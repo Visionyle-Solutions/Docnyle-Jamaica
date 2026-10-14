@@ -190,7 +190,7 @@ namespace OpdProject.Services
                 plan.Add("Investigations ordered:");
                 plan.AddRange(orders.Select(x => "• " + x.TestName + " (" + x.TestType + ")"));
             }
-            if (followupDate.HasValue) plan.Add("Follow-up: " + followupDate.Value.ToString("yyyy-MM-dd") + (string.IsNullOrEmpty(followupNotes) ? "" : " — " + followupNotes));
+            if (followupDate.HasValue) plan.Add("Follow-Up: " + followupDate.Value.ToString("yyyy-MM-dd") + (string.IsNullOrEmpty(followupNotes) ? "" : " — " + followupNotes));
             return new SoapDraft { Subjective = s.Trim(), Objective = o.Trim(), Assessment = a, Plan = plan.Count > 0 ? string.Join("\n", plan) : "Plan to be determined." };
         }
 

@@ -22,17 +22,13 @@ namespace OpdProject.templates.lab
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
         protected global::System.Web.UI.WebControls.Panel ClaimPanel;
 
-        /// <summary>ClaimOrderId control.</summary>
+        /// <summary>ClaimMobile control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox ClaimOrderId;
+        protected global::System.Web.UI.WebControls.TextBox ClaimMobile;
 
-        /// <summary>ClaimDob control.</summary>
+        /// <summary>FindButton control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox ClaimDob;
-
-        /// <summary>ClaimButton control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.LinkButton ClaimButton;
+        protected global::System.Web.UI.WebControls.LinkButton FindButton;
 
         /// <summary>ClaimErrorPanel control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
@@ -41,6 +37,22 @@ namespace OpdProject.templates.lab
         /// <summary>ClaimError control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
         protected global::System.Web.UI.WebControls.Literal ClaimError;
+
+        /// <summary>FoundPanel control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.PlaceHolder FoundPanel;
+
+        /// <summary>FoundTitle control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.Literal FoundTitle;
+
+        /// <summary>ReceiveAllButton control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.LinkButton ReceiveAllButton;
+
+        /// <summary>FoundRepeater control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.Repeater FoundRepeater;
 
         /// <summary>OrdersRepeater control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>

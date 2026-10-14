@@ -13,7 +13,7 @@
   <asp:PlaceHolder ID="NotFound" runat="server" Visible="false"><uc:ErrorState runat="server" Message="Patient not found." /></asp:PlaceHolder>
   <asp:PlaceHolder ID="Workspace" runat="server">
     <uc:PatientStrip ID="Strip" runat="server" />
-    <div class="page-container page-container--full">
+    <div class="page-container titlecase-headings">
       <div style="display:flex; gap:8px; margin-bottom:8px;">
         <a class="btn btn--xs btn--ghost" href="<%: Urls.PatientSearch %>"><i class="ti ti-arrow-left" aria-hidden="true"></i> Patients</a>
         <asp:HyperLink ID="ConsultLink" runat="server" CssClass="btn btn--xs btn--primary"><i class="ti ti-stethoscope" aria-hidden="true"></i> Open consultation</asp:HyperLink>
@@ -28,7 +28,7 @@
       </asp:PlaceHolder>
 
       <%-- At-a-glance summary; each tile opens its tab --%>
-      <div class="record-summary titlecase-headings">
+      <div class="record-summary">
         <a class="record-summary-tile" href="<%: TabUrl("allergies") %>"><span class="k">Allergies</span><span class="v<%: AllergyCount > 0 ? " v--warn" : "" %>"><%: AllergySummary %></span></a>
         <a class="record-summary-tile" href="<%: TabUrl("history") %>"><span class="k">Conditions</span><span class="v"><%: ConditionSummary %></span></a>
         <a class="record-summary-tile" href="<%: TabUrl("meds") %>"><span class="k">Current Medications</span><span class="v"><%: MedsSummary %></span></a>

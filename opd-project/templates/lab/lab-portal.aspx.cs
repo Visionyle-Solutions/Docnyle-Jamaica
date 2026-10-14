@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Web.UI.WebControls;
 using OpdProject.Models;
@@ -10,7 +9,7 @@ using OpdProject.Web;
 namespace OpdProject.templates.lab
 {
     /// <summary>
-    /// Lab partner portal: claim an order from the patient's requisition (Order ID + date of birth), mark received,
+    /// Lab partner portal: find a patient's open orders by mobile number and receive them, mark received,
     /// upload the result with report files (moves the order to RESULTS_READY). A lab partner only ever sees its own
     /// claimed orders; clinic staff with lab_portal see every order and can upload a report on a lab's behalf.
     /// </summary>
@@ -56,34 +55,102 @@ namespace OpdProject.templates.lab
 
         protected void RefreshButton_Click(object sender, EventArgs e) { Bind(); }
 
-        protected void ClaimButton_Click(object sender, EventArgs e)
+        /* ── Receive a requisition by the patient's mobile number ── */
+
+        /// <summary>The number the current results were found with; every claim re-checks against it.</summary>
+        private string SearchedMobile
+        {
+            get { return ViewState["mobile"] as string; }
+            set { ViewState["mobile"] = value; }
+        }
+
+        private string[] FoundIds
+        {
+            get { return ViewState["found"] as string[] ?? new string[0]; }
+            set { ViewState["found"] = value; }
+        }
+
+        private static string MaskedMobile(string mobile)
+        {
+            var digits = new string((mobile ?? "").Where(char.IsDigit).ToArray());
+            return digits.Length <= 4 ? digits : "…" + digits.Substring(digits.Length - 4);
+        }
+
+        protected void FindButton_Click(object sender, EventArgs e)
         {
             Validate("Claim");
             if (!IsValid || !IsPartner) return;
-            if (LabService.IsClaimLocked(UserId))
+            var mobile = ClaimMobile.Text.Trim();
+            SearchedMobile = null;
+            FoundIds = new string[0];
+            if (!LabService.IsValidMobile(mobile)) { ShowClaimError("Enter the patient's full 10-digit mobile number."); return; }
+            if (LabService.IsClaimLocked(UserId)) { ShowClaimError("Too many searches with no matching orders. Please try again in 15 minutes."); return; }
+
+            var found = LabService.FindOrdersByMobile(CurrentUser, mobile) ?? new List<InvestigationOrder>();
+            Audit(found.Count == 0 ? "CLAIM_FAILED" : "READ", "InvestigationOrder", "", "Lab requisition lookup by mobile " + MaskedMobile(mobile) + ": " + found.Count + " open order(s)");
+            if (found.Count == 0)
             {
-                ShowClaimError("Too many unsuccessful attempts. Please try again in 15 minutes.");
+                ShowClaimError("No open orders for that mobile number. Check the number, or the orders may already be with another lab.");
                 return;
             }
-            DateTime dob;
-            var orderId = ClaimOrderId.Text.Trim();
-            var order = DateTime.TryParseExact(ClaimDob.Text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out dob)
-                ? LabService.ClaimOrder(CurrentUser, orderId, dob) : null;
-            if (order == null)
-            {
-                Audit("CLAIM_FAILED", "InvestigationOrder", orderId, "Lab requisition claim did not match");
-                ShowClaimError("No open order matches that Order ID and date of birth. Check the requisition, or the order may already be with another lab.");
-                return;
-            }
+            SearchedMobile = mobile;
+            FoundIds = found.Select(o => o.OrderId).ToArray();
+            ClaimErrorPanel.Visible = false;
+            BindFound();
+        }
+
+        /// <summary>Orders from the last lookup that no lab has taken yet.</summary>
+        private List<InvestigationOrder> StillOpen()
+        {
+            return FoundIds.Select(LabService.GetOrder)
+                .Where(o => o != null && string.IsNullOrEmpty(o.LabPartnerId) && (o.Status == "ORDERED" || o.Status == "SENT")).ToList();
+        }
+
+        private void BindFound()
+        {
+            var open = StillOpen();
+            FoundPanel.Visible = open.Count > 0;
+            FoundTitle.Text = Server.HtmlEncode(open.Count + (open.Count == 1 ? " Open Order" : " Open Orders") + " For Mobile " + MaskedMobile(SearchedMobile));
+            ReceiveAllButton.Visible = open.Count > 1;
+            FoundRepeater.DataSource = open;
+            FoundRepeater.DataBind();
+        }
+
+        /// <summary>Takes one order for this lab; false if it no longer qualifies (e.g. another lab took it first).</summary>
+        private bool Receive(string orderId)
+        {
+            if (!FoundIds.Contains(orderId)) return false;
+            var order = LabService.ClaimOrder(CurrentUser, orderId, SearchedMobile);
+            if (order == null) return false;
             Audit("UPDATE", "InvestigationOrder", order.OrderId, "Received by lab " + CurrentUser.FullName + ": " + order.TestName);
-            ToastSuccess("Order received", order.TestName + " — " + PatientLabel(order.PatientId));
-            ReloadPage();
+            return true;
+        }
+
+        protected void FoundRepeater_ItemCommand(object source, RepeaterCommandEventArgs e)
+        {
+            if (e.CommandName != "Claim" || !IsPartner || string.IsNullOrEmpty(SearchedMobile)) return;
+            var order = LabService.GetOrder((string)e.CommandArgument);
+            if (order != null && Receive(order.OrderId)) ToastSuccess("Order received", order.TestName + " — " + PatientLabel(order.PatientId));
+            else ToastWarning("That order is no longer available — another lab may have received it");
+            BindFound();
+            Bind();
+        }
+
+        protected void ReceiveAllButton_Click(object sender, EventArgs e)
+        {
+            if (!IsPartner || string.IsNullOrEmpty(SearchedMobile)) return;
+            int received = StillOpen().Count(o => Receive(o.OrderId));
+            if (received > 0) ToastSuccess(received + (received == 1 ? " order received" : " orders received"));
+            else ToastWarning("Those orders are no longer available — another lab may have received them");
+            BindFound();
+            Bind();
         }
 
         private void ShowClaimError(string message)
         {
             ClaimError.Text = Server.HtmlEncode(message);
             ClaimErrorPanel.Visible = true;
+            FoundPanel.Visible = false;
             Bind();
         }
 

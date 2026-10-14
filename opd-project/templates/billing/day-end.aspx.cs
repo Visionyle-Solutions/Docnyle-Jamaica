@@ -56,7 +56,7 @@ namespace OpdProject.templates.billing
                 if (appt != null && appt.Type == "FOLLOWUP") followCount++; else newCount++;
             }
             ConsultCount.Text = consults.Count.ToString();
-            ConsultSplit.Text = newCount + " new · " + followCount + " follow-up";
+            ConsultSplit.Text = newCount + " New · " + followCount + " Follow-Up";
 
             var methods = payments.GroupBy(p => p.PaymentMethod).Select(g => new MethodTotal
             {

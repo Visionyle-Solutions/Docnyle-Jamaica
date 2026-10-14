@@ -106,6 +106,12 @@ namespace OpdProject.Web
             return FmtDate(value) + " " + FmtTime(value);
         }
 
+        /// <summary>Stored codes (DRUG, ACTIVE, CHECKED_IN) shown as Title Case ("Checked In").</summary>
+        public static string TitleCase(string code)
+        {
+            return string.IsNullOrEmpty(code) ? "" : CultureInfo.InvariantCulture.TextInfo.ToTitleCase(code.Replace('_', ' ').ToLowerInvariant());
+        }
+
         public string Money(decimal amount)
         {
             return (Hospital.Currency ?? "") + " " + amount.ToString("N2", CultureInfo.InvariantCulture);
@@ -133,6 +139,13 @@ namespace OpdProject.Web
         public static string StatusLabel(string status)
         {
             return SchedulingService.StatusLabels.ContainsKey(status ?? "") ? SchedulingService.StatusLabels[status] : status;
+        }
+
+        /// <summary>Appointment type name for a code (FOLLOWUP → "Follow-Up").</summary>
+        public string TypeName(string code)
+        {
+            var t = SchedulingService.GetAppointmentType(HospitalId, code);
+            return t != null ? t.Name : code;
         }
 
         /// <summary>Parses a yyyy-MM-dd (HTML date input) value.</summary>

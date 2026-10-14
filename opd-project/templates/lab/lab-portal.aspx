@@ -12,19 +12,34 @@
     </div>
   </div>
 
-  <asp:Panel ID="ClaimPanel" runat="server" CssClass="card mb-3" DefaultButton="ClaimButton">
+  <asp:Panel ID="ClaimPanel" runat="server" CssClass="card mb-3" DefaultButton="FindButton">
     <div class="text-sm text-secondary mb-2" style="font-weight:600; text-transform:uppercase;">Receive a requisition</div>
-    <div class="text-xs text-muted mb-2">Enter the Order ID printed on the patient's lab requisition and the patient's date of birth. The order is then added to your list.</div>
+    <div class="text-xs text-muted mb-2">Enter the patient's mobile number to see their open lab and imaging orders, then receive the ones you will do. They are then added to your list.</div>
     <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
-      <div class="form-group" style="margin:0;"><label class="form-label" for="<%= ClaimOrderId.ClientID %>">Order ID <span class="required">*</span></label>
-        <asp:TextBox ID="ClaimOrderId" runat="server" CssClass="form-control" MaxLength="30" placeholder="e.g., ORD-1042" autocomplete="off" />
-        <asp:RequiredFieldValidator runat="server" ControlToValidate="ClaimOrderId" ValidationGroup="Claim" Text="Required" CssClass="field-error" Display="Dynamic" /></div>
-      <div class="form-group" style="margin:0;"><label class="form-label" for="<%= ClaimDob.ClientID %>">Patient date of birth <span class="required">*</span></label>
-        <asp:TextBox ID="ClaimDob" runat="server" CssClass="form-control" TextMode="Date" />
-        <asp:RequiredFieldValidator runat="server" ControlToValidate="ClaimDob" ValidationGroup="Claim" Text="Required" CssClass="field-error" Display="Dynamic" /></div>
-      <asp:LinkButton ID="ClaimButton" runat="server" CssClass="btn btn--primary" ValidationGroup="Claim" OnClick="ClaimButton_Click"><i class="ti ti-file-import" aria-hidden="true"></i> Receive order</asp:LinkButton>
+      <div class="form-group" style="margin:0;"><label class="form-label" for="<%= ClaimMobile.ClientID %>">Patient Mobile Number <span class="required">*</span></label>
+        <asp:TextBox ID="ClaimMobile" runat="server" CssClass="form-control" TextMode="Phone" MaxLength="20" placeholder="e.g., 9111111115" autocomplete="off" />
+        <asp:RequiredFieldValidator runat="server" ControlToValidate="ClaimMobile" ValidationGroup="Claim" Text="Required" CssClass="field-error" Display="Dynamic" /></div>
+      <asp:LinkButton ID="FindButton" runat="server" CssClass="btn btn--primary" ValidationGroup="Claim" OnClick="FindButton_Click"><i class="ti ti-search" aria-hidden="true"></i> Find Orders</asp:LinkButton>
     </div>
     <asp:PlaceHolder ID="ClaimErrorPanel" runat="server" Visible="false"><div class="field-error mt-2"><asp:Literal ID="ClaimError" runat="server" /></div></asp:PlaceHolder>
+
+    <asp:PlaceHolder ID="FoundPanel" runat="server" Visible="false">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px;">
+        <div class="text-sm" style="font-weight:600;"><asp:Literal ID="FoundTitle" runat="server" /></div>
+        <asp:LinkButton ID="ReceiveAllButton" runat="server" CssClass="btn btn--sm btn--primary" OnClick="ReceiveAllButton_Click" CausesValidation="false"><i class="ti ti-file-import" aria-hidden="true"></i> Receive All</asp:LinkButton>
+      </div>
+      <asp:Repeater ID="FoundRepeater" runat="server" ItemType="OpdProject.Models.InvestigationOrder" OnItemCommand="FoundRepeater_ItemCommand">
+        <ItemTemplate>
+          <div style="display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid var(--border-default);">
+            <div style="flex:1;">
+              <div class="text-sm" style="font-weight:600;"><%#: Item.TestName %> <span class="text-xs text-muted" style="font-weight:400;">· <%#: Item.OrderId %></span></div>
+              <div class="text-xs text-muted"><%#: PatientLabel(Item.PatientId) %> · <%#: Item.TestType %> · Ordered: <%#: FmtDateTime(Item.OrderedAt) %></div>
+            </div>
+            <asp:LinkButton runat="server" CssClass="btn btn--sm" CommandName="Claim" CommandArgument="<%# Item.OrderId %>" CausesValidation="false"><i class="ti ti-file-import" aria-hidden="true"></i> Receive</asp:LinkButton>
+          </div>
+        </ItemTemplate>
+      </asp:Repeater>
+    </asp:PlaceHolder>
   </asp:Panel>
 
   <div class="card">

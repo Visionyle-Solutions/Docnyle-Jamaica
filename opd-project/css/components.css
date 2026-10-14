@@ -3,15 +3,17 @@
    Every CSS class used in two or more domains lives here.
    ============================================================ */
 
-/* Page containers — replaces inline style="max-width:...;margin:0 auto" */
-.page-container         { max-width: var(--page-width-default); margin: 0 auto; }
-.page-container--narrow { max-width: var(--page-width-narrow);  margin: 0 auto; }
-.page-container--wide   { max-width: var(--page-width-wide);    margin: 0 auto; }
-.page-container--full   { max-width: none; }
+/* Page containers — app pages use the full screen width; only the public portal forms stay narrow */
+.page-container         { max-width: none; }
+.page-container--narrow { max-width: var(--page-width-narrow); margin: 0 auto; }
 
 /* Show headings as written (Title Case) instead of forced UPPERCASE */
 .titlecase-headings th,
-.titlecase-headings .k { text-transform: none !important; }
+.titlecase-headings .k,
+.titlecase-headings .record-section-title,
+.titlecase-headings .record-visit-detail dt,
+.titlecase-headings .form-label,
+.titlecase-headings .c360-intel-sub { text-transform: none !important; }
 
 /* Utility spacing */
 .mb-1 { margin-bottom: var(--space-1); }

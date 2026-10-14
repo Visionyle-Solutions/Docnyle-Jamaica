@@ -26,7 +26,7 @@
       </asp:PlaceHolder>
       <asp:PlaceHolder ID="CustomHolder" runat="server">
         <div style="display:flex; gap:8px; align-items:center;">
-          <asp:TextBox ID="CustomComplaintInput" runat="server" CssClass="form-control" style="max-width:250px;" placeholder="Other complaint not listed" MaxLength="60" />
+          <asp:TextBox ID="CustomComplaintInput" runat="server" CssClass="form-control" style="max-width:250px;" placeholder="Other Complaint Not Listed" MaxLength="60" />
           <asp:LinkButton ID="AddCustomButton" runat="server" CssClass="btn btn--xs btn--primary" OnClick="AddCustomButton_Click">Add</asp:LinkButton>
         </div>
       </asp:PlaceHolder>

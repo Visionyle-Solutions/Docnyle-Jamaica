@@ -7,7 +7,7 @@
     </div>
     <asp:TextBox ID="ConfidentialNoteText" runat="server" CssClass="form-control mt-2" TextMode="MultiLine" style="min-height:70px;" placeholder="Private notes for your own reference — patient concerns, clinical hunches, follow-up reminders..." />
     <asp:LinkButton ID="SaveNoteButton" runat="server" CssClass="btn btn--sm btn--primary mt-2" OnClick="SaveNoteButton_Click" CausesValidation="false">
-      <i class="ti ti-device-floppy" aria-hidden="true"></i> Save note
+      <i class="ti ti-device-floppy" aria-hidden="true"></i> Save Note
     </asp:LinkButton>
     <span class="text-xs text-muted"><asp:Literal ID="SavedAt" runat="server" /></span>
   </div>

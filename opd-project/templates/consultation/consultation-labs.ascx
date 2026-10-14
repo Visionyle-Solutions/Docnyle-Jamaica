@@ -12,7 +12,7 @@
       </div>
 
       <asp:PlaceHolder ID="FavoritesHolder" runat="server">
-      <div class="text-xs text-muted mb-1" style="text-transform:uppercase; font-weight:600;">Your frequent tests</div>
+      <div class="text-xs text-muted mb-1" style="font-weight:600;">Your Frequent Tests</div>
       <div style="display:flex; flex-wrap:wrap; gap:4px; margin-bottom:8px;">
         <asp:Repeater ID="FavoritesRepeater" runat="server" ItemType="OpdProject.Models.LabTest" OnItemCommand="Order_ItemCommand" ClientIDMode="Predictable">
           <ItemTemplate>
@@ -24,7 +24,7 @@
       </asp:PlaceHolder>
 
       <asp:PlaceHolder ID="SuggestedHolder" runat="server">
-        <div class="text-xs text-muted mb-1" style="text-transform:uppercase; font-weight:600;"><i class="ti ti-route" aria-hidden="true"></i> Suggested for this visit</div>
+        <div class="text-xs text-muted mb-1" style="font-weight:600;"><i class="ti ti-route" aria-hidden="true"></i> Suggested For This Visit</div>
         <div style="display:flex; flex-wrap:wrap; gap:4px; margin-bottom:8px;">
           <asp:Repeater ID="SuggestedRepeater" runat="server" ItemType="OpdProject.Models.LabTest" OnItemCommand="Order_ItemCommand" ClientIDMode="Predictable">
             <ItemTemplate>
@@ -36,7 +36,7 @@
 
       <asp:PlaceHolder ID="SearchHolder" runat="server">
       <asp:Panel ID="SearchPanel" runat="server" CssClass="form-group mb-2" DefaultButton="LabSearchButton" style="display:flex; gap:8px;">
-        <asp:TextBox ID="LabSearchInput" runat="server" CssClass="form-control" placeholder="Search all tests (e.g. CBC, thyroid, x-ray)..." autocomplete="off" />
+        <asp:TextBox ID="LabSearchInput" runat="server" CssClass="form-control" placeholder="Search All Tests (e.g. CBC, Thyroid, X-Ray)..." autocomplete="off" />
         <asp:LinkButton ID="LabSearchButton" runat="server" CssClass="btn btn--sm btn--ghost" OnClick="LabSearchButton_Click"><i class="ti ti-search" aria-hidden="true"></i></asp:LinkButton>
       </asp:Panel>
       <div style="max-height:180px; overflow-y:auto;">
@@ -57,18 +57,18 @@
       </asp:PlaceHolder>
 
       <asp:Panel ID="CustomPanel" runat="server" DefaultButton="AddCustomTestButton" style="display:flex; gap:8px; align-items:center; margin-top:8px;">
-        <asp:TextBox ID="CustomTestName" runat="server" CssClass="form-control" style="max-width:250px;" placeholder="Custom test not in catalog" MaxLength="100" />
+        <asp:TextBox ID="CustomTestName" runat="server" CssClass="form-control" style="max-width:250px;" placeholder="Custom Test Not In Catalog" MaxLength="100" />
         <asp:DropDownList ID="CustomTestType" runat="server" CssClass="form-select" style="width:100px;">
           <asp:ListItem Value="LAB">Lab</asp:ListItem>
           <asp:ListItem Value="IMAGING">Imaging</asp:ListItem>
         </asp:DropDownList>
-        <asp:LinkButton ID="AddCustomTestButton" runat="server" CssClass="btn btn--xs btn--primary" OnClick="AddCustomTestButton_Click">Add to catalog &amp; order</asp:LinkButton>
+        <asp:LinkButton ID="AddCustomTestButton" runat="server" CssClass="btn btn--xs btn--primary" OnClick="AddCustomTestButton_Click">Add To Catalog &amp; Order</asp:LinkButton>
       </asp:Panel>
 
-      <asp:LinkButton ID="SkipLabsButton" runat="server" CssClass="btn btn--xs btn--ghost mt-2" OnClick="SkipLabsButton_Click">Not needed for this visit</asp:LinkButton>
+      <asp:LinkButton ID="SkipLabsButton" runat="server" CssClass="btn btn--xs btn--ghost mt-2" OnClick="SkipLabsButton_Click">Not Needed For This Visit</asp:LinkButton>
     </asp:PlaceHolder>
 
-    <div class="text-xs text-muted mt-3 mb-1" style="text-transform:uppercase; font-weight:600;">Ordered tests</div>
+    <div class="text-xs text-muted mt-3 mb-1" style="font-weight:600;">Ordered Tests</div>
     <asp:Repeater ID="OrdersRepeater" runat="server" ItemType="OpdProject.Models.InvestigationOrder" OnItemCommand="OrdersRepeater_ItemCommand" ClientIDMode="Predictable">
       <ItemTemplate>
         <div class="zone-a-item" style="display:flex; justify-content:space-between; align-items:center; padding:4px 0;">

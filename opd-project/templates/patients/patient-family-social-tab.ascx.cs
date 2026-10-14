@@ -38,7 +38,7 @@ namespace OpdProject.templates.patients
             EditingId.Value = "";
             RelationInput.SelectedIndex = 0;
             ConditionInput.Text = NotesInput.Text = "";
-            FormTitle.Text = "Add family history";
+            FormTitle.Text = "Add Family History";
             SaveButton.Text = "Add";
         }
 
@@ -61,7 +61,7 @@ namespace OpdProject.templates.patients
             HealthRecord.Select(RelationInput, f.RelationshipType);
             ConditionInput.Text = f.ConditionName;
             NotesInput.Text = f.Notes;
-            FormTitle.Text = "Edit family history";
+            FormTitle.Text = "Edit Family History";
             SaveButton.Text = "Update";
         }
 

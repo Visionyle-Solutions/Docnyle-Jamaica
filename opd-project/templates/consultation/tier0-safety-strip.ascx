@@ -13,7 +13,7 @@
   <asp:PlaceHolder ID="ContinuityHolder" runat="server">
     <div class="c360-alert c360-alert--note" id="tier0Continuity">
       <i class="ti ti-history c360-alert-icon" aria-hidden="true"></i>
-      <div><strong>Last visit</strong><div class="c360-alert-text"><%: ContinuityText %></div></div>
+      <div><strong>Last Visit</strong><div class="c360-alert-text"><%: ContinuityText %></div></div>
       <button class="c360-alert-dismiss" type="button" title="Dismiss" onclick="this.parentNode.style.display='none';">×</button>
     </div>
   </asp:PlaceHolder>

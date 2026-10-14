@@ -230,7 +230,7 @@ namespace OpdProject.templates.consultation
                 AlertTitle.Text = allergy.Count > 0 ? "Drug-Allergy Conflict Detected" : "Medication Reconciliation Alert";
                 AlertsRepeater.DataSource = allergy.Concat(recon).ToList();
                 AlertsRepeater.DataBind();
-                ProceedOverrideButton.Text = allergy.Count > 0 ? "Override &amp; proceed" : "Acknowledge &amp; proceed";
+                ProceedOverrideButton.Text = allergy.Count > 0 ? "Override &amp; Proceed" : "Acknowledge &amp; Proceed";
                 OverrideReason.Text = "";
                 AlertPanel.Visible = true;
                 return;

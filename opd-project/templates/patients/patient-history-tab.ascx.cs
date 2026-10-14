@@ -14,7 +14,7 @@ namespace OpdProject.templates.patients
         public string PatientId { get; set; }
 
         private BasePage AppPage { get { return (BasePage)Page; } }
-        private bool IsEvent { get { return EditingId.Value.Length > 0 ? EditingKind.Value == "EVENT" : RecordType.SelectedValue == "EVENT"; } }
+        protected bool IsEvent { get { return EditingId.Value.Length > 0 ? EditingKind.Value == "EVENT" : RecordType.SelectedValue == "EVENT"; } }
 
         protected void Page_Load(object sender, EventArgs e)
         {
@@ -94,7 +94,7 @@ namespace OpdProject.templates.patients
             FillNames();
             NameOther.Text = NotesInput.Text = "";
             SinceMonth.SelectedIndex = SinceYear.SelectedIndex = StatusInput.SelectedIndex = 0;
-            FormTitle.Text = "Add to medical history";
+            FormTitle.Text = "Add To Medical History";
             SaveButton.Text = "Add";
         }
 
@@ -123,7 +123,7 @@ namespace OpdProject.templates.patients
             HealthRecord.Select(SinceMonth, h.OnsetMonth.HasValue ? h.OnsetMonth.ToString() : "");
             HealthRecord.Select(SinceYear, h.OnsetYear.HasValue ? h.OnsetYear.ToString() : "");
             HealthRecord.Select(StatusInput, h.Status ?? "ACTIVE");
-            FormTitle.Text = "Edit condition";
+            FormTitle.Text = "Edit Condition";
             SaveButton.Text = "Update";
         }
 
@@ -149,7 +149,7 @@ namespace OpdProject.templates.patients
             NotesInput.Text = ev.Notes;
             HealthRecord.Select(SinceMonth, ev.EventMonth.HasValue ? ev.EventMonth.ToString() : "");
             HealthRecord.Select(SinceYear, ev.EventYear.HasValue ? ev.EventYear.ToString() : "");
-            FormTitle.Text = "Edit surgery / event";
+            FormTitle.Text = "Edit Surgery / Event";
             SaveButton.Text = "Update";
         }
 

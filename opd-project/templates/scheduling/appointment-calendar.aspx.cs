@@ -60,12 +60,12 @@ namespace OpdProject.templates.scheduling
             var free = slots.Where(s => !s.IsBooked).ToList();
             SlotsRepeater.DataSource = free;
             SlotsRepeater.DataBind();
-            NoSlots.Text = free.Count == 0 ? "<div class=\"zone-a-empty\">No available slots<br><span class=\"text-xs\">" + HttpUtility.HtmlEncode(SchedulingService.NoSlotReason(sched)) + "</span></div>" : "";
+            NoSlots.Text = free.Count == 0 ? "<div class=\"zone-a-empty\">No Available Slots<br><span class=\"text-xs\">" + HttpUtility.HtmlEncode(SchedulingService.NoSlotReason(sched)) + "</span></div>" : "";
             ScheduleInfo.Text = sched.OnLeave || sched.Windows.Count == 0
                 ? "<i class=\"ti ti-calendar-off\" aria-hidden=\"true\"></i> " + HttpUtility.HtmlEncode(SchedulingService.NoSlotReason(sched))
                 : "<i class=\"ti ti-clock\" aria-hidden=\"true\"></i> " + string.Join("<br>", sched.Windows.Select(w => HttpUtility.HtmlEncode(HospitalService.FormatClock(HospitalId, w.StartTime) + "–" + HospitalService.FormatClock(HospitalId, w.EndTime))))
-                  + "<br>" + sched.SlotMinutes + "-min slots" + (sched.BufferMinutes > 0 ? " · " + sched.BufferMinutes + "-min buffer" : "");
-            SlotSummary.Text = slots.Count(s => s.IsBooked) + " booked / " + slots.Count + " total slots · " + HttpUtility.HtmlEncode(FmtDate(SelectedDate));
+                  + "<br>" + sched.SlotMinutes + "-Min Slots" + (sched.BufferMinutes > 0 ? " · " + sched.BufferMinutes + "-Min Buffer" : "");
+            SlotSummary.Text = slots.Count(s => s.IsBooked) + " Booked / " + slots.Count + " Total Slots · " + HttpUtility.HtmlEncode(FmtDate(SelectedDate));
         }
 
         /* ── Display helpers ── */
@@ -80,12 +80,6 @@ namespace OpdProject.templates.scheduling
                 case "CANCELLED": case "NO_SHOW": return "var(--color-danger)";
                 default: return "var(--color-primary)";
             }
-        }
-
-        protected string TypeName(string code)
-        {
-            var t = SchedulingService.GetAppointmentType(HospitalId, code);
-            return t != null ? t.Name : code;
         }
 
         protected string TypeColor(string code)
@@ -134,7 +128,7 @@ namespace OpdProject.templates.scheduling
             RescheduleSlot.Items.Clear();
             var appt = SchedulingService.GetAppointment(RescheduleId.Value);
             var date = ParseDate(RescheduleDate.Text);
-            if (appt == null || !date.HasValue) { RescheduleSlot.Items.Add(new ListItem("Choose a date first", "")); return; }
+            if (appt == null || !date.HasValue) { RescheduleSlot.Items.Add(new ListItem("Choose A Date First", "")); return; }
             var free = SchedulingService.ListRescheduleSlots(appt, date.Value);
             if (free.Count == 0)
             {

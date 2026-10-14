@@ -3,7 +3,7 @@
 <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
   <asp:CheckBox ID="ShowInactive" runat="server" Text=" Show Inactive" CssClass="text-xs text-muted" AutoPostBack="true" OnCheckedChanged="ShowInactive_CheckedChanged" />
 </div>
-<table class="data-table titlecase-headings">
+<table class="data-table">
   <thead>
     <tr>
       <th scope="col">Allergy Type</th>
@@ -20,12 +20,12 @@
     <asp:Repeater ID="ItemsRepeater" runat="server" ItemType="OpdProject.Models.PatientAllergy" OnItemCommand="ItemsRepeater_ItemCommand" ClientIDMode="Predictable">
       <ItemTemplate>
         <tr>
-          <td><%#: Item.AllergyType %></td>
+          <td><%#: OpdProject.Web.BasePage.TitleCase(Item.AllergyType) %></td>
           <td><%#: Item.AllergyName %></td>
           <td><%#: Item.ReactionType %></td>
           <td><%#: Item.ReactionDescription %></td>
-          <td><span class="badge <%#: Item.Severity == "SEVERE" ? "badge--danger" : Item.Severity == "MODERATE" ? "badge--warning" : "badge--info" %>"><%#: Item.Severity %></span></td>
-          <td><%#: Item.Status %></td>
+          <td><span class="badge <%#: Item.Severity == "SEVERE" ? "badge--danger" : Item.Severity == "MODERATE" ? "badge--warning" : "badge--info" %>"><%#: OpdProject.Web.BasePage.TitleCase(Item.Severity) %></span></td>
+          <td><%#: OpdProject.Web.BasePage.TitleCase(Item.Status) %></td>
           <td><%#: Item.IsTreated ? "Yes" : "No" %></td>
           <td style="white-space:nowrap;">
             <asp:LinkButton runat="server" CssClass="btn btn--xs btn--ghost" CommandName="EditAllergy" CommandArgument="<%# Item.AllergyId %>" CausesValidation="false" ToolTip='<%# "Edit allergy " + Item.AllergyName %>'>

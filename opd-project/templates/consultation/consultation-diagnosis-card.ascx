@@ -5,7 +5,7 @@
   <div class="consult-section-body">
     <asp:PlaceHolder ID="SearchHolder" runat="server">
       <asp:Panel ID="SearchPanel" runat="server" CssClass="form-group" DefaultButton="SearchButton" style="display:flex; gap:8px;">
-        <asp:TextBox ID="Icd10SearchInput" runat="server" CssClass="form-control" placeholder="Search by code or term (e.g. 'high bp', 'fever', 'sugar')" autocomplete="off" />
+        <asp:TextBox ID="Icd10SearchInput" runat="server" CssClass="form-control" placeholder="Search By Code Or Term (e.g. 'high bp', 'fever', 'sugar')" autocomplete="off" />
         <asp:LinkButton ID="SearchButton" runat="server" CssClass="btn btn--sm btn--ghost" OnClick="SearchButton_Click"><i class="ti ti-search" aria-hidden="true"></i></asp:LinkButton>
       </asp:Panel>
       <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:8px;">
@@ -26,8 +26,8 @@
         <asp:HiddenField ID="PendingDescription" runat="server" />
         <asp:PlaceHolder ID="NotesHolder" runat="server">
         <div class="form-group mb-2">
-          <label class="form-label" for="<%= ClinicalNotesInput.ClientID %>">Clinical notes</label>
-          <asp:TextBox ID="ClinicalNotesInput" runat="server" CssClass="form-control" TextMode="MultiLine" placeholder="Doctor's diagnostic reasoning" />
+          <label class="form-label" for="<%= ClinicalNotesInput.ClientID %>">Clinical Notes</label>
+          <asp:TextBox ID="ClinicalNotesInput" runat="server" CssClass="form-control" TextMode="MultiLine" placeholder="Doctor's Diagnostic Reasoning" />
         </div>
         </asp:PlaceHolder>
         <div style="display:flex; gap:8px;">
@@ -44,12 +44,12 @@
           </asp:DropDownList>
         </div>
         <div style="display:flex; gap:8px; margin-top:8px;">
-          <asp:LinkButton ID="ConfirmDiagnosisButton" runat="server" CssClass="btn btn--sm btn--success" OnClick="ConfirmDiagnosisButton_Click">Add diagnosis</asp:LinkButton>
+          <asp:LinkButton ID="ConfirmDiagnosisButton" runat="server" CssClass="btn btn--sm btn--success" OnClick="ConfirmDiagnosisButton_Click">Add Diagnosis</asp:LinkButton>
           <asp:LinkButton ID="CancelDiagnosisButton" runat="server" CssClass="btn btn--sm btn--ghost" OnClick="CancelDiagnosisButton_Click">Cancel</asp:LinkButton>
         </div>
       </asp:Panel>
     </asp:PlaceHolder>
-    <div class="text-xs text-muted mt-2 mb-1">Diagnoses added</div>
+    <div class="text-xs text-muted mt-2 mb-1">Diagnoses Added</div>
     <asp:Repeater ID="DiagnosesRepeater" runat="server" ItemType="OpdProject.Models.ConsultationDiagnosis" OnItemCommand="DiagnosesRepeater_ItemCommand" ClientIDMode="Predictable">
       <ItemTemplate>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding:6px 8px; background:var(--surface-page); border-radius:var(--radius-md);">

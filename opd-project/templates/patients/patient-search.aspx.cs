@@ -31,8 +31,8 @@ namespace OpdProject.templates.patients
             ResultsRepeater.DataBind();
             EmptyRow.Visible = results.Count == 0;
             ResultCount.Text = SearchInput.Text.Trim().Length >= 2
-                ? results.Count + " match" + (results.Count == 1 ? "" : "es") + " for \"" + Server.HtmlEncode(SearchInput.Text.Trim()) + "\""
-                : results.Count + " registered patients";
+                ? results.Count + " Match" + (results.Count == 1 ? "" : "es") + " For \"" + Server.HtmlEncode(SearchInput.Text.Trim()) + "\""
+                : results.Count + " Registered Patients";
         }
     }
 }

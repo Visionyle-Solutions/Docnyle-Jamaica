@@ -48,10 +48,10 @@
           </ItemTemplate>
         </asp:Repeater>
         <div style="margin-top:8px;">
-          <div class="text-xs text-muted mb-1">Any other ailment — give details:</div>
-          <asp:TextBox ID="OtherHistory" runat="server" CssClass="form-control" style="font-size:12px;" placeholder="Other conditions not listed above..." />
+          <div class="text-xs text-muted mb-1">Any Other Ailment — Give Details:</div>
+          <asp:TextBox ID="OtherHistory" runat="server" CssClass="form-control" style="font-size:12px;" placeholder="Other Conditions Not Listed Above..." />
         </div>
-        <asp:LinkButton ID="SaveHistoryButton" runat="server" CssClass="btn btn--xs btn--primary mt-2" OnClick="SaveHistoryButton_Click" CausesValidation="false"><i class="ti ti-device-floppy" aria-hidden="true"></i> Save medical history</asp:LinkButton>
+        <asp:LinkButton ID="SaveHistoryButton" runat="server" CssClass="btn btn--xs btn--primary mt-2" OnClick="SaveHistoryButton_Click" CausesValidation="false"><i class="ti ti-device-floppy" aria-hidden="true"></i> Save Medical History</asp:LinkButton>
       </asp:PlaceHolder>
 
       <%-- Recent labs --%>
@@ -73,7 +73,7 @@
       <%-- Current medications --%>
       <asp:PlaceHolder ID="CurrentMedsDetail" runat="server" Visible="false">
         <asp:Repeater ID="MedsRepeater" runat="server" ItemType="OpdProject.Models.Prescription">
-          <ItemTemplate><div class="zone-a-item"><%#: Item.MedicineName %> <%#: Item.Strength %> · <%#: Item.TimesPerDay %>x/day · since <%#: AppPage.FmtDate(Item.PrescribedDate) %></div></ItemTemplate>
+          <ItemTemplate><div class="zone-a-item"><%#: Item.MedicineName %> <%#: Item.Strength %> · <%#: Item.TimesPerDay %>x/Day · since <%#: AppPage.FmtDate(Item.PrescribedDate) %></div></ItemTemplate>
         </asp:Repeater>
         <asp:PlaceHolder ID="NoMeds" runat="server"><div class="zone-a-empty">None</div></asp:PlaceHolder>
       </asp:PlaceHolder>
@@ -83,7 +83,7 @@
         <asp:Repeater ID="EventsRepeater" runat="server" ItemType="OpdProject.Models.PatientMedicalEvent">
           <ItemTemplate><div class="zone-a-item"><%#: Item.EventName %><%#: Item.EventYear.HasValue ? " (" + Item.EventYear + ")" : "" %><%#: string.IsNullOrEmpty(Item.Notes) ? "" : " — " + Item.Notes %></div></ItemTemplate>
         </asp:Repeater>
-        <div class="text-xs text-muted mt-2 mb-1">Quick add (this year):</div>
+        <div class="text-xs text-muted mt-2 mb-1">Quick Add (This Year):</div>
         <div style="display:flex; flex-wrap:wrap; gap:4px;">
           <asp:Repeater ID="EventPicksRepeater" runat="server" ItemType="OpdProject.Models.MedicalEventItem" OnItemCommand="EventPicksRepeater_ItemCommand" ClientIDMode="Predictable">
             <ItemTemplate><asp:LinkButton runat="server" CssClass="chip" CommandName="AddEvent" CommandArgument="<%# Item.EventId %>" CausesValidation="false"><%#: Item.EventName %></asp:LinkButton></ItemTemplate>
@@ -93,17 +93,17 @@
 
       <%-- Intake & consent --%>
       <asp:PlaceHolder ID="IntakeConsentDetail" runat="server" Visible="false">
-        <div class="text-xs text-muted" style="text-transform:uppercase; font-weight:600; margin-bottom:4px;">Pre-visit intake</div>
+        <div class="text-xs text-muted" style="font-weight:600; margin-bottom:4px;">Pre-Visit Intake</div>
         <asp:Literal ID="IntakeText" runat="server" />
         <asp:Repeater ID="IntakeRepeater" runat="server" ItemType="OpdProject.Models.IntakeAnswer">
           <ItemTemplate><div class="zone-a-item"><strong><%#: Item.Label %>:</strong> <%#: string.IsNullOrEmpty(Item.Answer) ? "—" : Item.Answer %></div></ItemTemplate>
         </asp:Repeater>
-        <div class="text-xs text-muted" style="text-transform:uppercase; font-weight:600; margin:10px 0 4px;">Consent</div>
+        <div class="text-xs text-muted" style="font-weight:600; margin:10px 0 4px;">Consent</div>
         <asp:Literal ID="ConsentText" runat="server" />
         <asp:Panel ID="SignConsentPanel" runat="server" DefaultButton="SignConsentButton" style="display:flex; gap:6px; align-items:center; margin-top:6px; flex-wrap:wrap;">
           <asp:TextBox ID="ConsentSignName" runat="server" CssClass="form-control" style="font-size:12px; max-width:240px;" aria-label="Patient or guardian name" />
-          <asp:LinkButton ID="SignConsentButton" runat="server" CssClass="btn btn--xs btn--primary" OnClick="SignConsentButton_Click" CausesValidation="false"><i class="ti ti-signature" aria-hidden="true"></i> Sign consent</asp:LinkButton>
-          <div class="text-xs text-muted" style="width:100%;">Patient / guardian name</div>
+          <asp:LinkButton ID="SignConsentButton" runat="server" CssClass="btn btn--xs btn--primary" OnClick="SignConsentButton_Click" CausesValidation="false"><i class="ti ti-signature" aria-hidden="true"></i> Sign Consent</asp:LinkButton>
+          <div class="text-xs text-muted" style="width:100%;">Patient / Guardian Name</div>
         </asp:Panel>
       </asp:PlaceHolder>
 
@@ -115,12 +115,12 @@
         <asp:Literal ID="SocialText" runat="server" />
         <asp:Panel ID="AddFamilyPanel" runat="server" DefaultButton="AddFamilyButton" style="display:flex; gap:6px; align-items:center; margin-top:8px; flex-wrap:wrap;">
           <asp:DropDownList ID="FamilyRelation" runat="server" CssClass="form-select" style="width:120px; font-size:12px;">
-            <asp:ListItem>FATHER</asp:ListItem><asp:ListItem>MOTHER</asp:ListItem><asp:ListItem>SIBLING</asp:ListItem>
-            <asp:ListItem>SPOUSE</asp:ListItem><asp:ListItem>CHILD</asp:ListItem><asp:ListItem>GRANDPARENT</asp:ListItem>
+            <asp:ListItem Value="FATHER">Father</asp:ListItem><asp:ListItem Value="MOTHER">Mother</asp:ListItem><asp:ListItem Value="SIBLING">Sibling</asp:ListItem>
+            <asp:ListItem Value="SPOUSE">Spouse</asp:ListItem><asp:ListItem Value="CHILD">Child</asp:ListItem><asp:ListItem Value="GRANDPARENT">Grandparent</asp:ListItem>
           </asp:DropDownList>
           <asp:TextBox ID="FamilyCondition" runat="server" CssClass="form-control" style="max-width:200px; font-size:12px;" placeholder="Condition" />
-          <asp:TextBox ID="FamilyNotes" runat="server" CssClass="form-control" style="max-width:200px; font-size:12px;" placeholder="Notes (optional)" />
-          <asp:LinkButton ID="AddFamilyButton" runat="server" CssClass="btn btn--xs btn--primary" OnClick="AddFamilyButton_Click" CausesValidation="false"><i class="ti ti-plus" aria-hidden="true"></i> Add relative</asp:LinkButton>
+          <asp:TextBox ID="FamilyNotes" runat="server" CssClass="form-control" style="max-width:200px; font-size:12px;" placeholder="Notes (Optional)" />
+          <asp:LinkButton ID="AddFamilyButton" runat="server" CssClass="btn btn--xs btn--primary" OnClick="AddFamilyButton_Click" CausesValidation="false"><i class="ti ti-plus" aria-hidden="true"></i> Add Relative</asp:LinkButton>
         </asp:Panel>
       </asp:PlaceHolder>
     </asp:Panel>

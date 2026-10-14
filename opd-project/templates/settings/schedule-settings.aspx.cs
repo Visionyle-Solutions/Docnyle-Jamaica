@@ -161,7 +161,7 @@ namespace OpdProject.templates.settings
         {
             if (!IsAdmin) return;
             SelectedDoctorId = null;
-            ProfileTitle.Text = "New doctor";
+            ProfileTitle.Text = "New Doctor";
             foreach (var tb in new[] { DpFirst, DpMiddle, DpLast, DpQualifications, DpDisplayOverride, DpLicense, DpRoom, DpEmail, DpPhone, DpLanguages, DpBio }) tb.Text = "";
             DpPrefix.Text = "Dr.";
             FillSpecialties(new string[0]);
@@ -217,7 +217,7 @@ namespace OpdProject.templates.settings
             var d = UserService.GetUser(doctorId);
             if (d == null) return;
             SelectedDoctorId = doctorId;
-            ScheduleTitle.Text = "Scheduling & charges — " + Server.HtmlEncode(d.FullName);
+            ScheduleTitle.Text = "Scheduling & Charges — " + Server.HtmlEncode(d.FullName);
             BindWeek();
             var settings = SchedulingService.GetDoctorSettings(HospitalId, doctorId);
             HospitalSlotText.Text = HospitalService.GetSetting(HospitalId, "APPT_SLOT_MINS") + " min";
@@ -378,7 +378,7 @@ namespace OpdProject.templates.settings
         private void ResetTypeForm()
         {
             EditingTypeId.Value = "";
-            TypeFormTitle.Text = "Add appointment type";
+            TypeFormTitle.Text = "Add Appointment Type";
             TypeName.Text = TypeDuration.Text = "";
             TypeColor.Text = "#0f766e";
             TypeFeeCategory.SelectedIndex = 0;

@@ -43,13 +43,13 @@ namespace OpdProject.templates.consultation
 
             RowsRepeater.DataSource = new List<ContextRow>
             {
-                new ContextRow { Key = "visitHistory", Label = "Visit History", Summary = visits.Count == 0 ? "No previous visits" : visits.Count + " visits · Last: " + AppPage.FmtDate(visits[0].VisitDate) },
+                new ContextRow { Key = "visitHistory", Label = "Visit History", Summary = visits.Count == 0 ? "No previous visits" : visits.Count + " Visits · Last: " + AppPage.FmtDate(visits[0].VisitDate) },
                 new ContextRow { Key = "medicalHistory", Label = "Medical History", Summary = history.Count == 0 ? "—" : string.Join(", ", history.Select(h => h.ConditionName + (h.OnsetYear.HasValue ? " (" + h.OnsetYear + ")" : ""))) },
-                new ContextRow { Key = "recentLabs", Label = "Recent Labs", Summary = labs.Count == 0 ? "No results" : labs.Count + " results · Latest: " + labs[0].TestName },
+                new ContextRow { Key = "recentLabs", Label = "Recent Labs", Summary = labs.Count == 0 ? "No results" : labs.Count + " Results · Latest: " + labs[0].TestName },
                 new ContextRow { Key = "currentMeds", Label = "Current Medications", Summary = meds.Count == 0 ? "None" : string.Join(", ", meds.Select(m => m.MedicineName).Take(3)) },
                 new ContextRow { Key = "medicalEvents", Label = "Medical Events", Summary = events.Count == 0 ? "—" : string.Join(", ", events.Select(e => e.EventName)) },
-                new ContextRow { Key = "intakeConsent", Label = "Intake & Consent", Summary = "Intake " + (intake != null ? "✓" : "not submitted") + " · Consent " + (consent != null ? "✓ signed" : "pending") },
-                new ContextRow { Key = "familySocial", Label = "Family & Social", Summary = family.Count == 0 ? "—" : string.Join(", ", family.Select(f => f.RelationshipType + ": " + f.ConditionName)) },
+                new ContextRow { Key = "intakeConsent", Label = "Intake & Consent", Summary = "Intake " + (intake != null ? "✓" : "Not Submitted") + " · Consent " + (consent != null ? "✓ Signed" : "Pending") },
+                new ContextRow { Key = "familySocial", Label = "Family & Social", Summary = family.Count == 0 ? "—" : string.Join(", ", family.Select(f => OpdProject.Web.BasePage.TitleCase(f.RelationshipType) + ": " + f.ConditionName)) },
             }.Where(r => FieldOn(r.Key)).ToList();
             /* configured order (Consultation Setup); rows the setup doesn't list yet keep their place at the end */
             var order = Host.FormConfig.FieldOrder(SectionKey);
@@ -124,10 +124,10 @@ namespace OpdProject.templates.consultation
                 case "familySocial":
                     FamilyRepeater.DataSource = PatientService.ListFamilyHistory(pid);
                     FamilyRepeater.DataBind();
-                    SocialText.Text = "<div class=\"zone-a-item\"><strong>Smoking:</strong> " + H(Patient.SmokingStatus ?? "—")
-                        + (Patient.SmokingPackYears.HasValue ? " (" + Patient.SmokingPackYears + " pack-years)" : "")
-                        + " · <strong>Alcohol:</strong> " + H(Patient.AlcoholUse ?? "—") + " · <strong>Occupation:</strong> " + H(Patient.Occupation ?? "—")
-                        + " · <strong>Activity:</strong> " + H(Patient.PhysicalActivity ?? "—") + " · <strong>Diet:</strong> " + H(Patient.Diet ?? "—") + "</div>";
+                    SocialText.Text = "<div class=\"zone-a-item\"><strong>Smoking:</strong> " + H(Patient.SmokingStatus != null ? OpdProject.Web.BasePage.TitleCase(Patient.SmokingStatus) : "—")
+                        + (Patient.SmokingPackYears.HasValue ? " (" + Patient.SmokingPackYears + " Pack/Years)" : "")
+                        + " · <strong>Alcohol:</strong> " + H(Patient.AlcoholUse != null ? OpdProject.Web.BasePage.TitleCase(Patient.AlcoholUse) : "—") + " · <strong>Occupation:</strong> " + H(Patient.Occupation ?? "—")
+                        + " · <strong>Activity:</strong> " + H(Patient.PhysicalActivity != null ? OpdProject.Web.BasePage.TitleCase(Patient.PhysicalActivity) : "—") + " · <strong>Diet:</strong> " + H(Patient.Diet != null ? OpdProject.Web.BasePage.TitleCase(Patient.Diet) : "—") + "</div>";
                     AddFamilyPanel.Visible = !locked;
                     break;
             }
@@ -197,7 +197,7 @@ namespace OpdProject.templates.consultation
             sb.Append("<div class=\"zone-a-item\"><strong>Diagnoses:</strong> " + H(string.Join("; ", ConsultationService.ListDiagnoses(id).Select(d => d.Icd10Code + " " + d.Icd10Description))) + "</div>");
             sb.Append("<div class=\"zone-a-item\"><strong>Prescriptions:</strong> " + H(string.Join("; ", ConsultationService.ListPrescriptions(id).Select(p => p.MedicineName + " " + p.Strength + " " + p.TimesPerDay + "x/day"))) + "</div>");
             if (!string.IsNullOrEmpty(c.PlanText)) sb.Append("<div class=\"zone-a-item\"><strong>Plan:</strong> " + H(c.PlanText) + "</div>");
-            if (c.FollowupDate.HasValue) sb.Append("<div class=\"zone-a-item\"><strong>Follow-up:</strong> " + H(AppPage.FmtDate(c.FollowupDate.Value)) + " " + H(c.FollowupNotes) + "</div>");
+            if (c.FollowupDate.HasValue) sb.Append("<div class=\"zone-a-item\"><strong>Follow-Up:</strong> " + H(AppPage.FmtDate(c.FollowupDate.Value)) + " " + H(c.FollowupNotes) + "</div>");
             VisitDetailText.Text = sb.ToString();
             VisitDetail.Visible = true;
         }

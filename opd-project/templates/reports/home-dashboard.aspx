@@ -3,7 +3,7 @@
      and today's visits by status (pie). Doctors see their own numbers; other roles see the whole hospital.
      Route: /dashboard --%>
 <asp:Content ContentPlaceHolderID="MainContent" runat="server">
-<div class="page-container page-container--wide">
+<div class="page-container">
   <h1 class="dash-welcome"><asp:Literal ID="WelcomeText" runat="server" /></h1>
   <div class="dash-grid">
     <div class="card dash-card"><asp:Literal ID="ConsultationsHtml" runat="server" /></div>

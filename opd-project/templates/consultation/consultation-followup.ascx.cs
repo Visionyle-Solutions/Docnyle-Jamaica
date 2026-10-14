@@ -26,7 +26,7 @@ namespace OpdProject.templates.consultation
             FollowupNotes.Text = c.FollowupNotes;
             FormPanel.Visible = !Host.IsLocked;
             SavedText.Text = c.FollowupDate.HasValue
-                ? "<div class=\"zone-a-item mt-2\"><i class=\"ti ti-calendar-check\" aria-hidden=\"true\"></i> Follow-up on <strong>" + HttpUtility.HtmlEncode(AppPage.FmtDate(c.FollowupDate.Value)) + "</strong>"
+                ? "<div class=\"zone-a-item mt-2\"><i class=\"ti ti-calendar-check\" aria-hidden=\"true\"></i> Follow-Up on <strong>" + HttpUtility.HtmlEncode(AppPage.FmtDate(c.FollowupDate.Value)) + "</strong>"
                   + (string.IsNullOrEmpty(c.FollowupNotes) ? "" : " — " + HttpUtility.HtmlEncode(c.FollowupNotes)) + "</div>"
                 : "";
         }
@@ -55,15 +55,15 @@ namespace OpdProject.templates.consultation
                 {
                     SchedulingService.CreateAppointment(HospitalId, Visit.PatientId, Host.DoctorId, slot.SlotStart, slot.SlotEnd, "FOLLOWUP",
                         string.IsNullOrEmpty(notes) ? "Auto-booked from follow-up" : notes);
-                    AppPage.ToastSuccess("Follow-up saved & appointment booked", AppPage.FmtDate(date) + " at " + AppPage.FmtTime(slot.SlotStart));
+                    AppPage.ToastSuccess("Follow-Up saved & appointment booked", AppPage.FmtDate(date) + " at " + AppPage.FmtTime(slot.SlotStart));
                 }
                 else
                 {
                     var reason = SchedulingService.NoSlotReason(SchedulingService.GetDoctorSchedule(Host.DoctorId, HospitalId, date));
-                    AppPage.ToastWarning("Follow-up saved — no slot to auto-book", reason + ". Book it from Appointments.");
+                    AppPage.ToastWarning("Follow-Up saved — no slot to auto-book", reason + ". Book it from Appointments.");
                 }
             }
-            else AppPage.ToastSuccess("Follow-up saved");
+            else AppPage.ToastSuccess("Follow-Up saved");
             Host.RefreshAll();
         }
 

@@ -422,7 +422,7 @@ namespace OpdProject.Services
                 var types = new[]
                 {
                     new AppointmentType { Code = "NEW", Name = "New Consultation", DurationMinutes = null, Color = "#0f766e", IsChargeable = true, FeeCategory = "NEW" },
-                    new AppointmentType { Code = "FOLLOWUP", Name = "Follow-up", DurationMinutes = null, Color = "#4f46e5", IsChargeable = true, FeeCategory = "FOLLOWUP" },
+                    new AppointmentType { Code = "FOLLOWUP", Name = "Follow-Up", DurationMinutes = null, Color = "#4f46e5", IsChargeable = true, FeeCategory = "FOLLOWUP" },
                     new AppointmentType { Code = "PROC", Name = "Procedure / Minor OT", DurationMinutes = 45, Color = "#b45309", IsChargeable = true, FeeCategory = "NEW" },
                     new AppointmentType { Code = "TELE", Name = "Teleconsultation", DurationMinutes = 20, Color = "#15803d", IsChargeable = true, FeeCategory = "FOLLOWUP" },
                 };
@@ -496,7 +496,7 @@ namespace OpdProject.Services
             var services = new[]
             {
                 /* No lab / imaging charges: the clinic has no in-house diagnostics (tests are done and paid for outside) */
-                new object[] { "CON-NEW", "Consultation – New Patient", "CONSULTATION", 500m }, new object[] { "CON-FUP", "Consultation – Follow-up", "CONSULTATION", 300m },
+                new object[] { "CON-NEW", "Consultation – New Patient", "CONSULTATION", 500m }, new object[] { "CON-FUP", "Consultation – Follow-Up", "CONSULTATION", 300m },
                 new object[] { "PRC-DRESS", "Wound Dressing", "PROCEDURE", 150m },
                 new object[] { "PRC-INJ", "Injection Administration", "INJECTION", 100m }, new object[] { "PRC-NEB", "Nebulization", "PROCEDURE", 200m },
             };
@@ -515,9 +515,9 @@ namespace OpdProject.Services
             MessageTemplates.AddRange(new[]
             {
                 new MessageTemplate { TemplateId = "TPL-001", Name = "Appointment Reminder", Trigger = "APPOINTMENT_REMINDER", Channel = "BOTH", IsEnabled = true, Text = "Dear {PatientName}, this is a reminder for your appointment with {DoctorName} at {Time} today at {HospitalName}. Please arrive 10 minutes early." },
-                new MessageTemplate { TemplateId = "TPL-002", Name = "No-Show Follow-up", Trigger = "NO_SHOW", Channel = "BOTH", IsEnabled = true, Text = "Dear {PatientName}, we noticed you missed your appointment on {Date} with {DoctorName} at {HospitalName}. Please call {Phone} to reschedule." },
+                new MessageTemplate { TemplateId = "TPL-002", Name = "No-Show Follow-Up", Trigger = "NO_SHOW", Channel = "BOTH", IsEnabled = true, Text = "Dear {PatientName}, we noticed you missed your appointment on {Date} with {DoctorName} at {HospitalName}. Please call {Phone} to reschedule." },
                 new MessageTemplate { TemplateId = "TPL-003", Name = "Lab Results Ready", Trigger = "LAB_RESULTS_READY", Channel = "BOTH", IsEnabled = true, Text = "Dear {PatientName}, your lab results for {TestName} are ready. Please visit {HospitalName} or contact {DoctorName} for review." },
-                new MessageTemplate { TemplateId = "TPL-004", Name = "Follow-up Reminder", Trigger = "FOLLOWUP_REMINDER", Channel = "BOTH", IsEnabled = true, Text = "Dear {PatientName}, your follow-up with {DoctorName} is tomorrow at {HospitalName}. Please confirm." },
+                new MessageTemplate { TemplateId = "TPL-004", Name = "Follow-Up Reminder", Trigger = "FOLLOWUP_REMINDER", Channel = "BOTH", IsEnabled = true, Text = "Dear {PatientName}, your follow-up with {DoctorName} is tomorrow at {HospitalName}. Please confirm." },
                 new MessageTemplate { TemplateId = "TPL-005", Name = "Prescription Ready", Trigger = "PRESCRIPTION_READY", Channel = "WHATSAPP", IsEnabled = true, Text = "Dear {PatientName}, your prescription from {DoctorName} at {HospitalName} is ready." },
             });
         }

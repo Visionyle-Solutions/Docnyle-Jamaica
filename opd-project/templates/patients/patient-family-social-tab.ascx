@@ -2,7 +2,7 @@
 <%-- Health record → Family & Social: family history (list + add/edit form) and the social history card. --%>
 <div class="split-layout">
   <div class="split-main">
-    <div class="record-section-title"><span>Family history</span></div>
+    <div class="record-section-title"><span>Family History</span></div>
     <table class="data-table">
       <thead>
         <tr><th scope="col">Relationship</th><th scope="col">Condition</th><th scope="col">Notes</th><th scope="col">Actions</th></tr>
@@ -11,7 +11,7 @@
         <asp:Repeater ID="FamilyRepeater" runat="server" ItemType="OpdProject.Models.PatientFamilyHistory" OnItemCommand="FamilyRepeater_ItemCommand" ClientIDMode="Predictable">
           <ItemTemplate>
             <tr>
-              <td><%#: Item.RelationshipType %></td>
+              <td><%#: OpdProject.Web.BasePage.TitleCase(Item.RelationshipType) %></td>
               <td><strong><%#: Item.ConditionName %></strong></td>
               <td><%#: string.IsNullOrEmpty(Item.Notes) ? "—" : Item.Notes %></td>
               <td style="white-space:nowrap;">
@@ -28,24 +28,24 @@
 
     <asp:Panel ID="SocialPanel" runat="server" DefaultButton="SaveSocialButton">
       <div class="record-section-title">
-        <span>Social history</span>
-        <asp:LinkButton ID="SaveSocialButton" runat="server" CssClass="btn btn--xs btn--primary" ValidationGroup="Social" OnClick="SaveSocialButton_Click"><i class="ti ti-device-floppy" aria-hidden="true"></i> Save social history</asp:LinkButton>
+        <span>Social History</span>
+        <asp:LinkButton ID="SaveSocialButton" runat="server" CssClass="btn btn--xs btn--primary" ValidationGroup="Social" OnClick="SaveSocialButton_Click"><i class="ti ti-device-floppy" aria-hidden="true"></i> Save Social History</asp:LinkButton>
       </div>
       <div class="card record-social-grid">
         <div class="form-group">
-          <label class="form-label" for="<%= SmokingInput.ClientID %>">Smoking status</label>
+          <label class="form-label" for="<%= SmokingInput.ClientID %>">Smoking Status</label>
           <asp:DropDownList ID="SmokingInput" runat="server" CssClass="form-select">
             <asp:ListItem Value="">—</asp:ListItem><asp:ListItem Value="NEVER">Never</asp:ListItem>
             <asp:ListItem Value="FORMER">Former</asp:ListItem><asp:ListItem Value="CURRENT">Current</asp:ListItem>
           </asp:DropDownList>
         </div>
         <div class="form-group">
-          <label class="form-label" for="<%= PackYearsInput.ClientID %>">Pack-years</label>
-          <asp:TextBox ID="PackYearsInput" runat="server" CssClass="form-control" TextMode="Number" min="0" max="200" placeholder="Former / current smokers" />
+          <label class="form-label" for="<%= PackYearsInput.ClientID %>">Pack/Years</label>
+          <asp:TextBox ID="PackYearsInput" runat="server" CssClass="form-control" TextMode="Number" min="0" max="200" placeholder="Former / Current Smokers" />
           <asp:RangeValidator runat="server" ControlToValidate="PackYearsInput" ValidationGroup="Social" Type="Integer" MinimumValue="0" MaximumValue="200" Text="Enter 0–200" CssClass="field-error" Display="Dynamic" />
         </div>
         <div class="form-group">
-          <label class="form-label" for="<%= AlcoholInput.ClientID %>">Alcohol use</label>
+          <label class="form-label" for="<%= AlcoholInput.ClientID %>">Alcohol Use</label>
           <asp:DropDownList ID="AlcoholInput" runat="server" CssClass="form-select">
             <asp:ListItem Value="">—</asp:ListItem><asp:ListItem Value="NONE">None</asp:ListItem>
             <asp:ListItem Value="OCCASIONAL">Occasional</asp:ListItem><asp:ListItem Value="REGULAR">Regular</asp:ListItem>
@@ -56,7 +56,7 @@
           <asp:TextBox ID="OccupationInput" runat="server" CssClass="form-control" MaxLength="80" placeholder="Occupation" />
         </div>
         <div class="form-group">
-          <label class="form-label" for="<%= ActivityInput.ClientID %>">Physical activity</label>
+          <label class="form-label" for="<%= ActivityInput.ClientID %>">Physical Activity</label>
           <asp:DropDownList ID="ActivityInput" runat="server" CssClass="form-select">
             <asp:ListItem Value="">—</asp:ListItem><asp:ListItem Value="SEDENTARY">Sedentary</asp:ListItem>
             <asp:ListItem Value="LIGHT">Light</asp:ListItem><asp:ListItem Value="MODERATE">Moderate</asp:ListItem>
@@ -67,7 +67,7 @@
           <label class="form-label" for="<%= DietInput.ClientID %>">Diet</label>
           <asp:DropDownList ID="DietInput" runat="server" CssClass="form-select">
             <asp:ListItem Value="">—</asp:ListItem><asp:ListItem Value="VEGETARIAN">Vegetarian</asp:ListItem>
-            <asp:ListItem Value="EGGETARIAN">Eggetarian</asp:ListItem><asp:ListItem Value="NON_VEGETARIAN">Non-vegetarian</asp:ListItem>
+            <asp:ListItem Value="EGGETARIAN">Eggetarian</asp:ListItem><asp:ListItem Value="NON_VEGETARIAN">Non-Vegetarian</asp:ListItem>
             <asp:ListItem Value="VEGAN">Vegan</asp:ListItem>
           </asp:DropDownList>
         </div>
@@ -78,12 +78,12 @@
   <div class="split-panel">
     <asp:Panel ID="FormPanel" runat="server" CssClass="card form-grid" DefaultButton="SaveButton">
       <asp:HiddenField ID="EditingId" runat="server" />
-      <div class="form-group form-group--full" style="font-weight:700;"><asp:Literal ID="FormTitle" runat="server" Text="Add family history" /></div>
+      <div class="form-group form-group--full" style="font-weight:700;"><asp:Literal ID="FormTitle" runat="server" Text="Add Family History" /></div>
       <div class="form-group">
         <label class="form-label" for="<%= RelationInput.ClientID %>">Relationship <span class="required">*</span></label>
         <asp:DropDownList ID="RelationInput" runat="server" CssClass="form-select">
-          <asp:ListItem>FATHER</asp:ListItem><asp:ListItem>MOTHER</asp:ListItem><asp:ListItem>SIBLING</asp:ListItem>
-          <asp:ListItem>SPOUSE</asp:ListItem><asp:ListItem>CHILD</asp:ListItem><asp:ListItem>GRANDPARENT</asp:ListItem>
+          <asp:ListItem Value="FATHER">Father</asp:ListItem><asp:ListItem Value="MOTHER">Mother</asp:ListItem><asp:ListItem Value="SIBLING">Sibling</asp:ListItem>
+          <asp:ListItem Value="SPOUSE">Spouse</asp:ListItem><asp:ListItem Value="CHILD">Child</asp:ListItem><asp:ListItem Value="GRANDPARENT">Grandparent</asp:ListItem>
         </asp:DropDownList>
       </div>
       <div class="form-group">

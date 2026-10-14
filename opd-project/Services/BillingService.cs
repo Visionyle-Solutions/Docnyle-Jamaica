@@ -29,7 +29,7 @@ namespace OpdProject.Services
             var appt = SchedulingService.AppointmentForConsultation(c);
             var type = appt != null ? SchedulingService.GetAppointmentType(hid, appt.Type) : null;
             var category = type != null ? type.FeeCategory : (appt != null && appt.Type == "FOLLOWUP" ? "FOLLOWUP" : "NEW");
-            var typeName = type != null ? type.Name : (category == "FOLLOWUP" ? "Follow-up" : "New Consultation");
+            var typeName = type != null ? type.Name : (category == "FOLLOWUP" ? "Follow-Up" : "New Consultation");
             int duration = appt != null ? (int)(appt.SlotEnd - appt.SlotStart).TotalMinutes : SchedulingService.SlotMinutes(hid, c.DoctorId);
             var result = new ConsultationCharge
             {

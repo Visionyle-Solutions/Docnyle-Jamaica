@@ -5,15 +5,15 @@
   <div class="form-group">
     <label class="form-label" for="<%= AllergyTypeInput.ClientID %>">Allergy Type <span class="required">*</span></label>
     <asp:DropDownList ID="AllergyTypeInput" runat="server" CssClass="form-select">
-      <asp:ListItem Value="DRUG">Drug allergy</asp:ListItem>
-      <asp:ListItem Value="FOOD">Food allergy</asp:ListItem>
-      <asp:ListItem Value="ENVIRONMENTAL">Environmental allergy</asp:ListItem>
+      <asp:ListItem Value="DRUG">Drug Allergy</asp:ListItem>
+      <asp:ListItem Value="FOOD">Food Allergy</asp:ListItem>
+      <asp:ListItem Value="ENVIRONMENTAL">Environmental Allergy</asp:ListItem>
       <asp:ListItem Value="OTHER">Other</asp:ListItem>
     </asp:DropDownList>
   </div>
   <div class="form-group">
     <label class="form-label" for="<%= AllergyNameInput.ClientID %>">Allergy Name <span class="required">*</span></label>
-    <asp:TextBox ID="AllergyNameInput" runat="server" CssClass="form-control" placeholder="Enter allergy name" MaxLength="100" />
+    <asp:TextBox ID="AllergyNameInput" runat="server" CssClass="form-control" placeholder="Enter Allergy Name" MaxLength="100" />
     <asp:RequiredFieldValidator runat="server" ControlToValidate="AllergyNameInput" ValidationGroup="Allergy" Text="Allergy name is required" CssClass="field-error" Display="Dynamic" />
   </div>
   <div class="form-group">
@@ -25,7 +25,7 @@
   </div>
   <div class="form-group">
     <label class="form-label" for="<%= ReactionInput.ClientID %>">Reaction <span class="required">*</span></label>
-    <asp:TextBox ID="ReactionInput" runat="server" CssClass="form-control" placeholder="Enter reaction name" MaxLength="200" />
+    <asp:TextBox ID="ReactionInput" runat="server" CssClass="form-control" placeholder="Enter Reaction Name" MaxLength="200" />
     <asp:RequiredFieldValidator runat="server" ControlToValidate="ReactionInput" ValidationGroup="Allergy" Text="Reaction is required" CssClass="field-error" Display="Dynamic" />
   </div>
   <div class="form-group">
@@ -65,7 +65,7 @@
   </div>
   <div class="form-group">
     <label class="form-label" for="<%= NotesInput.ClientID %>">Notes</label>
-    <asp:TextBox ID="NotesInput" runat="server" CssClass="form-control" placeholder="Enter notes" MaxLength="250" />
+    <asp:TextBox ID="NotesInput" runat="server" CssClass="form-control" placeholder="Enter Notes" MaxLength="250" />
   </div>
   <asp:HiddenField ID="EditingId" runat="server" />
   <div class="form-group form-group--full" style="display:flex; gap:8px;">

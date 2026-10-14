@@ -28,8 +28,8 @@ namespace OpdProject.Services
 
         public static readonly Dictionary<string, string> StatusLabels = new Dictionary<string, string>
         {
-            { "BOOKED", "Booked" }, { "CHECKED_IN", "Checked in" }, { "IN_CONSULT", "In consult" },
-            { "COMPLETED", "Completed" }, { "CANCELLED", "Cancelled" }, { "NO_SHOW", "No-show" },
+            { "BOOKED", "Booked" }, { "CHECKED_IN", "Checked In" }, { "IN_CONSULT", "In Consult" },
+            { "COMPLETED", "Completed" }, { "CANCELLED", "Cancelled" }, { "NO_SHOW", "No-Show" },
         };
 
         public static string DayCode(DateTime date) { return DayCodes[(int)date.DayOfWeek]; }

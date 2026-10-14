@@ -21,14 +21,16 @@ namespace OpdProject.templates.patients
         protected void Page_Load(object sender, EventArgs e)
         {
             DoctorFilterHolder.Visible = ShowDoctor;
-            SubtitleText.Text = Server.HtmlEncode((ShowDoctor ? "All doctors" : CurrentUser.FullName) + " · " + DateTime.Today.ToString("dddd, MMM d"));
+            SubtitleText.Text = Server.HtmlEncode((ShowDoctor ? "All Doctors" : CurrentUser.FullName) + " · " + DateTime.Today.ToString("dddd, MMM d"));
             if (!IsPostBack)
             {
                 if (ShowDoctor)
                 {
-                    DoctorFilter.Items.Add(new ListItem("All doctors", ""));
+                    DoctorFilter.Items.Add(new ListItem("All Doctors", ""));
                     foreach (var d in UserService.ListActiveDoctors(HospitalId)) DoctorFilter.Items.Add(new ListItem(d.FullName, d.UserId));
                 }
+                StatusFilter.Items.Add(new ListItem("All Statuses", ""));
+                foreach (var s in new[] { "BOOKED", "CHECKED_IN", "IN_CONSULT", "COMPLETED", "NO_SHOW" }) StatusFilter.Items.Add(new ListItem(StatusLabel(s), s));
                 BindQueue();
             }
         }
@@ -44,12 +46,16 @@ namespace OpdProject.templates.patients
             CountInConsult.Text = rows.Count(a => a.Status == "IN_CONSULT").ToString();
             CountCompleted.Text = rows.Count(a => a.Status == "COMPLETED").ToString();
 
+            /* counts above stay the day's totals; the status filter only narrows the list */
+            if (StatusFilter.SelectedValue != "") rows = rows.Where(a => a.Status == StatusFilter.SelectedValue).ToList();
             AppointmentsRepeater.DataSource = rows;
             AppointmentsRepeater.DataBind();
             EmptyRow.Visible = rows.Count == 0;
         }
 
         protected void DoctorFilter_Changed(object sender, EventArgs e) { BindQueue(); }
+
+        protected void StatusFilter_Changed(object sender, EventArgs e) { BindQueue(); }
 
         protected void AppointmentsRepeater_ItemCommand(object source, RepeaterCommandEventArgs e)
         {
@@ -75,7 +81,7 @@ namespace OpdProject.templates.patients
         protected string WaitingNote(AppointmentView a)
         {
             if (CanConsult(a)) return "";
-            return a.Status == "CHECKED_IN" ? "Waiting for doctor" : a.Status == "IN_CONSULT" ? "With doctor" : "";
+            return a.Status == "CHECKED_IN" ? "Waiting For Doctor" : a.Status == "IN_CONSULT" ? "With Doctor" : "";
         }
 
         protected string StatusTime(AppointmentView a)

@@ -46,7 +46,7 @@ namespace OpdProject.templates.patients
             var sb = new StringBuilder();
             /* A doctor can reopen only their own consultation (the consultation page enforces the same rule) */
             if (user.Role == "DOCTOR" && c.DoctorId == user.UserId)
-                Link(sb, Urls.Consultation(c.PatientId) + "?cid=" + HttpUtility.UrlEncode(c.ConsultationId), "ti-stethoscope", "Open visit", false);
+                Link(sb, Urls.Consultation(c.PatientId) + "?cid=" + HttpUtility.UrlEncode(c.ConsultationId), "ti-stethoscope", "Open Visit", false);
             if (canPrint)
             {
                 Link(sb, Urls.Print("summary", c.ConsultationId), "ti-file-text", "Summary", true);
@@ -98,13 +98,13 @@ namespace OpdProject.templates.patients
                 + (string.IsNullOrEmpty(m.DynamicInstruction) ? " · " + m.TimesPerDay + "x/day" : " · " + m.DynamicInstruction)))));
 
             var orders = ConsultationService.ListOrders(cid);
-            if (orders.Count > 0) row("Tests ordered", H(string.Join(", ", orders.Select(o => o.TestName))));
+            if (orders.Count > 0) row("Tests Ordered", H(string.Join(", ", orders.Select(o => o.TestName))));
 
             var refs = ConsultationService.ListReferrals(cid);
             if (refs.Count > 0) row("Referral", H(string.Join("; ", refs.Select(r => r.Specialty))));
 
             if (c.FollowupDate.HasValue || !string.IsNullOrEmpty(c.FollowupNotes))
-                row("Follow-up", H((c.FollowupDate.HasValue ? AppPage.FmtDate(c.FollowupDate.Value) : "") + (string.IsNullOrEmpty(c.FollowupNotes) ? "" : " — " + c.FollowupNotes)));
+                row("Follow-Up", H((c.FollowupDate.HasValue ? AppPage.FmtDate(c.FollowupDate.Value) : "") + (string.IsNullOrEmpty(c.FollowupNotes) ? "" : " — " + c.FollowupNotes)));
 
             var addenda = ConsultationService.ListAddenda(cid);
             if (addenda.Count > 0)

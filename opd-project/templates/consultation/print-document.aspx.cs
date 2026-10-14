@@ -81,7 +81,7 @@ namespace OpdProject.templates.consultation
             Section(sb, "Prescription", MedsTable(meds));
             var validUntil = meds.Where(m => m.ValidUntil.HasValue).Select(m => m.ValidUntil.Value).DefaultIfEmpty(DateTime.Today.AddDays(Hospital.DefaultRxValidityDays)).Max();
             sb.Append("<div class=\"print-validity\">FOR SINGLE DISPENSING ONLY · Valid until: " + H(FmtDate(validUntil)) + "</div>");
-            if (c.FollowupDate.HasValue) Section(sb, "Follow-up", H(FmtDate(c.FollowupDate.Value) + (string.IsNullOrEmpty(c.FollowupNotes) ? "" : " — " + c.FollowupNotes)));
+            if (c.FollowupDate.HasValue) Section(sb, "Follow-Up", H(FmtDate(c.FollowupDate.Value) + (string.IsNullOrEmpty(c.FollowupNotes) ? "" : " — " + c.FollowupNotes)));
         }
 
         private static string MedsTable(System.Collections.Generic.List<Prescription> meds)
@@ -133,7 +133,7 @@ namespace OpdProject.templates.consultation
             add("Investigations ordered", orders.Count == 0 ? "" : H(string.Join(", ", orders.Select(o => o.TestName + " (" + o.TestType + ")"))), "labs");
             var refs = ConsultationService.ListReferrals(cid);
             add("Referrals", string.Join("<br/>", refs.Select(r => H(r.Specialty + (string.IsNullOrEmpty(r.DoctorName) ? "" : " (Dr. " + r.DoctorName + ")") + " — " + r.Urgency + ": " + r.Reason))), "referral");
-            add("Follow-up", c.FollowupDate.HasValue ? H(FmtDate(c.FollowupDate.Value) + (string.IsNullOrEmpty(c.FollowupNotes) ? "" : " — " + c.FollowupNotes)) : "", "followup");
+            add("Follow-Up", c.FollowupDate.HasValue ? H(FmtDate(c.FollowupDate.Value) + (string.IsNullOrEmpty(c.FollowupNotes) ? "" : " — " + c.FollowupNotes)) : "", "followup");
         }
 
         /// <summary>"Label: value" lines for custom field values (dates in the hospital's format), after any existing section text.</summary>

@@ -59,7 +59,7 @@ namespace OpdProject.Services
             }
         }
 
-        /* ── Claim lockout: 5 failed claims in 15 minutes locks the user out of claiming for 15 minutes ── */
+        /* ── Claim lockout: 5 mobile lookups that find nothing in 15 minutes lock the user out of looking up for 15 minutes ── */
 
         private const int MaxClaimFailures = 5;
         private static readonly TimeSpan ClaimWindow = TimeSpan.FromMinutes(15);
@@ -99,29 +99,60 @@ namespace OpdProject.Services
             }
         }
 
-        /// <summary>
-        /// A lab partner takes an order from the patient's requisition. The order id must belong to the lab's
-        /// hospital, not yet be claimed, and the patient's date of birth must match. Returns null on any mismatch
-        /// without saying which part failed, so order ids cannot be probed.
-        /// </summary>
-        public static InvestigationOrder ClaimOrder(AppUser user, string orderId, DateTime dob)
+        /// <summary>Digits only, compared on the last 10 so "+91-91111 11115" and "9111111115" match.</summary>
+        private static string MobileKey(string phone)
         {
-            if (!IsPartner(user) || string.IsNullOrEmpty(user.LabPartnerId)) return null;
+            var digits = new string((phone ?? "").Where(char.IsDigit).ToArray());
+            return digits.Length > 10 ? digits.Substring(digits.Length - 10) : digits;
+        }
+
+        /// <summary>The number is long enough to look up (a full mobile number, not a fragment).</summary>
+        public static bool IsValidMobile(string mobile) { return MobileKey(mobile).Length >= 10; }
+
+        /// <summary>Open, unclaimed order in the lab's hospital for a patient registered with this mobile number.</summary>
+        private static bool IsClaimableFor(AppUser user, InvestigationOrder o, string key)
+        {
+            if (o.HospitalId != user.HospitalId || !string.IsNullOrEmpty(o.LabPartnerId) || (o.Status != "ORDERED" && o.Status != "SENT")) return false;
+            var p = DataStore.Patients.FirstOrDefault(x => x.PatientId == o.PatientId);
+            return p != null && MobileKey(p.Phone) == key;
+        }
+
+        /// <summary>
+        /// A lab partner looks up a patient's requisition by mobile number: every open order not yet taken by another
+        /// lab, for every patient in the lab's hospital registered with that number. A search that finds nothing counts
+        /// towards the claim lockout, so numbers cannot be probed at speed. Returns null when not allowed or locked out.
+        /// </summary>
+        public static List<InvestigationOrder> FindOrdersByMobile(AppUser user, string mobile)
+        {
+            if (!IsPartner(user) || string.IsNullOrEmpty(user.LabPartnerId) || !IsValidMobile(mobile)) return null;
+            var key = MobileKey(mobile);
             lock (DataStore.Sync)
             {
                 if (IsClaimLocked(user.UserId)) return null;
-                var o = GetOrder((orderId ?? "").Trim().ToUpperInvariant());
-                var p = o != null ? DataStore.Patients.FirstOrDefault(x => x.PatientId == o.PatientId) : null;
-                bool ok = o != null && p != null && o.HospitalId == user.HospitalId && string.IsNullOrEmpty(o.LabPartnerId)
-                    && (o.Status == "ORDERED" || o.Status == "SENT") && p.Dob.HasValue && p.Dob.Value.Date == dob.Date;
-                if (!ok)
+                var found = DataStore.Orders.Where(o => IsClaimableFor(user, o, key)).OrderByDescending(o => o.OrderedAt).ToList();
+                if (found.Count == 0)
                 {
                     List<DateTime> list;
                     if (!ClaimFailures.TryGetValue(user.UserId, out list)) ClaimFailures[user.UserId] = list = new List<DateTime>();
                     list.Add(DateTime.Now);
-                    return null;
                 }
-                ClaimFailures.Remove(user.UserId);
+                else ClaimFailures.Remove(user.UserId);
+                return found;
+            }
+        }
+
+        /// <summary>
+        /// The lab takes an order found by <see cref="FindOrdersByMobile"/>. The mobile number is checked again here so a
+        /// posted order id cannot claim an order that the lookup did not return. Null if it no longer qualifies
+        /// (e.g. another lab took it first).
+        /// </summary>
+        public static InvestigationOrder ClaimOrder(AppUser user, string orderId, string mobile)
+        {
+            if (!IsPartner(user) || string.IsNullOrEmpty(user.LabPartnerId) || !IsValidMobile(mobile)) return null;
+            lock (DataStore.Sync)
+            {
+                var o = GetOrder(orderId);
+                if (o == null || !IsClaimableFor(user, o, MobileKey(mobile))) return null;
                 o.LabPartnerId = user.LabPartnerId;
                 o.Status = "SENT";
                 return o;

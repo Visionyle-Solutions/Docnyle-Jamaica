@@ -32,7 +32,7 @@ namespace OpdProject.templates.consultation
             VitalsRepeater.DataSource = HospitalService.ListVitalsConfig(HospitalId, false).Where(v => Host.FormConfig.VitalOn(v.VitalCode)).ToList();
             VitalsRepeater.DataBind();
             CalcText.Text = Calculations(_current);
-            RecordedText.Text = _current != null ? "Last saved " + AppPage.FmtDateTime(_current.RecordedAt) : "";
+            RecordedText.Text = _current != null ? "Last Saved " + AppPage.FmtDateTime(_current.RecordedAt) : "";
             SaveVitalsButton.Visible = !Host.IsLocked;
         }
 

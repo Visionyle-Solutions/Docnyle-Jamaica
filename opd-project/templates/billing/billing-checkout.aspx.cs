@@ -49,8 +49,8 @@ namespace OpdProject.templates.billing
             PatientName.Text = H(_patient.FullName);
             PatientMeta.Text = H(PatientIdLabel + ": " + _patient.Mrn + (string.IsNullOrEmpty(_patient.Phone) ? "" : " · " + _patient.Phone));
             var appt = SchedulingService.AppointmentForConsultation(_consultation);
-            ConsultationInfo.Text = H((appt != null ? appt.Type : "NEW") + " · " + FmtDate(_consultation.VisitDate) + " · " + UserService.UserName(_consultation.DoctorId)
-                + (_consultation.IsLocked ? "" : " · not yet signed"));
+            ConsultationInfo.Text = H((appt != null ? TypeName(appt.Type) : TypeName("NEW")) + " · " + FmtDate(_consultation.VisitDate) + " · " + UserService.UserName(_consultation.DoctorId)
+                + (_consultation.IsLocked ? "" : " · Not Yet Signed"));
 
             NoInvoiceHolder.Visible = Inv == null;
             InvoiceHolder.Visible = Inv != null;
@@ -97,12 +97,12 @@ namespace OpdProject.templates.billing
             row("Grand Total", H(Money(Inv.TotalAmount, c)), "font-weight:700; border-top:2px solid var(--border-strong);");
             if (_split.CoveredAmount > 0)
             {
-                row("Covered by insurance / scheme", "-" + H(Money(_split.CoveredAmount, c)), "color:var(--color-info);");
-                row("Patient share", H(Money(_split.PatientLiability, c)), "font-weight:600;");
+                row("Covered By Insurance / Scheme", "-" + H(Money(_split.CoveredAmount, c)), "color:var(--color-info);");
+                row("Patient Share", H(Money(_split.PatientLiability, c)), "font-weight:600;");
             }
-            if (_split.PatientPaid > 0) row("Paid by patient", "<span style=\"color:var(--color-success);\">" + H(Money(_split.PatientPaid, c)) + "</span>", null);
+            if (_split.PatientPaid > 0) row("Paid By Patient", "<span style=\"color:var(--color-success);\">" + H(Money(_split.PatientPaid, c)) + "</span>", null);
             if (_split.PatientPaid > 0 || _split.CoveredAmount > 0)
-                row("Patient due", "<span style=\"color:" + (_split.PatientDue > 0 ? "var(--color-danger)" : "var(--color-success)") + ";\">" + H(Money(_split.PatientDue, c)) + "</span>", "font-weight:700;");
+                row("Patient Due", "<span style=\"color:" + (_split.PatientDue > 0 ? "var(--color-danger)" : "var(--color-success)") + ";\">" + H(Money(_split.PatientDue, c)) + "</span>", "font-weight:700;");
             return sb.ToString();
         }
 
@@ -117,14 +117,14 @@ namespace OpdProject.templates.billing
             var c = Inv.Currency;
             Func<string, string, string, string> kpi = (value, label, color) => "<div style=\"flex:1; min-width:110px; padding:8px 10px; border:1px solid var(--border-default); border-radius:var(--radius-md);\"><div style=\"font-weight:700; font-size:15px;" + (color == null ? "" : " color:" + color + ";") + "\">" + H(value) + "</div><div class=\"text-xs text-muted\">" + H(label) + "</div></div>";
             var sb = new StringBuilder("<div style=\"display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;\">");
-            sb.Append(kpi(Money(_split.GrossAmount, c), "Charge amount", null));
+            sb.Append(kpi(Money(_split.GrossAmount, c), "Charge Amount", null));
             sb.Append(kpi(Money(_split.InsuranceLiability, c), "Insurance", "var(--color-info)"));
             sb.Append(kpi(Money(_split.GovtLiability, c), Scheme.Label, "var(--color-info)"));
-            sb.Append(kpi(Money(_split.PatientLiability, c), "Patient share", null));
-            sb.Append(kpi(Money(_split.PatientDue, c), "Patient due", _split.PatientDue > 0 ? "var(--color-danger)" : "var(--color-success)"));
+            sb.Append(kpi(Money(_split.PatientLiability, c), "Patient Share", null));
+            sb.Append(kpi(Money(_split.PatientDue, c), "Patient Due", _split.PatientDue > 0 ? "var(--color-danger)" : "var(--color-success)"));
             sb.Append("</div>");
             if (_split.PayerOutstanding > 0 && Inv.Status == "PAID")
-                sb.Append("<div class=\"hint-banner mb-2\"><i class=\"ti ti-building-bank\" aria-hidden=\"true\"></i> Patient share settled. <strong>" + H(Money(_split.PayerOutstanding, c)) + "</strong> is receivable from the payer(s) — use Capture payment to record the settlement.</div>");
+                sb.Append("<div class=\"hint-banner mb-2\"><i class=\"ti ti-building-bank\" aria-hidden=\"true\"></i> Patient share settled. <strong>" + H(Money(_split.PayerOutstanding, c)) + "</strong> is receivable from the payer(s) — use Capture Payment to record the settlement.</div>");
             if (_split.PatientOverpaid > 0)
                 sb.Append("<div class=\"hint-banner mb-2\" style=\"border-left:3px solid var(--color-warning);\"><i class=\"ti ti-alert-triangle\" aria-hidden=\"true\"></i> Patient has paid <strong>" + H(Money(_split.PatientOverpaid, c)) + "</strong> more than their share — refund it or void a payment.</div>");
             SplitKpis.Text = sb.ToString();
@@ -139,7 +139,7 @@ namespace OpdProject.templates.billing
             CoverageFooter.Text = _split.GrossAmount == 0
                 ? "<div class=\"text-sm text-muted\">No charge for this visit — nothing to bill to a payer.</div>"
                 : coverages.Count == 0
-                    ? "<div class=\"hint-banner\"><i class=\"ti ti-info-circle\" aria-hidden=\"true\"></i> No coverage on file — <strong>Self-Pay</strong>. The patient pays the full charge. Use <em>Add coverage</em> for private insurance or " + H(Scheme.Label) + ".</div>"
+                    ? "<div class=\"hint-banner\"><i class=\"ti ti-info-circle\" aria-hidden=\"true\"></i> No coverage on file — <strong>Self-Pay</strong>. The patient pays the full charge. Use <em>Add Coverage</em> for private insurance or " + H(Scheme.Label) + ".</div>"
                     : "<p class=\"text-xs text-muted mt-2\">Eligibility is recorded manually from the insurer / scheme response. Percent approvals follow the invoice total when charges change; applied amounts can be edited.</p>";
             if (Inv.Status == "PAID" && _split.PayerOutstanding > 0) { EditActions.Visible = true; CapturePaymentButton.Visible = true; AddChargeButton.Visible = CustomChargeButton.Visible = CancelInvoiceButton.Visible = false; }
         }
@@ -158,7 +158,7 @@ namespace OpdProject.templates.billing
             var ident = c.CoverageType == "GOVT_SCHEME"
                 ? Scheme.CardLabel + ": " + (string.IsNullOrEmpty(c.GovtCardNumber) ? "—" : c.GovtCardNumber)
                 : "Member: " + (string.IsNullOrEmpty(c.MemberId) ? "—" : c.MemberId) + " · Policy: " + (string.IsNullOrEmpty(c.PolicyNumber) ? "—" : c.PolicyNumber)
-                  + (string.IsNullOrEmpty(c.GroupNumber) ? "" : " · Group: " + c.GroupNumber) + " · " + c.ClaimMode;
+                  + (string.IsNullOrEmpty(c.GroupNumber) ? "" : " · Group: " + c.GroupNumber) + " · " + TitleCase(c.ClaimMode);
             if (c.EffectiveDate.HasValue || c.ExpiryDate.HasValue) ident += " · Valid " + (c.EffectiveDate.HasValue ? FmtDate(c.EffectiveDate.Value) : "—") + " → " + (c.ExpiryDate.HasValue ? FmtDate(c.ExpiryDate.Value) : "—");
             return ident;
         }
@@ -173,13 +173,13 @@ namespace OpdProject.templates.billing
             var state = (Literal)e.Item.FindControl("CoverageState");
             var last = BillingService.ListVerifications(cov.CoverageId).FirstOrDefault();
             state.Text = line != null ? "<span class=\"badge badge--success\">Applied</span>"
-                : last != null ? "<span class=\"badge " + (last.Status == "REJECTED" ? "badge--danger" : "badge--warning") + "\" style=\"font-size:10px;\">Last: " + H(last.Status) + "</span>"
-                : "<span class=\"text-xs text-muted\">Not verified</span>";
+                : last != null ? "<span class=\"badge " + (last.Status == "REJECTED" ? "badge--danger" : "badge--warning") + "\" style=\"font-size:10px;\">Last: " + H(TitleCase(last.Status)) + "</span>"
+                : "<span class=\"text-xs text-muted\">Not Verified</span>";
             ((Literal)e.Item.FindControl("LiabilityText")).Text = line == null ? "" :
                 "<div class=\"text-sm\" style=\"margin-top:6px;\">Liability <strong>" + H(Money(line.Liability, Inv.Currency)) + "</strong> · Approved "
                 + H(line.ApprovedType == "PERCENT" ? line.ApprovedValue.ToString(CultureInfo.InvariantCulture) + "%" : Money(line.ApprovedValue, Inv.Currency))
-                + (line.IsManualAmount ? " (amount edited)" : "") + " · Auth <code>" + H(string.IsNullOrEmpty(line.AuthorizationNumber) ? "—" : line.AuthorizationNumber) + "</code>"
-                + (line.SettledAmount > 0 ? " · Settled by payer <strong>" + H(Money(line.SettledAmount, Inv.Currency)) + "</strong>" : "") + "</div>";
+                + (line.IsManualAmount ? " (Amount Edited)" : "") + " · Auth <code>" + H(string.IsNullOrEmpty(line.AuthorizationNumber) ? "—" : line.AuthorizationNumber) + "</code>"
+                + (line.SettledAmount > 0 ? " · Settled By Payer <strong>" + H(Money(line.SettledAmount, Inv.Currency)) + "</strong>" : "") + "</div>";
             var form = (Panel)e.Item.FindControl("VerifyForm");
             form.Visible = !locked;
             if (line != null)
@@ -224,7 +224,7 @@ namespace OpdProject.templates.billing
                     break;
                 case "History":
                     var cov = PatientService.GetCoverage(coverageId);
-                    HistoryTitle.Text = "Eligibility history — " + H(CoverageLabel(cov));
+                    HistoryTitle.Text = "Eligibility History — " + H(CoverageLabel(cov));
                     var rows = BillingService.ListVerifications(coverageId);
                     HistoryRepeater.DataSource = rows;
                     HistoryRepeater.DataBind();
@@ -254,7 +254,7 @@ namespace OpdProject.templates.billing
         protected void AddCoverageButton_Click(object sender, EventArgs e)
         {
             CovType.Items.Clear();
-            CovType.Items.Add(new ListItem("Private insurance", "PRIVATE_INSURANCE"));
+            CovType.Items.Add(new ListItem("Private Insurance", "PRIVATE_INSURANCE"));
             CovType.Items.Add(new ListItem(Scheme.Label, "GOVT_SCHEME"));
             CovPayerPrivate.DataSource = PatientService.ListPayers(Hospital.Country, "PRIVATE");
             CovPayerPrivate.DataTextField = "Name"; CovPayerPrivate.DataValueField = "PayerId"; CovPayerPrivate.DataBind();
@@ -399,12 +399,12 @@ namespace OpdProject.templates.billing
         private System.Collections.Generic.List<Component> Components()
         {
             var split = BillingService.GetBillingSplit(Inv.InvoiceId);
-            var list = new System.Collections.Generic.List<Component> { new Component { Value = "PATIENT", Label = "Patient share — due " + Money(split.PatientDue, Inv.Currency), Due = split.PatientDue } };
+            var list = new System.Collections.Generic.List<Component> { new Component { Value = "PATIENT", Label = "Patient Share — Due " + Money(split.PatientDue, Inv.Currency), Due = split.PatientDue } };
             foreach (var l in split.Lines.Where(l => l.Status == "VERIFIED" && l.Liability - l.SettledAmount > 0))
                 list.Add(new Component
                 {
                     Value = l.CoverageLineId, Due = Math.Round(l.Liability - l.SettledAmount, 2),
-                    Label = (l.CoverageType == "GOVT_SCHEME" ? "Scheme" : "Insurance") + " settlement — " + l.PayerName + " (due " + Money(l.Liability - l.SettledAmount, Inv.Currency) + ")",
+                    Label = (l.CoverageType == "GOVT_SCHEME" ? "Scheme" : "Insurance") + " Settlement — " + l.PayerName + " (Due " + Money(l.Liability - l.SettledAmount, Inv.Currency) + ")",
                 });
             return list;
         }
@@ -414,7 +414,7 @@ namespace OpdProject.templates.billing
             var comps = Components();
             if (comps.All(c => c.Due <= 0)) { ToastWarning("Nothing is due on this invoice"); return; }
             var split = BillingService.GetBillingSplit(Inv.InvoiceId);
-            PaymentHint.Text = "Patient due: <strong>" + H(Money(split.PatientDue, Inv.Currency)) + "</strong>" + (split.PayerOutstanding > 0 ? " · Receivable from payers: <strong>" + H(Money(split.PayerOutstanding, Inv.Currency)) + "</strong>" : "");
+            PaymentHint.Text = "Patient Due: <strong>" + H(Money(split.PatientDue, Inv.Currency)) + "</strong>" + (split.PayerOutstanding > 0 ? " · Receivable From Payers: <strong>" + H(Money(split.PayerOutstanding, Inv.Currency)) + "</strong>" : "");
             PayComponent.Items.Clear();
             foreach (var c in comps)
             {
@@ -426,7 +426,7 @@ namespace OpdProject.templates.billing
             PayComponent.SelectedValue = first.Value;
             PayAmount.Text = first.Due.ToString("0.00", CultureInfo.InvariantCulture);
             PayMethod.Items.Clear();
-            foreach (var m in HospitalService.ListPaymentMethods(HospitalId)) PayMethod.Items.Add(new ListItem(m.MethodName.Replace("_", " "), m.MethodName));
+            foreach (var m in HospitalService.ListPaymentMethods(HospitalId)) PayMethod.Items.Add(new ListItem(TitleCase(m.MethodName), m.MethodName));
             PayReference.Text = "";
             PaymentModal.Visible = true;
         }
@@ -493,13 +493,13 @@ namespace OpdProject.templates.billing
             return "<div style=\"text-align:center; border:2px solid var(--border-strong); border-radius:8px; padding:16px;\">"
                 + "<div style=\"font-weight:700; font-size:14px; margin-bottom:4px;\">" + H(Hospital.Name) + "</div>"
                 + "<div class=\"text-xs text-muted mb-3\">" + H(Hospital.LegalAddress) + "</div>"
-                + "<div style=\"font-weight:600; font-size:18px; color:var(--color-success); margin-bottom:8px;\">PAYMENT RECEIPT</div>"
+                + "<div style=\"font-weight:600; font-size:18px; color:var(--color-success); margin-bottom:8px;\">Payment Receipt</div>"
                 + "<div class=\"text-sm mb-1\"><strong>Receipt #:</strong> " + H(r.ReceiptNumber) + "</div>"
                 + "<div class=\"text-sm mb-1\"><strong>Date:</strong> " + H(FmtDate(r.GeneratedAt)) + "</div>"
                 + "<div class=\"text-sm mb-1\"><strong>Patient:</strong> " + H(_patient.FullName) + "</div>"
                 + "<div style=\"border-top:1px dashed var(--border-strong); margin:12px 0; padding-top:12px;\"><div style=\"font-size:20px; font-weight:700;\">" + H(Money(r.TotalAmount, r.Currency)) + "</div>"
-                + "<div class=\"text-xs text-muted\">" + (covered.Count > 0 ? "PATIENT SHARE PAID" : "PAID IN FULL") + "</div>" + splitHtml + "</div>"
-                + "<a class=\"btn btn--sm btn--ghost mt-2\" style=\"width:100%; justify-content:center;\" target=\"_blank\" href=\"" + H(Urls.InvoicePrint(r.InvoiceId)) + "\"><i class=\"ti ti-printer\"></i> Print receipt</a></div>";
+                + "<div class=\"text-xs text-muted\">" + (covered.Count > 0 ? "Patient Share Paid" : "Paid In Full") + "</div>" + splitHtml + "</div>"
+                + "<a class=\"btn btn--sm btn--ghost mt-2\" style=\"width:100%; justify-content:center;\" target=\"_blank\" href=\"" + H(Urls.InvoicePrint(r.InvoiceId)) + "\"><i class=\"ti ti-printer\"></i> Print Receipt</a></div>";
         }
 
         protected void CloseModals_Click(object sender, EventArgs e)

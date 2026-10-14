@@ -13,7 +13,7 @@
     </div>
 
     <asp:Panel ID="RxSearchPanel" runat="server" CssClass="form-group mb-2" DefaultButton="RxSearchButton" style="display:flex; gap:8px;">
-      <asp:TextBox ID="RxSearchInput" runat="server" CssClass="form-control" placeholder="Search formulary by name, generic, or therapeutic class..." autocomplete="off" />
+      <asp:TextBox ID="RxSearchInput" runat="server" CssClass="form-control" placeholder="Search Formulary By Name, Generic, Or Therapeutic Class..." autocomplete="off" />
       <asp:LinkButton ID="RxSearchButton" runat="server" CssClass="btn btn--sm btn--ghost" OnClick="RxSearchButton_Click" CausesValidation="false"><i class="ti ti-search" aria-hidden="true"></i></asp:LinkButton>
     </asp:Panel>
     <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:8px;">
@@ -88,7 +88,7 @@
           </div>
           <div class="form-group" style="flex:1;">
             <label class="form-label">&nbsp;</label>
-            <div class="chip-row"><%= Chips(RxDurationUnit, "days|day(s)", "weeks|week(s)", "months|month(s)", "hours|hours", "minutes|minutes") %></div>
+            <div class="chip-row"><%= Chips(RxDurationUnit, "days|Day(s)", "weeks|Week(s)", "months|Month(s)", "hours|Hours", "minutes|Minutes") %></div>
             <asp:HiddenField ID="RxDurationUnit" runat="server" Value="days" />
           </div>
           <div class="form-group" style="width:140px;">
@@ -106,8 +106,8 @@
             </asp:RadioButtonList>
             <asp:TextBox ID="RxFreqValue" runat="server" CssClass="form-control" TextMode="Number" Text="3" style="width:64px;" />
             <asp:RangeValidator runat="server" ControlToValidate="RxFreqValue" ValidationGroup="Rx" Type="Integer" MinimumValue="1" MaximumValue="24" ErrorMessage="Frequency must be 1–24" Text="1–24" CssClass="field-error" Display="Dynamic" />
-            <span style="font-size:12px;">per</span>
-            <div class="chip-row"><%= Chips(RxFreqPeriod, "day|day", "week|week", "month|month") %></div>
+            <span style="font-size:12px;">Per</span>
+            <div class="chip-row"><%= Chips(RxFreqPeriod, "day|Day", "week|Week", "month|Month") %></div>
             <asp:HiddenField ID="RxFreqPeriod" runat="server" Value="day" />
           </div>
           <asp:PlaceHolder ID="DoseTimingHolder" runat="server">
@@ -122,21 +122,21 @@
         </div>
         <asp:PlaceHolder ID="EventTimingHolder" runat="server">
         <div style="margin-top:8px; padding:10px; border:1px solid var(--border-subtle,#e2e8f0); border-radius:6px;">
-          <label class="form-label" style="color:var(--color-primary); font-weight:600;">Timing (relative to event)</label>
+          <label class="form-label" style="color:var(--color-primary); font-weight:600;">Timing (Relative To Event)</label>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <asp:TextBox ID="RxTimingFrom" runat="server" CssClass="form-control" TextMode="Number" style="width:60px;" placeholder="10" />
             <span style="font-size:12px;">to</span>
             <asp:TextBox ID="RxTimingTo" runat="server" CssClass="form-control" TextMode="Number" style="width:60px;" placeholder="20" />
             <span style="font-size:12px;">Unit</span>
-            <div class="chip-row"><%= Chips(RxTimingUnit, "hours|hour(s)", "minutes|minutes") %></div>
+            <div class="chip-row"><%= Chips(RxTimingUnit, "hours|Hour(s)", "minutes|Minutes") %></div>
             <asp:HiddenField ID="RxTimingUnit" runat="server" Value="minutes" />
             <span style="font-size:12px;">Direction</span>
-            <div class="chip-row"><%= Chips(RxTimingDir, "after|after", "before|before") %></div>
+            <div class="chip-row"><%= Chips(RxTimingDir, "after|After", "before|Before") %></div>
             <asp:HiddenField ID="RxTimingDir" runat="server" Value="before" />
           </div>
           <div style="margin-top:6px; display:flex; gap:4px; align-items:center;">
             <span style="font-size:12px; color:var(--text-muted);">Event</span>
-            <div class="chip-row"><%= Chips(RxEvent, "meals|meals", "lunch|lunch", "dinner|dinner", "bedtime|bedtime", "morning|morning", "breakfast|breakfast") %></div>
+            <div class="chip-row"><%= Chips(RxEvent, "meals|Meals", "lunch|Lunch", "dinner|Dinner", "bedtime|Bedtime", "morning|Morning", "breakfast|Breakfast") %></div>
             <asp:HiddenField ID="RxEvent" runat="server" Value="meals" />
           </div>
         </div>
@@ -146,7 +146,7 @@
           <asp:PlaceHolder ID="InstructionsHolder" runat="server">
           <div class="form-group" style="flex:1; margin:0;">
             <label class="form-label" for="<%= RxInstructions.ClientID %>">Instructions</label>
-            <asp:TextBox ID="RxInstructions" runat="server" CssClass="form-control" placeholder="Special usage instructions (left blank = generated instruction)" />
+            <asp:TextBox ID="RxInstructions" runat="server" CssClass="form-control" placeholder="Special Usage Instructions (Left Blank = Generated Instruction)" />
           </div>
           </asp:PlaceHolder>
         </div>
@@ -169,14 +169,14 @@
         </ItemTemplate>
       </asp:Repeater>
       <div class="form-group mt-2">
-        <label class="form-label text-xs" for="<%= OverrideReason.ClientID %>">Override reason (required for audit)</label>
+        <label class="form-label text-xs" for="<%= OverrideReason.ClientID %>">Override Reason (Required For Audit)</label>
         <asp:TextBox ID="OverrideReason" runat="server" CssClass="form-control" placeholder="e.g. Allergy history disputed, clinical judgment..." />
         <asp:RequiredFieldValidator runat="server" ControlToValidate="OverrideReason" ValidationGroup="Override" Text="A reason is required to proceed" CssClass="field-error" Display="Dynamic" />
       </div>
       <p class="text-xs text-muted">This will be permanently recorded in the safety audit trail.</p>
       <div style="display:flex; gap:8px;">
-        <asp:LinkButton ID="CancelOverrideButton" runat="server" CssClass="btn btn--sm btn--ghost" CausesValidation="false" OnClick="CancelOverrideButton_Click">Cancel prescription</asp:LinkButton>
-        <asp:LinkButton ID="ProceedOverrideButton" runat="server" CssClass="btn btn--sm btn--danger" ValidationGroup="Override" OnClick="ProceedOverrideButton_Click">Override &amp; proceed</asp:LinkButton>
+        <asp:LinkButton ID="CancelOverrideButton" runat="server" CssClass="btn btn--sm btn--ghost" CausesValidation="false" OnClick="CancelOverrideButton_Click">Cancel Prescription</asp:LinkButton>
+        <asp:LinkButton ID="ProceedOverrideButton" runat="server" CssClass="btn btn--sm btn--danger" ValidationGroup="Override" OnClick="ProceedOverrideButton_Click">Override &amp; Proceed</asp:LinkButton>
       </div>
     </asp:Panel>
 
@@ -188,7 +188,7 @@
       <p class="text-xs text-muted mt-2">Uncheck items you don't want to repeat.</p>
       <div style="display:flex; gap:8px;">
         <asp:LinkButton ID="CancelRepeatButton" runat="server" CssClass="btn btn--sm btn--ghost" CausesValidation="false" OnClick="CancelRepeatButton_Click">Cancel</asp:LinkButton>
-        <asp:LinkButton ID="ConfirmRepeatButton" runat="server" CssClass="btn btn--sm btn--success" CausesValidation="false" OnClick="ConfirmRepeatButton_Click">Add selected to today</asp:LinkButton>
+        <asp:LinkButton ID="ConfirmRepeatButton" runat="server" CssClass="btn btn--sm btn--success" CausesValidation="false" OnClick="ConfirmRepeatButton_Click">Add Selected To Today</asp:LinkButton>
       </div>
     </asp:Panel>
   </asp:PlaceHolder>

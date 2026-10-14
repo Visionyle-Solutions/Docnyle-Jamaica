@@ -1,0 +1,28 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "opd-iisexpress",
+      "url": "http://localhost:8095",
+      "port": 8095
+    },
+    {
+      "name": "opd-iisexpress-launch",
+      "runtimeExecutable": "C:/Program Files/IIS Express/iisexpress.exe",
+      "runtimeArgs": ["/path:C:\\Consult360\\opd-project", "/port:8097", "/clr:v4.0", "/systray:false"],
+      "port": 8097
+    },
+    {
+      "name": "record-page-mockup",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-I", "-m", "http.server", "8124", "--bind", "127.0.0.1", "--directory", "C:/Users/sivak/AppData/Local/Temp/claude/C--Consult360/e30dfcfb-b12e-4733-aeb2-802f2a0523ab/scratchpad"],
+      "port": 8124
+    },
+    {
+      "name": "opd-static-preview",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-I", "C:/Users/sivak/AppData/Local/Temp/claude/C--Consult360/b9f9201c-38cf-4329-860d-eef2ee89c58f/scratchpad/serve.py", "C:/Consult360/opd-project", "8123"],
+      "port": 8123
+    }
+  ]
+}

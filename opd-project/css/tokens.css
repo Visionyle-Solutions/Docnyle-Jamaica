@@ -70,8 +70,6 @@
 
   /* Page width constraints */
   --page-width-narrow:   860px;
-  --page-width-default:  1100px;
-  --page-width-wide:     1280px;
 
   /* App shell layout */
   --sidebar-width:        216px;

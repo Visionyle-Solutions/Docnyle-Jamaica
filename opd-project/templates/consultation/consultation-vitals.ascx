@@ -40,7 +40,7 @@
     <asp:PlaceHolder ID="CalcHolder" runat="server"><div class="vital-calc" id="vitalsCalcDisplay" style="padding:6px 8px; font-size:11px;"><asp:Literal ID="CalcText" runat="server" /></div></asp:PlaceHolder>
     <div class="text-xs text-muted" style="padding:0 8px;"><asp:Literal ID="RecordedText" runat="server" /></div>
     <asp:LinkButton ID="SaveVitalsButton" runat="server" CssClass="btn btn--sm btn--primary mt-2" OnClick="SaveVitalsButton_Click">
-      <i class="ti ti-device-floppy" aria-hidden="true"></i> Save vitals
+      <i class="ti ti-device-floppy" aria-hidden="true"></i> Save Vitals
     </asp:LinkButton>
   </asp:Panel>
 </div>

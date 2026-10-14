@@ -28,11 +28,11 @@ namespace OpdProject.templates.consultation
             var allergies = PatientService.ListAllergies(Visit.PatientId, true);
             AllergyTone = allergies.Any(a => a.Severity == "SEVERE") ? "danger" : allergies.Count > 0 ? "warning" : "ok";
             AllergyIcon = allergies.Count == 0 ? "ti-shield-check" : "ti-alert-triangle";
-            AllergyText = allergies.Count == 0 ? "No known allergies" : string.Join(" | ", allergies.Select(a => a.AllergyName + " · " + a.Severity));
+            AllergyText = allergies.Count == 0 ? "No Known Allergies" : string.Join(" | ", allergies.Select(a => a.AllergyName + " · " + OpdProject.Web.BasePage.TitleCase(a.Severity)));
             var meds = ConsultationService.ListActiveMedications(Visit.PatientId);
-            MedsText = meds.Count + " active medication" + (meds.Count == 1 ? "" : "s");
+            MedsText = meds.Count + " Active Medication" + (meds.Count == 1 ? "" : "s");
             MedNames = string.Join(", ", meds.Take(4).Select(m => m.MedicineName + (string.IsNullOrEmpty(m.Strength) ? "" : " " + m.Strength)))
-                + (meds.Count > 4 ? " +" + (meds.Count - 4) + " more" : "");
+                + (meds.Count > 4 ? " +" + (meds.Count - 4) + " More" : "");
             MedNamesHolder.Visible = meds.Count > 0;
 
             /* Continuity flag: the follow-up instruction left at the last signed visit */

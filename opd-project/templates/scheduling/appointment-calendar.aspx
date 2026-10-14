@@ -13,23 +13,23 @@
         <label class="form-label" for="<%= DateFilter.ClientID %>">Date</label>
         <asp:TextBox ID="DateFilter" runat="server" CssClass="form-control" TextMode="Date" AutoPostBack="true" OnTextChanged="Filter_Changed" />
       </div>
-      <asp:LinkButton ID="BookButton" runat="server" CssClass="btn btn--sm btn--primary" OnClick="BookButton_Click" CausesValidation="false"><i class="ti ti-plus" aria-hidden="true"></i> Book appointment</asp:LinkButton>
+      <asp:LinkButton ID="BookButton" runat="server" CssClass="btn btn--sm btn--primary" OnClick="BookButton_Click" CausesValidation="false"><i class="ti ti-plus" aria-hidden="true"></i> Book Appointment</asp:LinkButton>
       <div style="flex:1;"></div>
       <div class="text-sm text-secondary"><asp:Literal ID="SlotSummary" runat="server" /></div>
     </div>
   </div>
 
   <div class="card mb-3" style="display:flex; gap:8px; justify-content:flex-end; padding:8px 16px; flex-wrap:wrap;">
-    <asp:LinkButton ID="RecurringButton" runat="server" CssClass="btn btn--sm btn--ghost" OnClick="RecurringButton_Click" CausesValidation="false"><i class="ti ti-repeat" aria-hidden="true"></i> Book recurring series</asp:LinkButton>
-    <asp:LinkButton ID="RemindersButton" runat="server" CssClass="btn btn--sm" style="background:#25D366; color:#fff; border:none;" OnClick="RemindersButton_Click" CausesValidation="false"><i class="ti ti-brand-whatsapp" aria-hidden="true"></i> Send reminders</asp:LinkButton>
+    <asp:LinkButton ID="RecurringButton" runat="server" CssClass="btn btn--sm btn--ghost" OnClick="RecurringButton_Click" CausesValidation="false"><i class="ti ti-repeat" aria-hidden="true"></i> Book Recurring Series</asp:LinkButton>
+    <asp:LinkButton ID="RemindersButton" runat="server" CssClass="btn btn--sm" style="background:#25D366; color:#fff; border:none;" OnClick="RemindersButton_Click" CausesValidation="false"><i class="ti ti-brand-whatsapp" aria-hidden="true"></i> Send Reminders</asp:LinkButton>
     <asp:LinkButton ID="NoShowButton" runat="server" CssClass="btn btn--sm btn--warning" OnClick="NoShowButton_Click" CausesValidation="false"
-      OnClientClick="return confirm('Mark every still-booked appointment on this date as NO_SHOW and send the no-show message?');"><i class="ti ti-alert-circle" aria-hidden="true"></i> Send no-show messages</asp:LinkButton>
+      OnClientClick="return confirm('Mark every still-booked appointment on this date as NO_SHOW and send the no-show message?');"><i class="ti ti-alert-circle" aria-hidden="true"></i> Send No-Show Messages</asp:LinkButton>
   </div>
 
   <div style="display:flex; gap:16px; align-items:flex-start;">
     <div style="flex:1; min-width:0;">
       <div class="card">
-        <div class="text-sm text-secondary mb-2" style="font-weight:600;">SCHEDULE</div>
+        <div class="text-sm text-secondary mb-2" style="font-weight:600;">Schedule</div>
         <asp:Repeater ID="ScheduleRepeater" runat="server" ItemType="OpdProject.Models.AppointmentView" OnItemCommand="ScheduleRepeater_ItemCommand">
           <ItemTemplate>
             <div style="display:flex; align-items:center; gap:10px; padding:10px 8px; border-bottom:1px solid var(--border-default);">
@@ -42,7 +42,7 @@
                 <div class="text-sm" style="font-weight:600;"><%#: Item.PatientName %></div>
                 <div class="text-xs text-muted"><%#: Item.PatientMrn %> · <span style="display:inline-block; width:8px; height:8px; border-radius:2px; background:<%#: TypeColor(Item.Type) %>;"></span> <%#: TypeName(Item.Type) %><%#: string.IsNullOrEmpty(Item.Appointment.Notes) ? "" : " · " + Item.Appointment.Notes %></div>
               </div>
-              <span class="badge <%#: StatusBadge(Item.Status) %>" style="font-size:10px;"><%#: Item.Status %></span>
+              <span class="badge <%#: StatusBadge(Item.Status) %>" style="font-size:10px;"><%#: OpdProject.Web.BasePage.TitleCase(Item.Status) %></span>
               <div style="display:flex; gap:2px;">
                 <asp:LinkButton runat="server" CssClass="btn btn--xs btn--ghost" CommandName="CheckIn" CommandArgument="<%# Item.AppointmentId %>" Visible='<%# Item.Status == "BOOKED" %>' ToolTip="Check in">✓</asp:LinkButton>
                 <asp:LinkButton runat="server" CssClass="btn btn--xs btn--ghost" CommandName="Reschedule" CommandArgument="<%# Item.AppointmentId %>" Visible='<%# Item.Status == "BOOKED" %>' ToolTip="Reschedule" style="color:var(--color-primary);">↻</asp:LinkButton>
@@ -58,7 +58,7 @@
     </div>
     <div style="width:230px; flex-shrink:0;">
       <div class="card">
-        <div class="text-sm text-secondary mb-2" style="font-weight:600;">AVAILABLE SLOTS</div>
+        <div class="text-sm text-secondary mb-2" style="font-weight:600;">Available Slots</div>
         <div class="text-xs text-muted mb-2"><asp:Literal ID="ScheduleInfo" runat="server" /></div>
         <asp:Repeater ID="SlotsRepeater" runat="server" ItemType="OpdProject.Models.TimeSlot" OnItemCommand="SlotsRepeater_ItemCommand">
           <ItemTemplate>
@@ -82,7 +82,7 @@
       <div class="form-group">
         <label class="form-label" for="<%= PatientSearch.ClientID %>">Patient *</label>
         <div class="patient-suggest">
-          <asp:TextBox ID="PatientSearch" runat="server" CssClass="form-control" placeholder="Type 2+ letters of name, MRN or phone..." autocomplete="off" data-patient-suggest="true" />
+          <asp:TextBox ID="PatientSearch" runat="server" CssClass="form-control" placeholder="Type 2+ Letters Of Name, MRN Or Phone..." autocomplete="off" data-patient-suggest="true" />
           <asp:HiddenField ID="PatientPick" runat="server" />
         </div>
         <asp:CustomValidator runat="server" ValidationGroup="Book" ErrorMessage="Select a patient" Text="Select a patient from the suggestions" CssClass="field-error" Display="Dynamic"
@@ -95,12 +95,12 @@
         </div>
       </asp:PlaceHolder>
       <div class="form-group">
-        <label class="form-label" for="<%= BookType.ClientID %>">Appointment type</label>
+        <label class="form-label" for="<%= BookType.ClientID %>">Appointment Type</label>
         <asp:DropDownList ID="BookType" runat="server" CssClass="form-select" AutoPostBack="true" OnSelectedIndexChanged="BookOptions_Changed" />
       </div>
       <asp:PlaceHolder ID="BookSlotHolder" runat="server">
         <div class="form-group">
-          <label class="form-label" for="<%= BookSlot.ClientID %>">Time slot *</label>
+          <label class="form-label" for="<%= BookSlot.ClientID %>">Time Slot *</label>
           <asp:DropDownList ID="BookSlot" runat="server" CssClass="form-select" />
           <asp:RequiredFieldValidator runat="server" ControlToValidate="BookSlot" ValidationGroup="Book" ErrorMessage="No free slot for that doctor and appointment type on this date" Text="No free slot" CssClass="field-error" Display="Dynamic" />
         </div>
@@ -108,7 +108,7 @@
       <asp:HiddenField ID="QuickSlot" runat="server" />
       <div class="form-group">
         <label class="form-label" for="<%= BookNotes.ClientID %>">Notes</label>
-        <asp:TextBox ID="BookNotes" runat="server" CssClass="form-control" placeholder="Optional booking notes" MaxLength="200" />
+        <asp:TextBox ID="BookNotes" runat="server" CssClass="form-control" placeholder="Optional Booking Notes" MaxLength="200" />
       </div>
       <p class="text-xs text-muted">Weekly timetables and leave are set in Scheduling → Schedule Settings → Doctors.</p>
     </div>
@@ -128,12 +128,12 @@
       <asp:HiddenField ID="RescheduleId" runat="server" />
       <div class="hint-banner mb-3"><i class="ti ti-calendar-event" aria-hidden="true"></i> Currently: <strong><asp:Literal ID="RescheduleCurrent" runat="server" /></strong></div>
       <div class="form-group">
-        <label class="form-label" for="<%= RescheduleDate.ClientID %>">New date *</label>
+        <label class="form-label" for="<%= RescheduleDate.ClientID %>">New Date *</label>
         <asp:TextBox ID="RescheduleDate" runat="server" CssClass="form-control" TextMode="Date" AutoPostBack="true" OnTextChanged="RescheduleDate_Changed" />
         <asp:RequiredFieldValidator runat="server" ControlToValidate="RescheduleDate" ValidationGroup="Reschedule" Text="Choose a date" CssClass="field-error" Display="Dynamic" />
       </div>
       <div class="form-group">
-        <label class="form-label" for="<%= RescheduleSlot.ClientID %>">New time *</label>
+        <label class="form-label" for="<%= RescheduleSlot.ClientID %>">New Time *</label>
         <asp:DropDownList ID="RescheduleSlot" runat="server" CssClass="form-select" />
         <asp:RequiredFieldValidator runat="server" ControlToValidate="RescheduleSlot" ValidationGroup="Reschedule" Text="No free time on this date — choose another date" CssClass="field-error" Display="Dynamic" />
       </div>
@@ -155,25 +155,25 @@
       <div class="form-group">
         <label class="form-label" for="<%= RecurPatientSearch.ClientID %>">Patient *</label>
         <div class="patient-suggest">
-          <asp:TextBox ID="RecurPatientSearch" runat="server" CssClass="form-control" placeholder="Type 2+ letters of name, MRN or phone..." autocomplete="off" data-patient-suggest="true" />
+          <asp:TextBox ID="RecurPatientSearch" runat="server" CssClass="form-control" placeholder="Type 2+ Letters Of Name, MRN Or Phone..." autocomplete="off" data-patient-suggest="true" />
           <asp:HiddenField ID="RecurPatientPick" runat="server" />
         </div>
         <asp:CustomValidator runat="server" ValidationGroup="Recurring" Text="Select a patient from the suggestions" CssClass="field-error" Display="Dynamic"
           ClientValidationFunction="validatePatientPick" OnServerValidate="PatientPick_ServerValidate" />
       </div>
       <div class="form-grid">
-        <div class="form-group"><label class="form-label" for="<%= RecurStart.ClientID %>">Start date</label><asp:TextBox ID="RecurStart" runat="server" CssClass="form-control" TextMode="Date" />
+        <div class="form-group"><label class="form-label" for="<%= RecurStart.ClientID %>">Start Date</label><asp:TextBox ID="RecurStart" runat="server" CssClass="form-control" TextMode="Date" />
           <asp:RequiredFieldValidator runat="server" ControlToValidate="RecurStart" ValidationGroup="Recurring" Text="Required" CssClass="field-error" Display="Dynamic" /></div>
         <div class="form-group"><label class="form-label" for="<%= RecurFreq.ClientID %>">Frequency</label>
-          <asp:DropDownList ID="RecurFreq" runat="server" CssClass="form-select"><asp:ListItem Value="7">Weekly</asp:ListItem><asp:ListItem Value="14">Bi-weekly</asp:ListItem><asp:ListItem Value="30">Monthly</asp:ListItem></asp:DropDownList></div>
-        <div class="form-group"><label class="form-label" for="<%= RecurCount.ClientID %>">Number of appointments</label><asp:TextBox ID="RecurCount" runat="server" CssClass="form-control" TextMode="Number" Text="4" />
+          <asp:DropDownList ID="RecurFreq" runat="server" CssClass="form-select"><asp:ListItem Value="7">Weekly</asp:ListItem><asp:ListItem Value="14">Bi-Weekly</asp:ListItem><asp:ListItem Value="30">Monthly</asp:ListItem></asp:DropDownList></div>
+        <div class="form-group"><label class="form-label" for="<%= RecurCount.ClientID %>">Number Of Appointments</label><asp:TextBox ID="RecurCount" runat="server" CssClass="form-control" TextMode="Number" Text="4" />
           <asp:RangeValidator runat="server" ControlToValidate="RecurCount" ValidationGroup="Recurring" Type="Integer" MinimumValue="2" MaximumValue="12" Text="2–12" CssClass="field-error" Display="Dynamic" /></div>
         <div class="form-group"><label class="form-label" for="<%= RecurType.ClientID %>">Type</label><asp:DropDownList ID="RecurType" runat="server" CssClass="form-select" /></div>
       </div>
     </div>
     <div class="modal-footer">
       <asp:LinkButton runat="server" CssClass="btn btn--ghost" OnClick="CloseModals_Click" CausesValidation="false">Cancel</asp:LinkButton>
-      <asp:LinkButton ID="ConfirmRecurringButton" runat="server" CssClass="btn btn--primary" ValidationGroup="Recurring" OnClick="ConfirmRecurringButton_Click">Create series</asp:LinkButton>
+      <asp:LinkButton ID="ConfirmRecurringButton" runat="server" CssClass="btn btn--primary" ValidationGroup="Recurring" OnClick="ConfirmRecurringButton_Click">Create Series</asp:LinkButton>
     </div>
   </div>
 </asp:Panel>

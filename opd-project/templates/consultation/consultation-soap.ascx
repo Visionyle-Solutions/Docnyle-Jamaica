@@ -12,7 +12,7 @@
     <asp:PlaceHolder ID="VoiceHolder" runat="server">
       <div style="display:flex; gap:8px; margin-bottom:8px;">
         <button class="btn btn--sm" id="voiceDictateBtn" type="button" style="background:var(--surface-page);" onclick="Consult360.toggleVoice();">
-          <i class="ti ti-microphone" aria-hidden="true"></i> <span id="voiceBtnLabel">Start dictation</span>
+          <i class="ti ti-microphone" aria-hidden="true"></i> <span id="voiceBtnLabel">Start Dictation</span>
         </button>
         <span id="voiceStatus" class="text-xs text-muted" style="align-self:center;"></span>
       </div>
@@ -20,14 +20,14 @@
 
     <asp:PlaceHolder ID="SubjectiveHolder" runat="server">
     <div class="form-group mb-3">
-      <label class="form-label" for="soapSubjective">Subjective <span class="text-muted">(patient's own words)</span></label>
+      <label class="form-label" for="soapSubjective">Subjective <span class="text-muted">(Patient's Own Words)</span></label>
       <asp:PlaceHolder ID="ChipsSHolder" runat="server">
-      <div class="text-xs text-muted mb-1"><i class="ti ti-sparkles" aria-hidden="true" style="color:var(--color-primary);"></i> Quick phrases — tap to insert:</div>
+      <div class="text-xs text-muted mb-1"><i class="ti ti-sparkles" aria-hidden="true" style="color:var(--color-primary);"></i> Quick Phrases — Tap To Insert:</div>
       <div class="phrase-chip-row"><asp:Literal ID="ChipsS" runat="server" /></div>
       </asp:PlaceHolder>
       <asp:TextBox ID="soapSubjective" runat="server" ClientIDMode="Static" CssClass="form-control" TextMode="MultiLine" style="min-height:50px;" placeholder="What is the patient telling you? Duration, severity, what makes it better/worse... (phrase chips insert here, or type /trigger)" />
       <asp:PlaceHolder ID="SubjectivePersonalHolder" runat="server">
-      <div class="text-xs mt-1" style="color:var(--color-warning); font-weight:600;"><i class="ti ti-pencil" aria-hidden="true"></i> Free text — your own words (required):</div>
+      <div class="text-xs mt-1" style="color:var(--color-warning); font-weight:600;"><i class="ti ti-pencil" aria-hidden="true"></i> Free Text — Your Own Words (Required):</div>
       <asp:TextBox ID="SubjectivePersonal" runat="server" CssClass="form-control mt-1" placeholder="What's different about this patient's complaint?" />
       </asp:PlaceHolder>
     </div>
@@ -35,14 +35,14 @@
 
     <asp:PlaceHolder ID="ObjectiveHolder" runat="server">
     <div class="form-group mb-3">
-      <label class="form-label" for="soapObjective">Objective <span class="text-muted">(examination findings)</span></label>
+      <label class="form-label" for="soapObjective">Objective <span class="text-muted">(Examination Findings)</span></label>
       <asp:PlaceHolder ID="ChipsOHolder" runat="server">
-      <div class="text-xs text-muted mb-1"><i class="ti ti-sparkles" aria-hidden="true" style="color:var(--color-primary);"></i> Quick phrases — tap to insert:</div>
+      <div class="text-xs text-muted mb-1"><i class="ti ti-sparkles" aria-hidden="true" style="color:var(--color-primary);"></i> Quick Phrases — Tap To Insert:</div>
       <div class="phrase-chip-row"><asp:Literal ID="ChipsO" runat="server" /></div>
       </asp:PlaceHolder>
       <asp:TextBox ID="soapObjective" runat="server" ClientIDMode="Static" CssClass="form-control" TextMode="MultiLine" style="min-height:50px;" placeholder="Examination findings, relevant negatives... (phrase chips insert here, or type /trigger)" />
       <asp:PlaceHolder ID="ObjectivePersonalHolder" runat="server">
-      <div class="text-xs mt-1" style="color:var(--color-warning); font-weight:600;"><i class="ti ti-pencil" aria-hidden="true"></i> Free text — your own words (required):</div>
+      <div class="text-xs mt-1" style="color:var(--color-warning); font-weight:600;"><i class="ti ti-pencil" aria-hidden="true"></i> Free Text — Your Own Words (Required):</div>
       <asp:TextBox ID="ObjectivePersonal" runat="server" CssClass="form-control mt-1" placeholder="What stands out on examination for this patient?" />
       </asp:PlaceHolder>
     </div>
@@ -52,12 +52,12 @@
     <div class="form-group mb-3">
       <label class="form-label" for="soapPlan">Plan</label>
       <asp:PlaceHolder ID="ChipsPHolder" runat="server">
-      <div class="text-xs text-muted mb-1"><i class="ti ti-sparkles" aria-hidden="true" style="color:var(--color-primary);"></i> Quick phrases — tap to insert:</div>
+      <div class="text-xs text-muted mb-1"><i class="ti ti-sparkles" aria-hidden="true" style="color:var(--color-primary);"></i> Quick Phrases — Tap To Insert:</div>
       <div class="phrase-chip-row"><asp:Literal ID="ChipsP" runat="server" /></div>
       </asp:PlaceHolder>
       <asp:TextBox ID="soapPlan" runat="server" ClientIDMode="Static" CssClass="form-control" TextMode="MultiLine" style="min-height:50px;" placeholder="Treatment plan, lifestyle advice, follow-up timeline... (phrase chips insert here, or type /trigger)" />
       <asp:PlaceHolder ID="PlanPersonalHolder" runat="server">
-      <div class="text-xs mt-1" style="color:var(--color-warning); font-weight:600;"><i class="ti ti-pencil" aria-hidden="true"></i> Free text — your own words (required):</div>
+      <div class="text-xs mt-1" style="color:var(--color-warning); font-weight:600;"><i class="ti ti-pencil" aria-hidden="true"></i> Free Text — Your Own Words (Required):</div>
       <asp:TextBox ID="PlanPersonal" runat="server" CssClass="form-control mt-1" placeholder="Why this treatment for this patient?" />
       </asp:PlaceHolder>
     </div>
@@ -66,13 +66,13 @@
     <asp:PlaceHolder ID="ActionsHolder" runat="server">
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <asp:LinkButton ID="SaveSoapButton" runat="server" CssClass="btn btn--sm btn--primary" OnClick="SaveSoapButton_Click">
-          <i class="ti ti-device-floppy" aria-hidden="true"></i> Save observations
+          <i class="ti ti-device-floppy" aria-hidden="true"></i> Save Observations
         </asp:LinkButton>
         <asp:LinkButton ID="AutoGenerateButton" runat="server" CssClass="btn btn--sm" style="background:var(--color-warning-bg); color:var(--color-warning);" OnClick="AutoGenerateButton_Click">
           <i class="ti ti-sparkles" aria-hidden="true"></i> Auto-Generate SOAP
         </asp:LinkButton>
         <asp:LinkButton ID="ShowSavePhraseButton" runat="server" CssClass="btn btn--sm btn--ghost" OnClick="ShowSavePhraseButton_Click">
-          <i class="ti ti-bookmark" aria-hidden="true"></i> Save a phrase
+          <i class="ti ti-bookmark" aria-hidden="true"></i> Save A Phrase
         </asp:LinkButton>
       </div>
     </asp:PlaceHolder>
@@ -86,36 +86,36 @@
       <div class="form-group"><label class="form-label" for="<%= DraftP.ClientID %>">Plan</label><asp:TextBox ID="DraftP" runat="server" CssClass="form-control" TextMode="MultiLine" style="min-height:80px;" /></div>
       <p class="text-xs text-muted">Review and edit before accepting. This is a draft — you have full control. The assessment is added to the Objective note.</p>
       <div style="display:flex; gap:8px;">
-        <asp:LinkButton ID="AcceptDraftButton" runat="server" CssClass="btn btn--sm btn--success" OnClick="AcceptDraftButton_Click">Accept &amp; fill</asp:LinkButton>
+        <asp:LinkButton ID="AcceptDraftButton" runat="server" CssClass="btn btn--sm btn--success" OnClick="AcceptDraftButton_Click">Accept &amp; Fill</asp:LinkButton>
         <asp:LinkButton ID="CancelDraftButton" runat="server" CssClass="btn btn--sm btn--ghost" OnClick="CancelDraftButton_Click">Cancel</asp:LinkButton>
       </div>
     </asp:Panel>
 
     <%-- Save a personal phrase (doctor scope) --%>
     <asp:Panel ID="SavePhrasePanel" runat="server" CssClass="card mt-3" Visible="false" DefaultButton="SavePhraseButton">
-      <div class="text-sm" style="font-weight:600; margin-bottom:8px;"><i class="ti ti-bookmark" aria-hidden="true"></i> Save to my phrase library</div>
+      <div class="text-sm" style="font-weight:600; margin-bottom:8px;"><i class="ti ti-bookmark" aria-hidden="true"></i> Save To My Phrase Library</div>
       <div class="form-grid">
         <div class="form-group">
           <label class="form-label" for="<%= PhraseSection.ClientID %>">Section</label>
           <asp:DropDownList ID="PhraseSection" runat="server" CssClass="form-select">
             <asp:ListItem Value="S">Subjective</asp:ListItem><asp:ListItem Value="O">Objective</asp:ListItem>
-            <asp:ListItem Value="P">Plan</asp:ListItem><asp:ListItem Value="ANY">Any section</asp:ListItem>
+            <asp:ListItem Value="P">Plan</asp:ListItem><asp:ListItem Value="ANY">Any Section</asp:ListItem>
           </asp:DropDownList>
         </div>
         <div class="form-group">
-          <label class="form-label" for="<%= PhraseTrigger.ClientID %>">Trigger (starts with /)</label>
+          <label class="form-label" for="<%= PhraseTrigger.ClientID %>">Trigger (Starts With /)</label>
           <asp:TextBox ID="PhraseTrigger" runat="server" CssClass="form-control" placeholder="/keyword" MaxLength="20" />
           <asp:RegularExpressionValidator runat="server" ControlToValidate="PhraseTrigger" ValidationGroup="Phrase" ValidationExpression="^/?[A-Za-z0-9_]{2,19}$" Text="Letters/digits only, 2-19 characters" CssClass="field-error" Display="Dynamic" />
           <asp:RequiredFieldValidator runat="server" ControlToValidate="PhraseTrigger" ValidationGroup="Phrase" Text="Required" CssClass="field-error" Display="Dynamic" />
         </div>
         <div class="form-group form-group--full">
-          <label class="form-label" for="<%= PhraseText.ClientID %>">Phrase text</label>
+          <label class="form-label" for="<%= PhraseText.ClientID %>">Phrase Text</label>
           <asp:TextBox ID="PhraseText" runat="server" CssClass="form-control" TextMode="MultiLine" />
           <asp:RequiredFieldValidator runat="server" ControlToValidate="PhraseText" ValidationGroup="Phrase" Text="Required" CssClass="field-error" Display="Dynamic" />
         </div>
       </div>
       <div style="display:flex; gap:8px;">
-        <asp:LinkButton ID="SavePhraseButton" runat="server" CssClass="btn btn--sm btn--primary" ValidationGroup="Phrase" OnClick="SavePhraseButton_Click">Save phrase</asp:LinkButton>
+        <asp:LinkButton ID="SavePhraseButton" runat="server" CssClass="btn btn--sm btn--primary" ValidationGroup="Phrase" OnClick="SavePhraseButton_Click">Save Phrase</asp:LinkButton>
         <asp:LinkButton ID="CancelPhraseButton" runat="server" CssClass="btn btn--sm btn--ghost" CausesValidation="false" OnClick="CancelPhraseButton_Click">Cancel</asp:LinkButton>
       </div>
     </asp:Panel>
@@ -126,13 +126,13 @@
         <i class="ti ti-writing" aria-hidden="true" style="color:var(--color-primary);"></i>
         <strong class="text-sm">Sketches &amp; Handwritten Notes</strong>
         <asp:PlaceHolder ID="PadToggleHolder" runat="server">
-          <button class="btn btn--xs btn--ghost" type="button" onclick="Consult360.toggleDrawingPad();"><i class="ti ti-pencil-plus" aria-hidden="true"></i> Open drawing pad</button>
+          <button class="btn btn--xs btn--ghost" type="button" onclick="Consult360.toggleDrawingPad();"><i class="ti ti-pencil-plus" aria-hidden="true"></i> Open Drawing Pad</button>
         </asp:PlaceHolder>
       </div>
       <div id="drawingPadContainer"></div>
       <input type="hidden" id="sketchData" name="sketchData" />
       <input type="hidden" id="sketchTitle" name="sketchTitle" />
-      <asp:LinkButton ID="SaveSketchButton" runat="server" OnClick="SaveSketchButton_Click" style="display:none;" CausesValidation="false">save sketch</asp:LinkButton>
+      <asp:LinkButton ID="SaveSketchButton" runat="server" OnClick="SaveSketchButton_Click" style="display:none;" CausesValidation="false">Save Sketch</asp:LinkButton>
       <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;">
         <asp:Repeater ID="SketchesRepeater" runat="server" ItemType="OpdProject.Models.ConsultationSketch">
           <ItemTemplate>

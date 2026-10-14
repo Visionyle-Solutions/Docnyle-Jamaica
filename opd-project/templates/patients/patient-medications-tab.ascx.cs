@@ -98,7 +98,7 @@ namespace OpdProject.templates.patients
             EditingId.Value = "";
             MedicineInput.Text = StrengthInput.Text = DoseInput.Text = SinceInput.Text = SourceInput.Text = NotesInput.Text = "";
             FormInput.SelectedIndex = FrequencyInput.SelectedIndex = 0;
-            FormTitle.Text = "Add outside medication";
+            FormTitle.Text = "Add Outside Medication";
             SaveButton.Text = "Add";
             AllergyAlertPanel.Visible = false;
         }
@@ -129,7 +129,7 @@ namespace OpdProject.templates.patients
             SinceInput.Text = p.PeriodStart.HasValue ? p.PeriodStart.Value.ToString("yyyy-MM") : "";
             SourceInput.Text = p.SourceDetail;
             NotesInput.Text = p.Instructions;
-            FormTitle.Text = "Edit outside medication";
+            FormTitle.Text = "Edit Outside Medication";
             SaveButton.Text = "Update";
             AllergyAlertPanel.Visible = false;
         }

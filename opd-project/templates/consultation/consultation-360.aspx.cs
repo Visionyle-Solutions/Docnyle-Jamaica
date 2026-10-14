@@ -112,7 +112,7 @@ namespace OpdProject.templates.consultation
             var todays = appointments.FirstOrDefault(a => a.PatientId == Patient.PatientId);
             VisitBadgeHtml = todays == null ? "<span class=\"c360-badge c360-badge--routine\">🟢 Routine Outpatient</span>"
                 : todays.Type == "NEW" ? "<span class=\"c360-badge c360-badge--routine\">🟢 New Patient</span>"
-                : todays.Type == "FOLLOWUP" ? "<span class=\"c360-badge c360-badge--info\">🔵 Follow-up</span>"
+                : todays.Type == "FOLLOWUP" ? "<span class=\"c360-badge c360-badge--info\">🔵 Follow-Up</span>"
                 : "<span class=\"c360-badge c360-badge--info\">" + HttpUtility.HtmlEncode(todays.Type) + "</span>";
             BindWorklist(appointments);
 
@@ -148,7 +148,7 @@ namespace OpdProject.templates.consultation
                 IsActive = a.PatientId == Patient.PatientId,
                 Initials = string.Concat(a.PatientName.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => char.ToUpperInvariant(w[0]))),
             }).ToList();
-            WorklistCount.Text = rows.Count + " patient" + (rows.Count == 1 ? "" : "s");
+            WorklistCount.Text = rows.Count + " Patient" + (rows.Count == 1 ? "" : "s");
             WorklistEmpty.Visible = rows.Count == 0;
             WorklistRepeater.DataSource = rows;
             WorklistRepeater.DataBind();
@@ -214,11 +214,11 @@ namespace OpdProject.templates.consultation
                 { "complaints", string.Join(", ", states.Where(kv => kv.Value == "YES").Select(kv => ConsultationService.SymptomLabel(HospitalId, kv.Key))) },
                 { "diagnosis", string.Join(", ", dx.Select(d => d.Icd10Code)) },
                 { "soap", string.IsNullOrEmpty(c.SubjectiveText) ? "" : (c.SubjectiveText.Length > 40 ? c.SubjectiveText.Substring(0, 40) + "..." : c.SubjectiveText) },
-                { "labs", orders.Count > 0 ? orders.Count + " ordered" : c.SkippedSteps.Contains("labs") ? "not needed" : "" },
-                { "cpoe", meds.Count > 0 ? meds.Count + " prescribed" : "" },
-                { "referral", refs.Count > 0 ? refs[0].Specialty : c.SkippedSteps.Contains("referral") ? "not needed" : "" },
-                { "followup", c.FollowupDate.HasValue ? FmtDate(c.FollowupDate.Value) : c.SkippedSteps.Contains("followup") ? "not needed" : "" },
-                { "notes", ConsultationService.GetConfidentialNote(cid, UserId) != null ? "saved" : "" },
+                { "labs", orders.Count > 0 ? orders.Count + " Ordered" : c.SkippedSteps.Contains("labs") ? "Not Needed" : "" },
+                { "cpoe", meds.Count > 0 ? meds.Count + " Prescribed" : "" },
+                { "referral", refs.Count > 0 ? refs[0].Specialty : c.SkippedSteps.Contains("referral") ? "Not Needed" : "" },
+                { "followup", c.FollowupDate.HasValue ? FmtDate(c.FollowupDate.Value) : c.SkippedSteps.Contains("followup") ? "Not Needed" : "" },
+                { "notes", ConsultationService.GetConfidentialNote(cid, UserId) != null ? "Saved" : "" },
             };
             var state = new Dictionary<string, string>
             {
@@ -246,7 +246,7 @@ namespace OpdProject.templates.consultation
                 {
                     Key = s.Key, Label = s.Label, Icon = s.Icon, Mandatory = fields.Any(f => f.RequiredAtSignOff),
                     State = filled > 0 && !missingRequired ? "completed" : "pending",
-                    Summary = filled > 0 ? filled + " of " + fields.Count + " filled" : "",
+                    Summary = filled > 0 ? filled + " Of " + fields.Count + " Filled" : "",
                 };
             }
         }
@@ -352,7 +352,7 @@ namespace OpdProject.templates.consultation
             WorkflowStep s;
             if (!_steps.TryGetValue(key, out s)) return "<div><div>";
             var badge = s.State == "completed" ? "<span class=\"c360-badge c360-badge--routine\">✓ Complete</span>"
-                : s.State == "skipped" ? "<span class=\"c360-badge c360-badge--muted\">Not needed</span>"
+                : s.State == "skipped" ? "<span class=\"c360-badge c360-badge--muted\">Not Needed</span>"
                 : s.Mandatory ? "<span class=\"c360-badge c360-badge--warn\">Required</span>" : "";
             return "<div class=\"c360-card c360-card--" + s.State + "\" id=\"card-" + key + "\" data-step=\"" + key + "\">"
                 + "<div class=\"c360-card-head\"><span class=\"c360-card-title\"><i class=\"ti " + s.Icon + "\" aria-hidden=\"true\"></i> " + HttpUtility.HtmlEncode(s.Label) + "</span>"
@@ -383,7 +383,7 @@ namespace OpdProject.templates.consultation
             var workflow = OrderedSteps().Where(s => s.Key != "notes").ToList();
             var done = workflow.Count(s => s.State == "completed" || s.State == "skipped");
             ProgressPercent = workflow.Count == 0 ? 0 : done * 100 / workflow.Count;
-            ProgressText.Text = done + " of " + workflow.Count + " sections complete";
+            ProgressText.Text = done + " Of " + workflow.Count + " Sections Complete";
             var missing = IsLocked ? new List<string>() : MissingMandatory();
             RequiredMissingHolder.Visible = missing.Count > 0;
             RequiredMissingText.Text = HttpUtility.HtmlEncode(string.Join(", ", missing));
@@ -457,7 +457,7 @@ namespace OpdProject.templates.consultation
                 + (primary != null ? primary.Icd10Code + " " + primary.Icd10Description : "not recorded"));
             var contradictions = Contradictions();
             ContradictionsHolder.Visible = contradictions.Count > 0;
-            ContradictionCount.Text = contradictions.Count + " issue" + (contradictions.Count > 1 ? "s" : "");
+            ContradictionCount.Text = contradictions.Count + " Issue" + (contradictions.Count > 1 ? "s" : "");
             ContradictionsRepeater.DataSource = contradictions;
             ContradictionsRepeater.DataBind();
             var mandatory = MissingMandatory();

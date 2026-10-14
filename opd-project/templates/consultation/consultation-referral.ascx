@@ -4,14 +4,14 @@
     <asp:Panel ID="FormPanel" runat="server" DefaultButton="AddReferralButton">
       <div class="form-grid">
         <div class="form-group">
-          <label class="form-label" for="<%= ReferralSpecialty.ClientID %>">Refer to specialty <span class="required">*</span></label>
+          <label class="form-label" for="<%= ReferralSpecialty.ClientID %>">Refer To Specialty <span class="required">*</span></label>
           <asp:TextBox ID="ReferralSpecialty" runat="server" CssClass="form-control" placeholder="e.g. Cardiology, Neurology" MaxLength="80" />
           <asp:RequiredFieldValidator runat="server" ControlToValidate="ReferralSpecialty" ValidationGroup="Referral" Text="Specialty is required" CssClass="field-error" Display="Dynamic" />
         </div>
         <asp:PlaceHolder ID="DoctorNameHolder" runat="server">
         <div class="form-group">
-          <label class="form-label" for="<%= ReferralDoctorName.ClientID %>">Doctor name (optional)</label>
-          <asp:TextBox ID="ReferralDoctorName" runat="server" CssClass="form-control" placeholder="Specific doctor if known" MaxLength="80" />
+          <label class="form-label" for="<%= ReferralDoctorName.ClientID %>">Doctor Name (Optional)</label>
+          <asp:TextBox ID="ReferralDoctorName" runat="server" CssClass="form-control" placeholder="Specific Doctor If Known" MaxLength="80" />
         </div>
         </asp:PlaceHolder>
         <asp:PlaceHolder ID="UrgencyHolder" runat="server">
@@ -25,12 +25,12 @@
         </asp:PlaceHolder>
         <div class="form-group">
           <label class="form-label" for="<%= ReferralReason.ClientID %>">Reason <span class="required">*</span></label>
-          <asp:TextBox ID="ReferralReason" runat="server" CssClass="form-control" placeholder="Reason for referral" MaxLength="250" />
+          <asp:TextBox ID="ReferralReason" runat="server" CssClass="form-control" placeholder="Reason For Referral" MaxLength="250" />
           <asp:RequiredFieldValidator runat="server" ControlToValidate="ReferralReason" ValidationGroup="Referral" Text="Reason is required" CssClass="field-error" Display="Dynamic" />
         </div>
       </div>
-      <asp:LinkButton ID="AddReferralButton" runat="server" CssClass="btn btn--sm btn--success" ValidationGroup="Referral" OnClick="AddReferralButton_Click">Add referral</asp:LinkButton>
-      <asp:LinkButton ID="SkipReferralButton" runat="server" CssClass="btn btn--xs btn--ghost ml-2" CausesValidation="false" OnClick="SkipReferralButton_Click">Not needed</asp:LinkButton>
+      <asp:LinkButton ID="AddReferralButton" runat="server" CssClass="btn btn--sm btn--success" ValidationGroup="Referral" OnClick="AddReferralButton_Click">Add Referral</asp:LinkButton>
+      <asp:LinkButton ID="SkipReferralButton" runat="server" CssClass="btn btn--xs btn--ghost ml-2" CausesValidation="false" OnClick="SkipReferralButton_Click">Not Needed</asp:LinkButton>
     </asp:Panel>
     <div class="mt-2">
       <asp:Repeater ID="ReferralsRepeater" runat="server" ItemType="OpdProject.Models.Referral">

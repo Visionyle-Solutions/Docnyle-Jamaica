@@ -2,7 +2,7 @@
 <%-- Health record → Medical History: chronic conditions and surgeries/medical events, with an add/edit form. --%>
 <div class="split-layout">
   <div class="split-main">
-    <div class="record-section-title"><span>Chronic conditions</span></div>
+    <div class="record-section-title"><span>Chronic Conditions</span></div>
     <table class="data-table">
       <thead>
         <tr><th scope="col">Condition</th><th scope="col">Since</th><th scope="col">Status</th><th scope="col">Notes</th><th scope="col">Recorded</th><th scope="col">Actions</th></tr>
@@ -13,7 +13,7 @@
             <tr>
               <td><strong><%#: ConditionLabel(Item) %></strong></td>
               <td><%#: SinceLabel(Item.OnsetMonth, Item.OnsetYear) %></td>
-              <td><span class="badge <%#: StatusBadge(Item.Status) %>"><%#: Item.Status ?? "ACTIVE" %></span></td>
+              <td><span class="badge <%#: StatusBadge(Item.Status) %>"><%#: OpdProject.Web.BasePage.TitleCase(Item.Status ?? "ACTIVE") %></span></td>
               <td><%#: Item.ConditionName == "OTHER" || string.IsNullOrEmpty(Item.Notes) ? "—" : Item.Notes %></td>
               <td class="text-xs text-muted"><%#: RecordedLabel(Item.RecordedByUserId, Item.RecordedAt) %></td>
               <td style="white-space:nowrap;">
@@ -28,7 +28,7 @@
       </tbody>
     </table>
 
-    <div class="record-section-title"><span>Surgeries &amp; medical events</span></div>
+    <div class="record-section-title"><span>Surgeries &amp; Medical Events</span></div>
     <table class="data-table">
       <thead>
         <tr><th scope="col">Event</th><th scope="col">When</th><th scope="col">Notes</th><th scope="col">Recorded</th><th scope="col">Actions</th></tr>
@@ -58,9 +58,9 @@
     <asp:Panel ID="FormPanel" runat="server" CssClass="card form-grid" DefaultButton="SaveButton">
       <asp:HiddenField ID="EditingId" runat="server" />
       <asp:HiddenField ID="EditingKind" runat="server" />
-      <div class="form-group form-group--full" style="font-weight:700;"><asp:Literal ID="FormTitle" runat="server" Text="Add to medical history" /></div>
+      <div class="form-group form-group--full" style="font-weight:700;"><asp:Literal ID="FormTitle" runat="server" Text="Add To Medical History" /></div>
       <div class="form-group form-group--full">
-        <span class="form-label">Record type <span class="required">*</span></span>
+        <span class="form-label">Record Type <span class="required">*</span></span>
         <asp:RadioButtonList ID="RecordType" runat="server" RepeatLayout="Flow" RepeatDirection="Horizontal" CssClass="form-radio-group" AutoPostBack="true" OnSelectedIndexChanged="RecordType_SelectedIndexChanged">
           <asp:ListItem Value="CONDITION" Selected="True"> Chronic Condition</asp:ListItem>
           <asp:ListItem Value="EVENT"> Surgery / Event</asp:ListItem>
@@ -71,16 +71,16 @@
         <asp:DropDownList ID="NamePick" runat="server" CssClass="form-select" />
       </div>
       <div class="form-group">
-        <label class="form-label" for="<%= NameOther.ClientID %>">Or type a name</label>
-        <asp:TextBox ID="NameOther" runat="server" CssClass="form-control" MaxLength="100" placeholder="Not in the list" />
+        <label class="form-label" for="<%= NameOther.ClientID %>">Or Type A Name</label>
+        <asp:TextBox ID="NameOther" runat="server" CssClass="form-control" MaxLength="100" placeholder="Not In The List" />
         <asp:CustomValidator ID="NameValidator" runat="server" ValidationGroup="MedHistory" OnServerValidate="NameValidator_ServerValidate" Text="Pick from the list or type a name" CssClass="field-error" Display="Dynamic" />
       </div>
       <div class="form-group">
-        <label class="form-label" for="<%= SinceMonth.ClientID %>">Since (month)</label>
+        <label class="form-label" for="<%= SinceMonth.ClientID %>"><%: IsEvent ? "When" : "Since" %> (Month)</label>
         <asp:DropDownList ID="SinceMonth" runat="server" CssClass="form-select" />
       </div>
       <div class="form-group">
-        <label class="form-label" for="<%= SinceYear.ClientID %>">Since (year)</label>
+        <label class="form-label" for="<%= SinceYear.ClientID %>"><%: IsEvent ? "When" : "Since" %> (Year)</label>
         <asp:DropDownList ID="SinceYear" runat="server" CssClass="form-select" />
       </div>
       <asp:PlaceHolder ID="StatusHolder" runat="server">

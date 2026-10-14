@@ -20,7 +20,7 @@
 <asp:Content ContentPlaceHolderID="MainContent" runat="server">
   <asp:PlaceHolder ID="NotFound" runat="server" Visible="false"><uc:ErrorState ID="NotFoundMessage" runat="server" /></asp:PlaceHolder>
   <asp:PlaceHolder ID="Workspace" runat="server">
-  <div class="c360" id="c360" data-scroll-to="<%: ScrollTarget %>">
+  <div class="c360 titlecase-headings" id="c360" data-scroll-to="<%: ScrollTarget %>">
     <div class="c360-rainbow"></div>
 
     <%-- Topbar --%>
@@ -37,7 +37,7 @@
         </asp:LinkButton>
       </asp:PlaceHolder>
       <asp:PlaceHolder ID="LockedBadgeHolder" runat="server" Visible="false">
-        <a class="c360-badge c360-badge--routine" href="#card-signoff" data-step="signoff"><i class="ti ti-lock" aria-hidden="true"></i> Signed &amp; locked</a>
+        <a class="c360-badge c360-badge--routine" href="#card-signoff" data-step="signoff"><i class="ti ti-lock" aria-hidden="true"></i> Signed &amp; Locked</a>
       </asp:PlaceHolder>
     </div>
 
@@ -122,7 +122,7 @@
               <div class="c360-card c360-card--completed" id="card-signoff" data-step="signoff">
                 <div class="c360-card-head"><span class="c360-card-title"><i class="ti ti-lock" aria-hidden="true"></i> Signed &amp; Locked</span><span class="c360-badge c360-badge--routine">Complete</span></div>
                 <div class="c360-card-body">
-                  <asp:HyperLink ID="BillingLink" runat="server" CssClass="btn btn--primary" style="width:100%; justify-content:center;"><i class="ti ti-file-invoice" aria-hidden="true"></i> Proceed to billing</asp:HyperLink>
+                  <asp:HyperLink ID="BillingLink" runat="server" CssClass="btn btn--primary" style="width:100%; justify-content:center;"><i class="ti ti-file-invoice" aria-hidden="true"></i> Proceed To Billing</asp:HyperLink>
                   <asp:PlaceHolder ID="PrintHolder" runat="server">
                     <div class="c360-print-grid">
                       <a class="btn btn--sm" target="_blank" href="<%: Urls.Print("prescription", ConsultationIdValue) %>"><i class="ti ti-printer" aria-hidden="true"></i> Print Rx</a>
@@ -152,9 +152,9 @@
                         <asp:ListItem Value="CLINICAL_NOTE">Additional Clinical Note</asp:ListItem>
                       </asp:DropDownList>
                     </div>
-                    <asp:TextBox ID="AddendumText" runat="server" CssClass="form-control" TextMode="MultiLine" style="min-height:60px;" placeholder="Type correction or additional note..." />
+                    <asp:TextBox ID="AddendumText" runat="server" CssClass="form-control" TextMode="MultiLine" style="min-height:60px;" placeholder="Type Correction Or Additional Note..." />
                     <asp:RequiredFieldValidator runat="server" ControlToValidate="AddendumText" ValidationGroup="Addendum" Text="Enter addendum text" CssClass="field-error" Display="Dynamic" />
-                    <asp:LinkButton ID="SaveAddendumButton" runat="server" CssClass="btn btn--sm btn--warning mt-2" ValidationGroup="Addendum" OnClick="SaveAddendumButton_Click"><i class="ti ti-plus" aria-hidden="true"></i> Add addendum</asp:LinkButton>
+                    <asp:LinkButton ID="SaveAddendumButton" runat="server" CssClass="btn btn--sm btn--warning mt-2" ValidationGroup="Addendum" OnClick="SaveAddendumButton_Click"><i class="ti ti-plus" aria-hidden="true"></i> Add Addendum</asp:LinkButton>
                   </asp:Panel>
                 </div>
               </div>
@@ -166,7 +166,7 @@
             <div class="c360-intel-title"><i class="ti ti-brain" aria-hidden="true"></i> Clinical Intelligence</div>
             <uc:Tier0 ID="Tier0Section" runat="server" />
 
-            <div class="c360-intel-sub">Clinical alerts</div>
+            <div class="c360-intel-sub">Clinical Alerts</div>
             <asp:Repeater ID="IntelAlertsRepeater" runat="server" ItemType="OpdProject.Models.ClinicalAlert">
               <ItemTemplate>
                 <div class="c360-alert c360-alert--<%# Item.Severity == "CRITICAL" ? "danger" : "warning" %>">
@@ -183,7 +183,7 @@
             <div class="c360-progress">
               <div class="c360-progress-label"><asp:Literal ID="ProgressText" runat="server" /></div>
               <div class="c360-progress-track"><div class="c360-progress-fill" style="width:<%: ProgressPercent %>%;"></div></div>
-              <asp:PlaceHolder ID="RequiredMissingHolder" runat="server"><div class="c360-progress-note">Required before sign-off: <asp:Literal ID="RequiredMissingText" runat="server" /></div></asp:PlaceHolder>
+              <asp:PlaceHolder ID="RequiredMissingHolder" runat="server"><div class="c360-progress-note">Required Before Sign-Off: <asp:Literal ID="RequiredMissingText" runat="server" /></div></asp:PlaceHolder>
             </div>
           </aside>
         </div>
@@ -212,22 +212,22 @@
           </asp:PlaceHolder>
           <asp:PlaceHolder ID="MandatoryHolder" runat="server">
             <div class="c360-alert c360-alert--danger">
-              <div><strong>Required sections incomplete:</strong> <asp:Literal ID="MandatoryMissing" runat="server" />
+              <div><strong>Required Sections Incomplete:</strong> <asp:Literal ID="MandatoryMissing" runat="server" />
                 <div class="c360-alert-text">Vitals, complaints, at least one diagnosis and any field marked * are required before sign-off.</div></div>
             </div>
           </asp:PlaceHolder>
           <asp:PlaceHolder ID="PersonalHolder" runat="server">
             <div class="c360-alert c360-alert--warning">
-              <div><i class="ti ti-pencil" aria-hidden="true"></i> <strong>Personal observations missing</strong> for: <asp:Literal ID="PersonalMissing" runat="server" />
+              <div><i class="ti ti-pencil" aria-hidden="true"></i> <strong>Personal Observations Missing</strong> for: <asp:Literal ID="PersonalMissing" runat="server" />
                 <div class="c360-alert-text">These "your own words" fields help document what's specific to this patient.</div>
-                <asp:CheckBox ID="AttestSkipPersonal" runat="server" Text=" I choose to sign off without filling these" CssClass="text-xs" /></div>
+                <asp:CheckBox ID="AttestSkipPersonal" runat="server" Text=" I Choose To Sign Off Without Filling These" CssClass="text-xs" /></div>
             </div>
           </asp:PlaceHolder>
           <p class="text-sm text-secondary mb-3">Confirm you have reviewed each section before signing and locking.</p>
-          <div class="form-group"><asp:CheckBox ID="AttestS" runat="server" Text=" Subjective reviewed" /></div>
-          <div class="form-group"><asp:CheckBox ID="AttestO" runat="server" Text=" Objective reviewed" /></div>
-          <div class="form-group"><asp:CheckBox ID="AttestA" runat="server" Text=" Assessment / Diagnosis reviewed" /></div>
-          <div class="form-group"><asp:CheckBox ID="AttestP" runat="server" Text=" Plan / Prescriptions reviewed" /></div>
+          <div class="form-group"><asp:CheckBox ID="AttestS" runat="server" Text=" Subjective Reviewed" /></div>
+          <div class="form-group"><asp:CheckBox ID="AttestO" runat="server" Text=" Objective Reviewed" /></div>
+          <div class="form-group"><asp:CheckBox ID="AttestA" runat="server" Text=" Assessment / Diagnosis Reviewed" /></div>
+          <div class="form-group"><asp:CheckBox ID="AttestP" runat="server" Text=" Plan / Prescriptions Reviewed" /></div>
           <asp:CustomValidator ID="AttestValidator" runat="server" ValidationGroup="SignOff" OnServerValidate="AttestValidator_ServerValidate" CssClass="field-error" Display="Dynamic" />
         </div>
         <div class="modal-footer">

@@ -33,7 +33,7 @@ namespace OpdProject.templates.consultation
             OtherSymptoms.DataSource = all.Where(c => !quickCodes.Contains(c.Code) && c.State == "UNSET").ToList();
             OtherSymptoms.DataBind();
             ExpandedPanel.Visible = Expanded;
-            MoreToggle.Text = Expanded ? "less" : "...more";
+            MoreToggle.Text = Expanded ? "Less" : "...More";
             CustomHolder.Visible = !Locked;
         }
 

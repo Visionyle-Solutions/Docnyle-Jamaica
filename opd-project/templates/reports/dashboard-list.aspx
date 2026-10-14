@@ -3,7 +3,7 @@
      [&status=CHECKED_IN…]. Same filter as the dashboard counts (ReportService), so the row count matches the tile.
      Route: /dashboard/list --%>
 <asp:Content ContentPlaceHolderID="MainContent" runat="server">
-<div class="page-container page-container--wide">
+<div class="page-container">
   <div class="card mb-3">
     <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
       <a class="btn btn--sm" href="<%: OpdProject.Web.Urls.Dashboard %>" title="Back to dashboard"><i class="ti ti-arrow-left" aria-hidden="true"></i> Dashboard</a>
@@ -45,7 +45,7 @@
                 <asp:HyperLink runat="server" CssClass="btn btn--xs btn--primary" NavigateUrl="<%# OpdProject.Web.Urls.Consultation(Item.PatientId) %>" Visible="<%# CanConsult(Item) %>">
                   <i class="ti ti-stethoscope" aria-hidden="true"></i> <%#: Item.Status == "IN_CONSULT" ? "Continue consultation" : "Start consultation" %>
                 </asp:HyperLink>
-                <a class="btn btn--xs btn--ghost" href="<%#: OpdProject.Web.Urls.Allergies(Item.PatientId) %>">Health record</a>
+                <a class="btn btn--xs" href="<%#: OpdProject.Web.Urls.Allergies(Item.PatientId) %>"><i class="ti ti-clipboard-heart" aria-hidden="true"></i> Health Record</a>
               </td>
             </tr>
           </ItemTemplate>
