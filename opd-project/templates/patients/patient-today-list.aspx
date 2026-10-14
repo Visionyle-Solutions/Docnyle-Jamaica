@@ -57,7 +57,7 @@
         <asp:Repeater ID="AppointmentsRepeater" runat="server" ItemType="OpdProject.Models.AppointmentView" OnItemCommand="AppointmentsRepeater_ItemCommand" ClientIDMode="Predictable">
           <ItemTemplate>
             <tr>
-              <td><%# Container.ItemIndex + 1 %></td>
+              <td><%# RowOffset + Container.ItemIndex + 1 %></td>
               <asp:PlaceHolder runat="server" Visible="<%# !IsToday %>"><td><%#: FmtDate(Item.SlotStart) %></td></asp:PlaceHolder>
               <td><%#: FmtTime(Item.SlotStart) %></td>
               <asp:PlaceHolder runat="server" Visible="<%# ShowDoctor %>"><td><%#: Item.DoctorName %><div class="text-xs text-muted"><%#: Item.DoctorRoom %></div></td></asp:PlaceHolder>
@@ -83,6 +83,19 @@
         </asp:PlaceHolder>
       </tbody>
     </table>
+    <%-- pager: page size on the left, Prev/Next centred, record range on the right --%>
+    <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:12px; align-items:center; margin-top:12px;">
+      <div class="text-sm text-secondary" style="display:flex; gap:8px; align-items:center;">
+        <label class="form-label" for="<%= PageSizeFilter.ClientID %>" style="margin:0;">Show</label>
+        <asp:DropDownList ID="PageSizeFilter" runat="server" CssClass="form-select" AutoPostBack="true" OnSelectedIndexChanged="PageSizeFilter_Changed" style="width:auto;" />
+        <span>records per page</span>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center; justify-content:center;">
+        <asp:LinkButton ID="PrevPageButton" runat="server" CssClass="btn btn--xs" OnClick="PrevPage_Click" aria-label="Previous page"><i class="ti ti-chevron-left" aria-hidden="true"></i> Prev</asp:LinkButton>
+        <asp:LinkButton ID="NextPageButton" runat="server" CssClass="btn btn--xs" OnClick="NextPage_Click" aria-label="Next page">Next <i class="ti ti-chevron-right" aria-hidden="true"></i></asp:LinkButton>
+      </div>
+      <div class="text-sm text-secondary" style="text-align:right;"><asp:Literal ID="PageInfo" runat="server" /></div>
+    </div>
   </div>
 </div>
 </asp:Content>

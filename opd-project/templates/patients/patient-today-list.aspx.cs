@@ -36,6 +36,8 @@ namespace OpdProject.templates.patients
                 KindFilter.Items.Add(new ListItem("Cancelled Consultations", "cancelled"));
                 StatusFilter.Items.Add(new ListItem("All Statuses", ""));
                 foreach (var s in new[] { "BOOKED", "CHECKED_IN", "IN_CONSULT", "COMPLETED", "NO_SHOW" }) StatusFilter.Items.Add(new ListItem(StatusLabel(s), s));
+                foreach (var n in new[] { "10", "25", "50", "100" }) PageSizeFilter.Items.Add(new ListItem(n, n));
+                PageSizeFilter.Items.Add(new ListItem("All", "0"));
 
                 /* dashboard tiles and pie slices link here with ?kind=&period=[&status=]; unknown values fall back to the defaults */
                 Select(KindFilter, Request.QueryString["kind"]);
@@ -70,18 +72,51 @@ namespace OpdProject.templates.patients
 
             /* counts above stay the period's totals; the status filter only narrows the list */
             if (StatusFilter.SelectedValue != "") rows = rows.Where(a => a.Status == StatusFilter.SelectedValue).ToList();
-            AppointmentsRepeater.DataSource = rows;
+
+            /* paging: PageSize 0 = all records; the page index is clamped so a shrinking list never shows an empty page */
+            var size = PageSize;
+            var pages = size == 0 || rows.Count == 0 ? 1 : (rows.Count + size - 1) / size;
+            PageIndex = Math.Max(0, Math.Min(PageIndex, pages - 1));
+            RowOffset = size == 0 ? 0 : PageIndex * size;
+            var pageRows = size == 0 ? rows : rows.Skip(RowOffset).Take(size).ToList();
+
+            AppointmentsRepeater.DataSource = pageRows;
             AppointmentsRepeater.DataBind();
             EmptyRow.Visible = rows.Count == 0;
+
+            PageInfo.Text = rows.Count == 0 ? "" : "Showing " + (RowOffset + 1) + "–" + (RowOffset + pageRows.Count) + " of " + rows.Count;
+            PrevPageButton.Enabled = PageIndex > 0;
+            NextPageButton.Enabled = PageIndex < pages - 1;
+            foreach (var b in new[] { PrevPageButton, NextPageButton }) { if (b.Enabled) b.Style.Remove("opacity"); else b.Style["opacity"] = "0.45"; }
         }
 
-        protected void DoctorFilter_Changed(object sender, EventArgs e) { BindQueue(); }
+        protected int PageSize { get { int n; return int.TryParse(PageSizeFilter.SelectedValue, out n) ? n : 10; } }
 
-        protected void StatusFilter_Changed(object sender, EventArgs e) { BindQueue(); }
+        protected int PageIndex
+        {
+            get { return ViewState["page"] as int? ?? 0; }
+            set { ViewState["page"] = value; }
+        }
 
-        protected void PeriodFilter_Changed(object sender, EventArgs e) { BindQueue(); }
+        /// <summary>Records before the current page, so S.No continues across pages.</summary>
+        protected int RowOffset { get; private set; }
 
-        protected void KindFilter_Changed(object sender, EventArgs e) { BindQueue(); }
+        /* any filter change starts again at the first page */
+        private void Rebind() { PageIndex = 0; BindQueue(); }
+
+        protected void DoctorFilter_Changed(object sender, EventArgs e) { Rebind(); }
+
+        protected void StatusFilter_Changed(object sender, EventArgs e) { Rebind(); }
+
+        protected void PeriodFilter_Changed(object sender, EventArgs e) { Rebind(); }
+
+        protected void KindFilter_Changed(object sender, EventArgs e) { Rebind(); }
+
+        protected void PageSizeFilter_Changed(object sender, EventArgs e) { Rebind(); }
+
+        protected void PrevPage_Click(object sender, EventArgs e) { PageIndex--; BindQueue(); }
+
+        protected void NextPage_Click(object sender, EventArgs e) { PageIndex++; BindQueue(); }
 
         protected void AppointmentsRepeater_ItemCommand(object source, RepeaterCommandEventArgs e)
         {

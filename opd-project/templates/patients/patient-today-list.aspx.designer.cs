@@ -100,5 +100,10 @@ namespace OpdProject.templates.patients
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.PlaceHolder EmptyRow;
+
+        protected global::System.Web.UI.WebControls.DropDownList PageSizeFilter;
+        protected global::System.Web.UI.WebControls.Literal PageInfo;
+        protected global::System.Web.UI.WebControls.LinkButton PrevPageButton;
+        protected global::System.Web.UI.WebControls.LinkButton NextPageButton;
     }
 }
