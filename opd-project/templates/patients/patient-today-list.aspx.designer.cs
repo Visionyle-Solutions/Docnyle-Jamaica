@@ -47,8 +47,13 @@ namespace OpdProject.templates.patients
         protected global::System.Web.UI.WebControls.DropDownList KindFilter;
         protected global::System.Web.UI.WebControls.DropDownList StatusFilter;
 
-        /// <summary>CountBooked control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        /// <summary>
+        /// CountBooked control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
         protected global::System.Web.UI.WebControls.Literal CountBooked;
 
         /// <summary>

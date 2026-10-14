@@ -31,10 +31,10 @@
       </div>
       <div style="flex:1;"></div>
       <div class="text-sm text-secondary" style="display:flex; gap:12px; flex-wrap:wrap;">
-        <span><span class="badge badge--info"><%: StatusLabel("BOOKED") %></span> <asp:Literal ID="CountBooked" runat="server" /></span>
-        <span><span class="badge badge--warning"><%: StatusLabel("CHECKED_IN") %></span> <asp:Literal ID="CountCheckedIn" runat="server" /></span>
-        <span><span class="badge badge--warning"><%: StatusLabel("IN_CONSULT") %></span> <asp:Literal ID="CountInConsult" runat="server" /></span>
-        <span><span class="badge badge--success"><%: StatusLabel("COMPLETED") %></span> <asp:Literal ID="CountCompleted" runat="server" /></span>
+        <span><span class="badge badge--info"><asp:Literal ID="CountBooked" runat="server" /> <%: StatusLabel("BOOKED") %> </span></span>
+        <span><span class="badge badge--warning"><asp:Literal ID="CountCheckedIn" runat="server" /> <%: StatusLabel("CHECKED_IN") %> </span></span>
+        <span><span class="badge badge--warning"><asp:Literal ID="CountInConsult" runat="server" /> <%: StatusLabel("IN_CONSULT") %> </span> </span>
+        <span><span class="badge badge--success"><asp:Literal ID="CountCompleted" runat="server" /> <%: StatusLabel("COMPLETED") %> </span> </span>
       </div>
     </div>
   </div>
