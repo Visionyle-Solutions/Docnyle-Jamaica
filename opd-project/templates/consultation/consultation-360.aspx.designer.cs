@@ -42,15 +42,6 @@ namespace OpdProject.templates.consultation
         protected global::System.Web.UI.WebControls.PlaceHolder Workspace;
 
         /// <summary>
-        /// RxLinkHolder control.
-        /// </summary>
-        /// <remarks>
-        /// Auto-generated field.
-        /// To modify move field declaration from designer file to code-behind file.
-        /// </remarks>
-        protected global::System.Web.UI.WebControls.PlaceHolder RxLinkHolder;
-
-        /// <summary>
         /// SignOffHolder control.
         /// </summary>
         /// <remarks>

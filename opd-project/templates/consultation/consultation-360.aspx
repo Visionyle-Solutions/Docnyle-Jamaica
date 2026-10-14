@@ -30,7 +30,7 @@
       <span class="c360-tb-btn c360-tb-btn--static">Acting as: <strong><%: ActingAs %></strong></span>
       <%= VisitBadgeHtml %>
       <div class="c360-tb-spacer"></div>
-      <asp:PlaceHolder ID="RxLinkHolder" runat="server"><a class="c360-tb-btn" href="#card-cpoe" data-step="cpoe"><i class="ti ti-prescription" aria-hidden="true"></i> Prescription</a></asp:PlaceHolder>
+      
       <asp:PlaceHolder ID="SignOffHolder" runat="server">
         <asp:LinkButton ID="OpenSignOffButton" runat="server" CssClass="c360-tb-btn c360-tb-btn--teal" OnClick="OpenSignOffButton_Click" CausesValidation="false">
           <i class="ti ti-signature" aria-hidden="true"></i> Sign &amp; Complete
