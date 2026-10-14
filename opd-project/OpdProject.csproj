@@ -504,6 +504,7 @@
     </Compile>
   </ItemGroup>
   <ItemGroup>
+    <Content Include="assets\Medcity.png" />
     <Content Include="Global.asax" />
     <Content Include="Site.Master" />
     <Content Include="Web.config" />

@@ -7,7 +7,7 @@
   <div class="card mb-3">
     <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
       <div>
-        <div style="font-weight:700;">Today's Patients</div>
+        <div style="font-weight:700;">Appointment Summary</div>
         <div class="text-xs text-muted"><asp:Literal ID="SubtitleText" runat="server" /></div>
       </div>
       <asp:PlaceHolder ID="DoctorFilterHolder" runat="server">

@@ -3,7 +3,7 @@
 <div style="display:flex; justify-content:center; align-items:center; min-height:80vh;">
   <asp:Panel ID="LoginCard" runat="server" CssClass="card" style="width:400px; padding:32px;" DefaultButton="SignInButton">
     <div style="text-align:center; margin-bottom:20px;">
-      <img src="<%: ResolveUrl("~/assets/logo.png") %>" alt="Consult360" style="max-height:90px; margin-bottom:8px;" />
+      <img src="<%: ResolveUrl("~/assets/Medcity.png") %>" alt="Consult360" style="max-height:90px; margin-bottom:8px;" />
       <div style="font-size:16px; font-weight:600; margin:8px 0 2px;"><asp:Literal ID="HospitalNameText" runat="server" /></div>
       <div class="text-xs text-muted"><asp:Literal ID="HospitalAddressText" runat="server" /></div>
       <div class="text-sm text-secondary" style="margin-top:12px;">Sign in to continue</div>

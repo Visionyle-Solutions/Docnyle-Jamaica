@@ -68,8 +68,8 @@ namespace OpdProject.templates.billing
             TotalsFooter.Text = lines.Count == 0 ? "" : Totals();
             EditActions.Visible = Editable;
             CapturePaymentButton.Visible = lines.Count > 0 && Editable;
-            PrintLink.NavigateUrl = Urls.InvoicePrint(Inv.InvoiceId);
-            PrintLink.Visible = lines.Count > 0;
+            //PrintLink.NavigateUrl = Urls.InvoicePrint(Inv.InvoiceId);
+            //PrintLink.Visible = lines.Count > 0;
             var cn = BillingService.ListCreditNotes(Inv.InvoiceId).FirstOrDefault();
             CreditNoteText.Text = cn == null ? "" : "<div class=\"hint-banner mt-2\" style=\"border-left:3px solid var(--color-danger);\"><i class=\"ti ti-receipt-refund\" aria-hidden=\"true\"></i> Cancelled — credit note <strong>" + H(cn.CreditNoteNumber) + "</strong> for " + H(Money(cn.Amount, Inv.Currency)) + ". Reason: " + H(cn.Reason) + "</div>";
 
@@ -495,11 +495,11 @@ namespace OpdProject.templates.billing
                 + "<div class=\"text-xs text-muted mb-3\">" + H(Hospital.LegalAddress) + "</div>"
                 + "<div style=\"font-weight:600; font-size:18px; color:var(--color-success); margin-bottom:8px;\">PAYMENT RECEIPT</div>"
                 + "<div class=\"text-sm mb-1\"><strong>Receipt #:</strong> " + H(r.ReceiptNumber) + "</div>"
-                + "<div class=\"text-sm mb-1\"><strong>Date:</strong> " + H(FmtDate(r.GeneratedAt)) + "</div>"
+                + "<div class=\"text-sm mb-1\"><strong>Date:</strong> " + H(FmtDateTime(r.GeneratedAt)) + "</div>"
                 + "<div class=\"text-sm mb-1\"><strong>Patient:</strong> " + H(_patient.FullName) + "</div>"
                 + "<div style=\"border-top:1px dashed var(--border-strong); margin:12px 0; padding-top:12px;\"><div style=\"font-size:20px; font-weight:700;\">" + H(Money(r.TotalAmount, r.Currency)) + "</div>"
                 + "<div class=\"text-xs text-muted\">" + (covered.Count > 0 ? "PATIENT SHARE PAID" : "PAID IN FULL") + "</div>" + splitHtml + "</div>"
-                + "<a class=\"btn btn--sm btn--ghost mt-2\" style=\"width:100%; justify-content:center;\" target=\"_blank\" href=\"" + H(Urls.InvoicePrint(r.InvoiceId)) + "\"><i class=\"ti ti-printer\"></i> Print receipt</a></div>";
+                + "<a class=\"btn btn--sm btn--primary mt-2\" style=\"width:100%; justify-content:center;\" target=\"_blank\" href=\"" + H(Urls.InvoicePrint(r.InvoiceId)) + "\"><i class=\"ti ti-printer\"></i> Print receipt</a></div>";
         }
 
         protected void CloseModals_Click(object sender, EventArgs e)

@@ -13,8 +13,8 @@
     <div class="card mb-3">
       <div class="text-sm" style="font-weight:600; margin-bottom:8px;">1. Who is the appointment for?</div>
       <div class="form-grid">
-        <div class="form-group"><label class="form-label" for="<%= PatientMrn.ClientID %>">Your <%: PatientIdLabelText %></label><asp:TextBox ID="PatientMrn" runat="server" CssClass="form-control" placeholder="MRN-XXXXX" /></div>
-        <div class="form-group"><label class="form-label" for="<%= PatientPhone.ClientID %>">Or phone number</label><asp:TextBox ID="PatientPhone" runat="server" CssClass="form-control" placeholder="+91-9000000000" /></div>
+        <div class="form-group"><label class="form-label" for="<%= PatientMrn.ClientID %>"><%: PatientIdLabelText %></label><asp:TextBox ID="PatientMrn" runat="server" CssClass="form-control" placeholder="MRN-XXXXX" /></div>
+        <div class="form-group"><label class="form-label" for="<%= PatientPhone.ClientID %>">Phone Number</label><asp:TextBox ID="PatientPhone" runat="server" CssClass="form-control" placeholder="+91-9000000000" /></div>
       </div>
       <div class="text-xs text-muted">New here? <a href="<%: RegisterUrl %>">Register first</a>.</div>
     </div>

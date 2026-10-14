@@ -7,7 +7,7 @@
           <label class="form-label" for="<%= FollowupDate.ClientID %>">Follow-up date</label>
           <asp:TextBox ID="FollowupDate" runat="server" CssClass="form-control" TextMode="Date" />
           <asp:RequiredFieldValidator runat="server" ControlToValidate="FollowupDate" ValidationGroup="Followup" Text="Please select a follow-up date" CssClass="field-error" Display="Dynamic" />
-          <asp:CustomValidator runat="server" ControlToValidate="FollowupDate" ValidationGroup="Followup" OnServerValidate="FollowupDate_ServerValidate" Text="Must be after today" CssClass="field-error" Display="Dynamic" />
+          <asp:CustomValidator runat="server" ControlToValidate="FollowupDate" ValidationGroup="Followup" OnServerValidate="FollowupDate_ServerValidate" Text="Follow-up date can't be in the past. Choose tomorrow or later." CssClass="field-error" Display="Dynamic" />
         </div>
         <asp:PlaceHolder ID="NotesHolder" runat="server">
         <div class="form-group">

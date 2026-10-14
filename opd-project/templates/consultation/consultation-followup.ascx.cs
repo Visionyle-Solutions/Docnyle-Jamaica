@@ -30,7 +30,12 @@ namespace OpdProject.templates.consultation
                   + (string.IsNullOrEmpty(c.FollowupNotes) ? "" : " — " + HttpUtility.HtmlEncode(c.FollowupNotes)) + "</div>"
                 : "";
         }
-
+        protected override void OnPreRender(EventArgs e)
+        {
+            base.OnPreRender(e);
+            // Date picker: grey out every date before the earliest allowed follow-up (tomorrow)
+            FollowupDate.Attributes["min"] = DateTime.Today.AddDays(1).ToString("yyyy-MM-dd");
+        }
         protected void FollowupDate_ServerValidate(object source, ServerValidateEventArgs args)
         {
             DateTime d;
@@ -73,5 +78,6 @@ namespace OpdProject.templates.consultation
             AppPage.ToastSuccess("Marked as not needed");
             Host.RefreshAll();
         }
+
     }
 }
