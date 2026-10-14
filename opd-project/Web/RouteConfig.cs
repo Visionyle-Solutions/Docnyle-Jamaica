@@ -69,9 +69,10 @@ namespace OpdProject.Web
 
         public static string Login { get { return To("login"); } }
         public static string Dashboard { get { return To("dashboard"); } }
+        /// <summary>The Appointment Summary filtered to one dashboard tile or pie slice.</summary>
         public static string DashboardList(string kind, string period, string status)
         {
-            return To("dashboard/list") + "?kind=" + E(kind) + "&period=" + E(period) + (string.IsNullOrEmpty(status) ? "" : "&status=" + E(status));
+            return To("patients") + "?kind=" + E(kind) + "&period=" + E(period) + (string.IsNullOrEmpty(status) ? "" : "&status=" + E(status));
         }
         public static string TodayPatients { get { return To("patients"); } }
         public static string PatientSearch { get { return To("patients/search"); } }
