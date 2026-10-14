@@ -13,7 +13,6 @@ namespace OpdProject.Web
     {
         public string Code { get; set; }
         public string Label { get; set; }
-        public string Placeholder { get; set; }
         public string Range { get; set; }
         public string Value { get; set; }
     }
@@ -30,13 +29,6 @@ namespace OpdProject.templates.scheduling
     {
         protected override string RequiredPermission { get { return "patients"; } }
         public override string PageTitle { get { return "Nurse Vitals Entry"; } }
-
-        /// <summary>Example values (base unit) shown as placeholders in each vital's default unit.</summary>
-        private static readonly Dictionary<string, double> Examples = new Dictionary<string, double>
-        {
-            { "TEMP", 98.6 }, { "BP_SYS", 120 }, { "BP_DIA", 80 }, { "PULSE", 72 }, { "SPO2", 98 }, { "RESP_RATE", 16 },
-            { "HEIGHT", 170 }, { "WEIGHT", 70 }, { "PAIN_SCALE", 0 }, { "WAIST_CIRC", 85 }, { "HEAD_CIRC", 48 },
-        };
 
         private ConsultFormView _form;
         private ConsultFormView FormConfig { get { return _form ?? (_form = ConsultationConfigService.GetView(HospitalId)); } }
@@ -89,7 +81,7 @@ namespace OpdProject.templates.scheduling
             SelectedName.Text = Server.HtmlEncode(appt.PatientName + " · " + appt.DoctorName);
             var existing = ConsultationService.FindInProgress(appt.PatientId, appt.DoctorId);
             var v = existing != null ? ConsultationService.GetVitals(existing.ConsultationId) : null;
-            /* Values, examples and ranges are shown in each vital's default unit */
+            /* Values and ranges are shown in each vital's default unit */
             Func<string, string> valueOf = code =>
             {
                 var val = ConsultationService.GetVital(v, code);
@@ -97,12 +89,10 @@ namespace OpdProject.templates.scheduling
             };
             Func<string, string> rangeOf = code => VitalUnitService.RangeText(FormConfig.DefaultUnit(code), ConsultationService.RangeFor(HospitalId, code));
             /* The same vitals as the consultation's Vitals card: those the consultation setup captures, in vital order */
-            double example;
             var rows = HospitalService.ListVitalsConfig(HospitalId, false).Where(cfg => FormConfig.VitalOn(cfg.VitalCode))
                 .Select(cfg => new NurseVital
                 {
                     Code = cfg.VitalCode, Label = cfg.DisplayLabel, Range = rangeOf(cfg.VitalCode), Value = valueOf(cfg.VitalCode),
-                    Placeholder = Examples.TryGetValue(cfg.VitalCode, out example) ? VitalUnitService.Format(FormConfig.DefaultUnit(cfg.VitalCode), example) : "",
                 })
                 .ToList();
             VitalsRepeater.DataSource = rows;
