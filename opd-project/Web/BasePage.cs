@@ -106,20 +106,31 @@ namespace OpdProject.Web
             return FmtDate(value) + " " + FmtTime(value);
         }
 
-        /// <summary>Stored codes (DRUG, ACTIVE, CHECKED_IN) shown as Title Case ("Checked In").</summary>
-        public static string TitleCase(string code)
+        /// <summary>Currency code → display symbol. Unknown codes are shown as the code itself.</summary>
+        public static string CurrencySymbol(string code)
         {
-            return string.IsNullOrEmpty(code) ? "" : CultureInfo.InvariantCulture.TextInfo.ToTitleCase(code.Replace('_', ' ').ToLowerInvariant());
+            switch ((code ?? "").Trim().ToUpperInvariant())
+            {
+                case "JMD": return "J$";
+                case "INR": return "₹";
+                case "USD": return "$";
+                case "GBP": return "£";
+                default: return (code ?? "").Trim();
+            }
         }
 
         public string Money(decimal amount)
         {
-            return (Hospital.Currency ?? "") + " " + amount.ToString("N2", CultureInfo.InvariantCulture);
+            return Money(amount, null);
         }
 
         public string Money(decimal amount, string currency)
         {
-            return (currency ?? Hospital.Currency ?? "") + " " + amount.ToString("N2", CultureInfo.InvariantCulture);
+            var code = (currency ?? Hospital.Currency ?? "").Trim();
+            var symbol = CurrencySymbol(code);
+            // symbols attach to the number (J$300.00); a bare code such as AED keeps a space (AED 300.00)
+            var prefix = symbol == code && code.Length > 0 ? code + " " : symbol;
+            return prefix + amount.ToString("N2", CultureInfo.InvariantCulture);
         }
 
         public string PatientIdLabel { get { return string.IsNullOrEmpty(Hospital.PatientIdLabel) ? "MRN" : Hospital.PatientIdLabel; } }

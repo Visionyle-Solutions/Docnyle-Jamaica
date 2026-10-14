@@ -123,7 +123,7 @@ namespace OpdProject.Services
         {
             Hospitals.Add(new Hospital
             {
-                HospitalId = "HOSP-001", Name = "Sunrise Multispecialty Clinic",
+                HospitalId = "HOSP-001", Name = "Medcity Orthopaedic & Medical Centre",
                 LegalAddress = "12 Market Street, Montego Bay, St. James, Jamaica", PrimaryEmail = "admin@sunriseclinic.example",
                 ContactNumber = "+1-876-555-0123", Country = "JM", Currency = "JMD", Timezone = "America/Jamaica",
                 PatientIdLabel = "MRN", NationalHealthIdLabel = "National Health ID", NationalHealthIdMandatory = false,

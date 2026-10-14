@@ -127,8 +127,8 @@
                     <div class="c360-print-grid">
                       <a class="btn btn--sm" target="_blank" href="<%: Urls.Print("prescription", ConsultationIdValue) %>"><i class="ti ti-printer" aria-hidden="true"></i> Print Rx</a>
                       <a class="btn btn--sm" target="_blank" href="<%: Urls.Print("summary", ConsultationIdValue) %>"><i class="ti ti-file-text" aria-hidden="true"></i> Print Summary</a>
-                      <a class="btn btn--sm btn--ghost" target="_blank" href="<%: Urls.Print("lab-requisition", ConsultationIdValue) %>"><i class="ti ti-microscope" aria-hidden="true"></i> Print Lab Order</a>
-                      <a class="btn btn--sm btn--ghost" target="_blank" href="<%: Urls.Print("referral", ConsultationIdValue) %>"><i class="ti ti-mail-forward" aria-hidden="true"></i> Print Referral</a>
+                      <a class="btn btn--sm" target="_blank" href="<%: Urls.Print("lab-requisition", ConsultationIdValue) %>"><i class="ti ti-microscope" aria-hidden="true"></i> Print Lab Order</a>
+                      <a class="btn btn--sm" target="_blank" href="<%: Urls.Print("referral", ConsultationIdValue) %>"><i class="ti ti-mail-forward" aria-hidden="true"></i> Print Referral</a>
                     </div>
                   </asp:PlaceHolder>
                   <asp:Panel ID="AddendumPanel" runat="server" CssClass="c360-addendum" DefaultButton="SaveAddendumButton">

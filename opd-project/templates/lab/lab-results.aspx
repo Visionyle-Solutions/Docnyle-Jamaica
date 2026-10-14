@@ -30,7 +30,7 @@
             </asp:Repeater>
           </div>
           <div style="display:flex; flex-direction:column; gap:4px;">
-            <asp:LinkButton runat="server" CssClass="btn btn--sm btn--success" CommandName="Review" CommandArgument="<%# Item.ResultId %>" CausesValidation="false"><i class="ti ti-check" aria-hidden="true"></i> Reviewed</asp:LinkButton>
+            <asp:LinkButton runat="server" CssClass="btn btn--sm btn--success" CommandName="Review" CommandArgument="<%# Item.ResultId %>" CausesValidation="false"><i class="ti ti-check" aria-hidden="true"></i> Review</asp:LinkButton>
             <asp:HyperLink runat="server" CssClass="btn btn--xs btn--ghost" NavigateUrl="<%# Urls.Consultation(Item.PatientId) %>" Visible="<%# CanConsult %>"><i class="ti ti-stethoscope" aria-hidden="true"></i> Open</asp:HyperLink>
           </div>
         </div>

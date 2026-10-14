@@ -23,9 +23,9 @@
         <nav id="sidebar" aria-label="Primary navigation">
           <div style="padding:16px 14px 10px; text-align:center; border-bottom:1px solid rgba(255,255,255,0.08);">
             <div style="display:inline-block; padding:3px; border-radius:18px; background:linear-gradient(135deg, rgba(245,158,11,0.4), rgba(59,130,246,0.4)); margin-bottom:6px;">
-              <img src="<%: ResolveUrl("~/assets/icon-light.png") %>" alt="Consult360" style="width:72px; height:72px; border-radius:16px; display:block;" />
+              <img src="<%: ResolveUrl("~/assets/Medcity.png") %>" alt="Consult360" style="width:72px; height:66px; border-radius:16px; display:block;" />
             </div>
-            <div style="color:#fff; font-weight:800; font-size:16px; letter-spacing:0.4px;">Consult360</div>
+            <div style="color:#fff; font-weight:800; font-size:16px; letter-spacing:0.4px;">Medcity Orthopaedic & Medical Centre</div>
             <div style="margin-top:6px; padding:4px 12px; background:rgba(245,158,11,0.12); border:1px solid rgba(251,191,36,0.3); border-radius:12px; display:inline-block;">
               <span style="color:#fbbf24; font-size:9.5px; font-weight:600; letter-spacing:0.2px;">Effortless, smart consultations with 360° insight</span>
             </div>

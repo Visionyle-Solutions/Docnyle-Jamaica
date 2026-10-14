@@ -38,11 +38,11 @@ namespace OpdProject.Web
                 new NavSection { Key = "home", Label = null, Items = new List<NavItem> {
                     I("ti-layout-dashboard", "Dashboard", "dashboard", "patients") } },
                 new NavSection { Key = "consultation", Label = "Consultation", Items = new List<NavItem> {
-                    I("ti-stethoscope", "New Consultation", "patients/search", "consultation"),
+                    //I("ti-stethoscope", "New Consultation", "patients/search", "consultation"),
                     I("ti-flask", "Lab Results", "lab-results", "consultation"),
                     I("ti-adjustments", "Consultation Setup", "settings/consultation", "admin_consultation") } },
                 new NavSection { Key = "patients", Label = "Patients", Items = new List<NavItem> {
-                    I("ti-users", "Today's Patients", "patients", "patients"),
+                    I("ti-users", "Appointment Summary", "patients", "patients"),
                     I("ti-search", "Search / Register", "patients/search", "patients") } },
                 new NavSection { Key = "scheduling", Label = "Scheduling", Items = new List<NavItem> {
                     I("ti-calendar", "Appointments", "scheduling/appointments", "scheduling"),

@@ -1,4 +1,5 @@
 <%@ Page Title="Billing Checkout" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="billing-checkout.aspx.cs" Inherits="OpdProject.templates.billing.billing_checkout" MaintainScrollPositionOnPostback="true" %>
+
 <%@ Register TagPrefix="uc" TagName="ErrorState" Src="~/templates/shared/error-state.ascx" %>
 <%-- Itemised invoice → discount/tax → coverage & N-way bill split → payment → receipt.
      Route: /billing/checkout/{consultationId} --%>
@@ -139,25 +140,30 @@
   </div>
 </div>
 
-<%-- Add service charge --%>
-<asp:Panel ID="AddChargeModal" runat="server" CssClass="modal-overlay" Visible="false" DefaultButton="ConfirmAddChargeButton">
-  <div class="modal-frame" role="dialog" aria-modal="true">
-    <div class="modal-header"><strong>Add Service Charge</strong><asp:LinkButton runat="server" CssClass="btn btn--ghost btn--xs" OnClick="CloseModals_Click" CausesValidation="false"><i class="ti ti-x"></i></asp:LinkButton></div>
-    <div class="modal-body">
-      <div class="form-grid">
-        <div class="form-group" style="grid-column:1/-1;"><label class="form-label" for="<%= ServicePick.ClientID %>">Service *</label><asp:DropDownList ID="ServicePick" runat="server" CssClass="form-select" /></div>
-        <div class="form-group"><label class="form-label" for="<%= ServiceQty.ClientID %>">Qty</label><asp:TextBox ID="ServiceQty" runat="server" CssClass="form-control" TextMode="Number" Text="1" />
-          <asp:RangeValidator runat="server" ControlToValidate="ServiceQty" ValidationGroup="AddCharge" Type="Integer" MinimumValue="1" MaximumValue="99" Text="1–99" CssClass="field-error" Display="Dynamic" /></div>
-        <div class="form-group"><label class="form-label" for="<%= ServiceDiscount.ClientID %>">Discount %</label><asp:TextBox ID="ServiceDiscount" runat="server" CssClass="form-control" TextMode="Number" Text="0" step="0.5" />
-          <asp:RangeValidator runat="server" ControlToValidate="ServiceDiscount" ValidationGroup="AddCharge" Type="Double" MinimumValue="0" MaximumValue="100" Text="0–100" CssClass="field-error" Display="Dynamic" /></div>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <asp:LinkButton runat="server" CssClass="btn btn--ghost" OnClick="CloseModals_Click" CausesValidation="false">Cancel</asp:LinkButton>
-      <asp:LinkButton ID="ConfirmAddChargeButton" runat="server" CssClass="btn btn--primary" ValidationGroup="AddCharge" OnClick="ConfirmAddChargeButton_Click">Add</asp:LinkButton>
-    </div>
-  </div>
-</asp:Panel>
+        <%-- Add service charge --%>
+        <asp:Panel ID="AddChargeModal" runat="server" CssClass="modal-overlay" Visible="false" DefaultButton="ConfirmAddChargeButton">
+            <div class="modal-frame" role="dialog" aria-modal="true">
+                <div class="modal-header"><strong>Add Service Charge</strong><asp:LinkButton runat="server" CssClass="btn btn--ghost btn--xs" OnClick="CloseModals_Click" CausesValidation="false"><i class="ti ti-x"></i></asp:LinkButton></div>
+                <div class="modal-body">
+                    <div class="form-grid">
+                        <div class="form-group" style="grid-column: 1/-1;">
+                            <label class="form-label" for="<%= ServicePick.ClientID %>">Service *</label><asp:DropDownList ID="ServicePick" runat="server" CssClass="form-select" /></div>
+                        <div class="form-group">
+                            <label class="form-label" for="<%= ServiceQty.ClientID %>">Qty</label><asp:TextBox ID="ServiceQty" runat="server" CssClass="form-control" TextMode="Number" Text="1" />
+                            <asp:RangeValidator runat="server" ControlToValidate="ServiceQty" ValidationGroup="AddCharge" Type="Integer" MinimumValue="1" MaximumValue="99" Text="1–99" CssClass="field-error" Display="Dynamic" />
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="<%= ServiceDiscount.ClientID %>">Discount %</label><asp:TextBox ID="ServiceDiscount" runat="server" CssClass="form-control" TextMode="Number" Text="0" step="0.5" />
+                            <asp:RangeValidator runat="server" ControlToValidate="ServiceDiscount" ValidationGroup="AddCharge" Type="Double" MinimumValue="0" MaximumValue="100" Text="0–100" CssClass="field-error" Display="Dynamic" />
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <asp:LinkButton runat="server" CssClass="btn btn--ghost" OnClick="CloseModals_Click" CausesValidation="false">Cancel</asp:LinkButton>
+                    <asp:LinkButton ID="ConfirmAddChargeButton" runat="server" CssClass="btn btn--primary" ValidationGroup="AddCharge" OnClick="ConfirmAddChargeButton_Click">Add</asp:LinkButton>
+                </div>
+            </div>
+        </asp:Panel>
 
 <%-- Custom charge --%>
 <asp:Panel ID="CustomChargeModal" runat="server" CssClass="modal-overlay" Visible="false" DefaultButton="ConfirmCustomChargeButton">
