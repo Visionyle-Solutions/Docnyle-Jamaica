@@ -106,6 +106,12 @@ namespace OpdProject.Web
             return FmtDate(value) + " " + FmtTime(value);
         }
 
+        /// <summary>Stored codes (DRUG, ACTIVE, CHECKED_IN) shown as Title Case ("Checked In").</summary>
+        public static string TitleCase(string code)
+        {
+            return string.IsNullOrEmpty(code) ? "" : CultureInfo.InvariantCulture.TextInfo.ToTitleCase(code.Replace('_', ' ').ToLowerInvariant());
+        }
+
         /// <summary>Currency code → display symbol. Unknown codes are shown as the code itself.</summary>
         public static string CurrencySymbol(string code)
         {
@@ -153,7 +159,7 @@ namespace OpdProject.Web
         }
 
         /// <summary>Appointment type name for a code (FOLLOWUP → "Follow-Up").</summary>
-        public string TypeName(string code)
+        public string AppointmentTypeName(string code)
         {
             var t = SchedulingService.GetAppointmentType(HospitalId, code);
             return t != null ? t.Name : code;

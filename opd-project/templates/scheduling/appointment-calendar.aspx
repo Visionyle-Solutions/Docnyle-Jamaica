@@ -40,7 +40,7 @@
               </div>
               <div style="flex:1;">
                 <div class="text-sm" style="font-weight:600;"><%#: Item.PatientName %></div>
-                <div class="text-xs text-muted"><%#: Item.PatientMrn %> · <span style="display:inline-block; width:8px; height:8px; border-radius:2px; background:<%#: TypeColor(Item.Type) %>;"></span> <%#: TypeName(Item.Type) %><%#: string.IsNullOrEmpty(Item.Appointment.Notes) ? "" : " · " + Item.Appointment.Notes %></div>
+                <div class="text-xs text-muted"><%#: Item.PatientMrn %> · <span style="display:inline-block; width:8px; height:8px; border-radius:2px; background:<%#: TypeColor(Item.Type) %>;"></span> <%#: AppointmentTypeName(Item.Type) %><%#: string.IsNullOrEmpty(Item.Appointment.Notes) ? "" : " · " + Item.Appointment.Notes %></div>
               </div>
               <span class="badge <%#: StatusBadge(Item.Status) %>" style="font-size:10px;"><%#: OpdProject.Web.BasePage.TitleCase(Item.Status) %></span>
               <div style="display:flex; gap:2px;">

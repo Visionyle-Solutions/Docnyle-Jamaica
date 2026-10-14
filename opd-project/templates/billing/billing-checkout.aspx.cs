@@ -49,7 +49,7 @@ namespace OpdProject.templates.billing
             PatientName.Text = H(_patient.FullName);
             PatientMeta.Text = H(PatientIdLabel + ": " + _patient.Mrn + (string.IsNullOrEmpty(_patient.Phone) ? "" : " · " + _patient.Phone));
             var appt = SchedulingService.AppointmentForConsultation(_consultation);
-            ConsultationInfo.Text = H((appt != null ? TypeName(appt.Type) : TypeName("NEW")) + " · " + FmtDate(_consultation.VisitDate) + " · " + UserService.UserName(_consultation.DoctorId)
+            ConsultationInfo.Text = H((appt != null ? AppointmentTypeName(appt.Type) : AppointmentTypeName("NEW")) + " · " + FmtDate(_consultation.VisitDate) + " · " + UserService.UserName(_consultation.DoctorId)
                 + (_consultation.IsLocked ? "" : " · Not Yet Signed"));
 
             NoInvoiceHolder.Visible = Inv == null;

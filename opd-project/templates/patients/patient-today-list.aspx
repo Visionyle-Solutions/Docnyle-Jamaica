@@ -52,7 +52,7 @@
               <asp:PlaceHolder runat="server" Visible="<%# ShowDoctor %>"><td><%#: Item.DoctorName %><div class="text-xs text-muted"><%#: Item.DoctorRoom %></div></td></asp:PlaceHolder>
               <td><%#: Item.PatientName %></td>
               <td><%#: Item.PatientMrn %></td>
-              <td><%#: TypeName(Item.Type) %></td>
+              <td><%#: AppointmentTypeName(Item.Type) %></td>
               <td><span class="badge <%#: StatusBadge(Item.Status) %>"><%#: StatusLabel(Item.Status) %></span><div class="text-xs text-muted"><%#: StatusTime(Item) %></div></td>
               <td>
                 <asp:LinkButton runat="server" CssClass="btn btn--xs btn--success" CommandName="CheckIn" CommandArgument="<%# Item.AppointmentId %>" Visible="<%# CanCheckIn(Item) %>">
