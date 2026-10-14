@@ -369,7 +369,7 @@ namespace OpdProject.templates.consultation
             /* Cards and stepper follow the published configuration: order, and only the enabled sections */
             CardList.Order = FormConfig.SectionOrder;
             foreach (var card in CardList.Cards) card.Visible = FormConfig.SectionOn(card.Step);
-            RxLinkHolder.Visible = FormConfig.SectionOn("cpoe");
+            //RxLinkHolder.Visible = FormConfig.SectionOn("cpoe");
             var context = new WorkflowStep { Key = "context", Label = "Patient Context", Icon = "ti-user-heart", State = "info" };
             StepsRepeater.DataSource = FormConfig.SectionOrder.Where(k => FormConfig.SectionOn(k) && (k == "context" || _steps.ContainsKey(k)))
                 .Select(k => k == "context" ? context : _steps[k]).ToList();
