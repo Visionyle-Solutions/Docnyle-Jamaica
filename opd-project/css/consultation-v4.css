@@ -1,0 +1,287 @@
+/* ============================================================
+   consultation-v4.css — Consultation 360 workspace
+   Topbar · Today's Patients worklist · patient bar ·
+   section stepper | module cards | Clinical Intelligence panel.
+   Everything is scoped under .c360; inside it the app tokens are
+   re-pointed to the consultation palette so the section controls'
+   buttons, inputs and badges follow the same design.
+   ============================================================ */
+
+.c360 {
+  /* Consultation palette */
+  --c-bg: #f8fafc;
+  --c-fg: #0f172a;
+  --c-surface: #ffffff;
+  --c-surface-2: #f1f5f9;
+  --c-border: #cbd5e1;
+  --c-border-soft: #e2e8f0;
+  --c-muted: #64748b;
+  --c-primary: #2563eb;
+  --c-primary-hover: #1d4ed8;
+  --c-primary-soft: #eff6ff;
+  --c-teal: #0d9488;
+  --c-teal-hover: #0f766e;
+  --c-warn-bg: #fffbeb;
+  --c-warn-border: #fde68a;
+  --c-warn-fg: #b45309;
+  --c-danger-bg: #fef2f2;
+  --c-danger-border: #fecaca;
+  --c-danger-fg: #dc2626;
+  --c-ok-bg: #dcfce7;
+  --c-ok-fg: #15803d;
+  --c-radius: 8px;
+  --c-shadow: 0 1px 3px 0 rgba(0,0,0,0.1), 0 1px 2px -1px rgba(0,0,0,0.1);
+
+  /* App tokens re-pointed for the section controls */
+  --color-primary: var(--c-primary);
+  --color-primary-dark: var(--c-primary-hover);
+  --color-primary-light: var(--c-primary-soft);
+  --text-primary: var(--c-fg);
+  --text-secondary: #475569;
+  --text-muted: var(--c-muted);
+  --surface-page: var(--c-surface-2);
+  --surface-card: var(--c-surface);
+  --border-default: var(--c-border-soft);
+  --border-strong: var(--c-border);
+
+  display: flex; flex-direction: column;
+  height: calc(100vh - var(--topbar-height));
+  margin: calc(-1 * var(--space-3)) calc(-1 * var(--space-4));
+  background: var(--c-bg); color: var(--c-fg);
+  font-size: 13px; line-height: 1.5;
+  overflow: hidden;
+}
+/* Full-screen when the app shell hides its top bar (the consultation page sets HideChrome). */
+#app-shell.no-chrome .c360 { height: 100vh; }
+.c360 *, .c360 *::before, .c360 *::after { box-sizing: border-box; }
+
+/* ── Rainbow + topbar ─────────────────────────────── */
+.c360-rainbow { height: 3px; flex-shrink: 0; background: linear-gradient(90deg, #2563eb, #0d9488, #d97706, #dc2626); }
+.c360-topbar {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap;
+  padding: 8px 16px; background: var(--c-surface); border-bottom: 1px solid var(--c-border);
+}
+.c360-tb-title { font-weight: 700; font-size: 15px; margin-right: 8px; }
+.c360-tb-spacer { flex: 1; }
+.c360-tb-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--c-surface); border: 1px solid var(--c-border); color: var(--c-fg);
+  padding: 5px 10px; border-radius: 6px; font: inherit; font-size: 12px; font-weight: 500;
+  cursor: pointer; text-decoration: none; line-height: 1.4;
+}
+a.c360-tb-btn:hover, button.c360-tb-btn:hover { background: var(--c-surface-2); text-decoration: none; }
+.c360-tb-btn--static { cursor: default; }
+.c360-tb-btn--teal, a.c360-tb-btn--teal:hover { background: var(--c-teal); border-color: var(--c-teal); color: #fff; }
+a.c360-tb-btn--teal:hover { background: var(--c-teal-hover); }
+.c360-tb-btn .ti { font-size: 14px; }
+
+.c360-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 12px; white-space: nowrap; text-decoration: none; }
+.c360-badge--routine { background: var(--c-ok-bg); color: var(--c-ok-fg); }
+.c360-badge--info { background: var(--c-primary-soft); color: var(--c-primary); }
+.c360-badge--warn { background: var(--c-warn-bg); color: var(--c-warn-fg); border: 1px solid var(--c-warn-border); }
+.c360-badge--urgent { background: var(--c-danger-bg); color: var(--c-danger-fg); border: 1px solid var(--c-danger-border); }
+.c360-badge--muted { background: var(--c-surface-2); color: var(--c-muted); }
+
+/* ── App columns ──────────────────────────────────── */
+.c360-app { flex: 1; display: flex; min-height: 0; }
+
+/* Today's patients worklist */
+.c360-worklist {
+  width: 240px; flex-shrink: 0; position: relative; display: flex; flex-direction: column;
+  background: var(--c-surface); border-right: 1px solid var(--c-border); transition: width .22s ease;
+}
+.c360-wl-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 12px; border-bottom: 1px solid var(--c-border); font-weight: 700; }
+.c360-wl-heading { min-width: 0; }
+.c360-wl-heading small { display: block; font-size: 11px; color: var(--c-muted); font-weight: 400; }
+.c360-wl-collapse { min-width: 28px; padding: 3px 7px; justify-content: center; }
+.c360-wl-scroll { flex: 1; overflow-y: auto; }
+.c360-wl-card { display: block; padding: 10px 12px; border-bottom: 1px solid var(--c-border-soft); color: inherit; text-decoration: none; border-left: 3px solid transparent; }
+.c360-wl-card:hover, .c360-wl-card.active { background: var(--c-primary-soft); text-decoration: none; }
+.c360-wl-card.active { border-left-color: var(--c-primary); }
+.c360-wl-card-name { display: block; font-weight: 600; color: var(--c-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.c360-wl-card-meta { display: flex; justify-content: space-between; gap: 6px; margin-top: 2px; font-size: 11px; color: var(--c-muted); }
+.c360-wl-time { color: var(--c-primary); white-space: nowrap; }
+.c360-wl-status { display: inline-block; margin-top: 4px; font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 10px; background: var(--c-surface-2); color: var(--c-muted); }
+.c360-wl-status--active { background: var(--c-primary-soft); color: var(--c-primary); }
+.c360-wl-status--waiting { background: var(--c-warn-bg); color: var(--c-warn-fg); }
+.c360-wl-status--done { background: var(--c-ok-bg); color: var(--c-ok-fg); }
+.c360-wl-empty { padding: 16px 12px; font-size: 12px; color: var(--c-muted); }
+.c360-wl-rail { display: none; flex: 1; padding: 8px 5px; overflow-y: auto; }
+.c360-wl-rail-item {
+  display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; margin: 0 auto 8px;
+  border: 1px solid var(--c-border); border-radius: 50%; background: #fff; color: var(--c-fg);
+  font-size: 12px; font-weight: 700; text-decoration: none;
+}
+.c360-wl-rail-item:hover, .c360-wl-rail-item.active { background: var(--c-primary-soft); border-color: var(--c-primary); color: var(--c-primary); text-decoration: none; }
+.c360-worklist.collapsed { width: 52px; }
+.c360-worklist.collapsed .c360-wl-heading, .c360-worklist.collapsed .c360-wl-scroll { display: none; }
+.c360-worklist.collapsed .c360-wl-head { justify-content: center; padding: 8px 4px; }
+.c360-worklist.collapsed .c360-wl-rail { display: block; }
+
+/* Consultation column */
+.c360-consult { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.c360-pbar { flex-shrink: 0; padding: 8px 16px; background: var(--c-surface); border-bottom: 1px solid var(--c-border); font-size: 12px; }
+.c360-pbar-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.c360-pbar-row--r2 { margin-top: 4px; justify-content: space-between; font-size: 11px; color: var(--c-muted); }
+.c360-pbar-row--r2 strong { color: var(--c-fg); }
+.c360-pbar-name { font-size: 13px; }
+.c360-pbar-id { color: var(--c-primary); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.c360-pbar-sep { color: var(--c-muted); }
+
+.c360-workspace { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+
+/* Section stepper */
+.c360-stepper { width: 190px; flex-shrink: 0; overflow-y: auto; padding: 12px 0; background: var(--c-surface); border-right: 1px solid var(--c-border); }
+.c360-step {
+  display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+  font-size: 12px; font-weight: 500; color: var(--c-muted); text-decoration: none;
+  border-left: 3px solid transparent; cursor: pointer;
+}
+.c360-step:hover { color: var(--c-fg); background: var(--c-surface-2); text-decoration: none; }
+.c360-step-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.c360-step-req { color: var(--c-danger-fg); font-weight: 700; }
+.c360-step-dot { width: 14px; text-align: center; font-size: 11px; flex-shrink: 0; }
+.c360-step--pending .c360-step-dot::before { content: '○'; }
+.c360-step--completed .c360-step-dot::before { content: '✓'; color: var(--c-ok-fg); font-weight: 700; }
+.c360-step--skipped .c360-step-dot::before { content: '—'; }
+.c360-step--skipped .c360-step-label { text-decoration: line-through; }
+.c360-step--info .c360-step-dot::before { content: '●'; color: var(--c-muted); font-size: 8px; }
+.c360-step--current { border-left-color: var(--c-primary); color: var(--c-primary); font-weight: 600; background: var(--c-primary-soft); }
+
+/* Module cards */
+.c360-input-col { position: relative; flex: 1; min-width: 0; overflow-y: auto; padding: 16px; }
+.c360-card { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--c-radius); box-shadow: var(--c-shadow); margin-bottom: 16px; scroll-margin-top: 8px; }
+.c360-card-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 10px 14px; background: var(--c-surface-2); border-bottom: 1px solid var(--c-border);
+  border-radius: var(--c-radius) var(--c-radius) 0 0; font-weight: 600; font-size: 13px;
+}
+.c360-card-title { display: inline-flex; align-items: center; gap: 6px; }
+.c360-card-title .ti { font-size: 16px; color: var(--c-primary); }
+.c360-card-meta { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.c360-card-summary { font-size: 11px; font-weight: 400; color: var(--c-muted); max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.c360-card-body { padding: 16px; }
+.c360-card-body--flush { padding: 0; }
+.c360-card--completed .c360-card-head { border-left: 3px solid var(--c-ok-fg); }
+.c360-subhead {
+  font-size: 11px; font-weight: 700; color: var(--c-primary); text-transform: uppercase; letter-spacing: .5px;
+  margin: 0 0 12px; padding-bottom: 4px; border-bottom: 1px dashed var(--c-border);
+}
+.c360-print-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0 16px; }
+.c360-print-grid .btn { justify-content: center; }
+.c360-addendum { border-top: 1px solid var(--c-border-soft); padding-top: 14px; }
+.c360-addendum-item { padding: 6px 8px; margin-bottom: 6px; background: var(--c-surface-2); border-radius: 6px; font-size: 12px; }
+
+/* Clinical Intelligence */
+.c360-intel { width: 300px; flex-shrink: 0; overflow-y: auto; padding: 16px; background: var(--c-surface); border-left: 1px solid var(--c-border); }
+.c360-intel-title { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; margin-bottom: 12px; }
+.c360-intel-title .ti { font-size: 16px; color: var(--c-primary); }
+.c360-intel-sub { font-size: 11px; font-weight: 700; color: var(--c-muted); text-transform: uppercase; letter-spacing: .5px; margin: 16px 0 8px; }
+.c360-intel-empty { font-size: 12px; color: var(--c-muted); }
+.c360-intel-note { font-size: 11px; color: #475569; margin: 0 0 6px; }
+
+.c360-alert { position: relative; display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; margin-bottom: 10px; border-radius: 6px; font-size: 12px; border: 1px solid transparent; }
+.c360-alert-icon { font-size: 15px; line-height: 1.3; flex-shrink: 0; }
+.c360-alert-text { margin-top: 2px; }
+.c360-alert--danger { background: var(--c-danger-bg); border-color: var(--c-danger-border); color: var(--c-danger-fg); }
+.c360-alert--warning { background: var(--c-warn-bg); border-color: var(--c-warn-border); color: var(--c-warn-fg); }
+.c360-alert--ok { background: #f0fdf4; border-color: #bbf7d0; color: var(--c-ok-fg); }
+.c360-alert--info { background: var(--c-primary-soft); border-color: #bfdbfe; color: #1e40af; }
+.c360-alert--note { background: var(--c-surface-2); border-color: var(--c-border-soft); color: #334155; }
+.c360-alert-dismiss { position: absolute; top: 4px; right: 6px; background: none; border: none; cursor: pointer; font-size: 14px; color: var(--c-muted); }
+
+.c360-progress-label { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.c360-progress-track { height: 6px; border-radius: 3px; background: var(--c-surface-2); overflow: hidden; }
+.c360-progress-fill { height: 100%; background: var(--c-teal); border-radius: 3px; }
+.c360-progress-note { margin-top: 8px; font-size: 11px; color: var(--c-warn-fg); }
+
+/* Sign-off dialog */
+.c360 .modal-frame { border-radius: var(--c-radius); }
+.c360 .modal-header { padding: 12px 16px; background: var(--c-surface-2); }
+.c360 .modal-body { padding: 16px; }
+.c360 .modal-footer { padding: 12px 16px; background: var(--c-surface-2); }
+.c360-sign-summary { padding: 10px; margin-bottom: 12px; background: var(--c-surface-2); border-radius: 6px; font-size: 12px; }
+.c360 .btn.c360-btn-teal { background: var(--c-teal); border-color: var(--c-teal); color: #fff; }
+.c360 .btn.c360-btn-teal:hover { background: var(--c-teal-hover); }
+
+/* ── Section controls inside the cards ────────────── */
+.c360 .btn { height: 30px; padding: 0 10px; border-radius: 6px; font-size: 12px; font-weight: 500; }
+.c360 .btn--sm { height: 28px; }
+.c360 .btn--xs { height: 24px; padding: 0 8px; font-size: 11px; }
+.c360 .form-label { font-size: 11px; font-weight: 600; color: var(--c-muted); text-transform: uppercase; letter-spacing: .5px; }
+.c360 .form-control, .c360 .form-select { height: 34px; padding: 6px 10px; border-radius: 6px; font-size: 12px; border-color: var(--c-border); }
+.c360 textarea.form-control { height: auto; min-height: 70px; resize: vertical; }
+.c360 .form-control:focus, .c360 .form-select:focus { border-color: var(--c-primary); box-shadow: 0 0 0 2px rgba(37,99,235,0.2); }
+.c360 .form-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0 14px; }
+.c360 .card { border-radius: var(--c-radius); border-color: var(--c-border); }
+.c360 .badge { font-size: 11px; padding: 2px 8px; border-radius: 12px; }
+.c360 .chip { font-size: 12px; padding: 4px 10px; }
+.c360 .text-xs { font-size: 11px; }
+
+/* Tier 1 context panel, rendered as the body of the "Patient Context" card */
+.tier1-panel { background: var(--surface-card); }
+.c360-card .tier1-header { display: none; }
+.tier1-panel.tier1--collapsed .tier1-body { display: none; }
+.tier1-body { padding: 0; }
+.tier1-row {
+  display: flex; align-items: center; padding: 7px 14px; gap: 8px;
+  border-top: 1px solid var(--border-subtle, #f1f5f9);
+  cursor: pointer; font-size: 12px; transition: background 0.1s;
+}
+.c360-card .tier1-row:first-child { border-top: none; }
+.tier1-row:hover { background: var(--c-surface-2, #f8fafc); }
+.tier1-row-label { font-weight: 600; min-width: 140px; color: var(--text-primary); }
+.tier1-row-summary { flex: 1; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tier1-row-chevron { color: var(--text-muted); font-size: 14px; transition: transform 0.15s; }
+.tier1-row.tier1-row--expanded { background: var(--c-primary-soft, #f8fafc); }
+.tier1-row.tier1-row--expanded .tier1-row-chevron { transform: rotate(90deg); }
+.tier1-detail { padding: 10px 14px 12px 28px; font-size: 12px; background: var(--c-bg, #f8fafc); border-top: 1px solid var(--border-subtle, #f1f5f9); display: none; }
+.tier1-detail.tier1-detail--open { display: block; }
+
+/* ── Responsive ───────────────────────────────────── */
+@media (max-width: 1440px) {
+  .c360-intel { width: 260px; }
+  .c360-stepper { width: 160px; }
+  .c360-worklist:not(.collapsed) { width: 210px; }
+}
+@media (max-width: 1100px) {
+  .c360-intel { width: 230px; }
+  .c360-stepper { width: 140px; }
+}
+/* Narrow screens: one scrolling column; safety/intelligence stays visible above the cards. */
+@media (max-width: 900px) {
+  .c360 { height: auto; overflow: visible; }
+  .c360-app, .c360-workspace { display: block; }
+  .c360-consult { overflow: visible; }
+  .c360-worklist:not(.collapsed), .c360-worklist.collapsed { width: auto; border-right: none; border-bottom: 1px solid var(--c-border); }
+  .c360-wl-scroll { max-height: 180px; }
+  .c360-worklist.collapsed .c360-wl-rail { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; }
+  .c360-worklist.collapsed .c360-wl-rail-item { margin: 0; }
+  .c360-stepper { width: auto; display: flex; overflow-x: auto; padding: 0; border-right: none; border-bottom: 1px solid var(--c-border); }
+  .c360-step { border-left: none; border-bottom: 3px solid transparent; white-space: nowrap; }
+  .c360-step--current { border-bottom-color: var(--c-primary); }
+  .c360-intel { width: auto; border-left: none; border-bottom: 1px solid var(--c-border); }
+  .c360-input-col { overflow: visible; }
+  .c360-workspace { display: flex; flex-direction: column; }
+  .c360-intel { order: 1; }
+  .c360-stepper { order: 0; }
+  .c360-input-col { order: 2; }
+}
+
+@media print {
+  .c360 { height: auto; overflow: visible; margin: 0; }
+  .c360-topbar, .c360-worklist, .c360-stepper, .c360-rainbow { display: none !important; }
+  .c360-app, .c360-workspace, .c360-consult, .c360-input-col { display: block; overflow: visible; }
+}
+
+/* Vitals columns hidden by the consultation setup */
+.vitals-table--no-prev .vt-prev, .vitals-table--no-range .vt-range { display: none; }
+
+/* Custom fields (Consultation Setup): block at the foot of a built-in card, or a whole custom card */
+.c360-custom { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border-default); }
+.c360-custom--standalone { margin-top: 0; padding-top: 0; border-top: 0; }
+.c360-custom-checks { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.c360-custom-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
+
+/* Vital unit picker (Consultation Setup → Vitals units) */
+.vital-unit { display: inline-block; width: auto; min-width: 64px; height: 24px; padding: 0 4px; font-size: 11px; }

@@ -1,0 +1,23 @@
+# Visual Studio temporary files
+
+.vs/
+**/bin/
+**/obj/
+
+# User-specific settings
+
+*.user
+*.suo
+
+# Claude local settings (ignore only if they contain local or sensitive config)
+
+# .claude/
+
+# Build and temporary files
+
+*.cache
+*.tmp
+
+# Logs
+
+*.log

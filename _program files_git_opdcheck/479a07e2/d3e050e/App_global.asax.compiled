@@ -1,0 +1,6 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<preserve resultType="8" virtualPath="/C:/Program Files/Git/OpdCheck/global.asax" hash="3574fb6" filehash="e45d45c6281" flags="150000" assembly="App_global.asax" type="ASP.global_asax">
+    <filedeps>
+        <filedep name="/C:/Program Files/Git/OpdCheck/global.asax" />
+    </filedeps>
+</preserve>

@@ -1,0 +1,11 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<preserve resultType="3" virtualPath="/C:/Program Files/Git/OpdCheck/templates/patients/patient-allergies.aspx" hash="fffffffffd75d2dc" filehash="bdc967986f6dd225" flags="110000" assembly="App_Web_0i55aoli" type="ASP.templates_patients_patient_allergies_aspx">
+    <filedeps>
+        <filedep name="/C:/Program Files/Git/OpdCheck/Site.Master" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/patients/patient-allergies.aspx" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/patients/patient-allergies-body.ascx" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/patients/patient-allergies-form.ascx" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/shared/error-state.ascx" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/shared/patient-identifier-strip.ascx" />
+    </filedeps>
+</preserve>

@@ -1,0 +1,51 @@
+/* ============================================================
+   css/print.css — High-DPI print stylesheet
+   Designed for pre-printed hospital letterheads.
+   Hides all UI chrome, shows only clinical content.
+   Letterhead fields configurable from Hospital Profile.
+   ============================================================ */
+
+@media print {
+  /* Hide everything except the print container */
+  body > *:not(#printContainer) { display: none !important; }
+  #printContainer { display: block !important; }
+
+  /* Reset page */
+  @page { margin: 15mm 12mm; size: A4; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11pt; color: #000; background: #fff; }
+
+  .print-header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 8px; margin-bottom: 12px; }
+  .print-header h2 { margin: 0; font-size: 16pt; }
+  .print-header .print-subtitle { font-size: 9pt; color: #555; margin: 2px 0; }
+  .print-header .print-license { font-size: 8pt; color: #777; }
+
+  .print-patient-info { display: flex; justify-content: space-between; border: 1px solid #ccc; padding: 6px 10px; margin-bottom: 10px; font-size: 10pt; }
+  .print-patient-info div { line-height: 1.6; }
+
+  .print-section { margin-bottom: 10px; page-break-inside: avoid; }
+  .print-section-label { font-weight: 700; font-size: 10pt; text-transform: uppercase; border-bottom: 1px solid #ccc; padding-bottom: 2px; margin-bottom: 4px; }
+  .print-section-body { font-size: 10pt; line-height: 1.5; padding-left: 4px; }
+
+  .print-rx-table { width: 100%; border-collapse: collapse; font-size: 9pt; margin-top: 4px; }
+  .print-rx-table th, .print-rx-table td { border: 1px solid #ccc; padding: 4px 6px; text-align: left; }
+  .print-rx-table th { background: #f5f5f5; font-weight: 600; }
+
+  .print-footer { margin-top: 20px; border-top: 1px solid #ccc; padding-top: 8px; display: flex; justify-content: space-between; font-size: 9pt; }
+  .print-signature { text-align: right; min-width: 200px; }
+  .print-signature .sig-line { border-top: 1px solid #333; margin-top: 30px; padding-top: 4px; }
+
+  .print-validity { font-size: 8pt; color: #777; margin-top: 8px; text-align: center; }
+  .print-addendum { border-left: 3px solid #f59e0b; padding: 6px 10px; margin-top: 6px; font-size: 9pt; background: #fffbeb; }
+
+  /* No-print class for elements to hide in print */
+  .no-print { display: none !important; }
+}
+
+/* Screen preview styling (when showing print preview in a modal) */
+#printContainer { display: none; }
+.print-preview { background: #fff; padding: 24px; border: 1px solid #ddd; border-radius: 4px; font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #000; max-height: 500px; overflow-y: auto; }
+.print-preview .print-header h2 { margin: 0; font-size: 16px; }
+.print-preview .print-subtitle { font-size: 10px; color: #555; }
+.print-preview .print-rx-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+.print-preview .print-rx-table th, .print-preview .print-rx-table td { border: 1px solid #ccc; padding: 3px 5px; }
+.print-preview .print-rx-table th { background: #f5f5f5; }

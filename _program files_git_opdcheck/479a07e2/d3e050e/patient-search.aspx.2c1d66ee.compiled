@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<preserve resultType="3" virtualPath="/C:/Program Files/Git/OpdCheck/templates/patients/patient-search.aspx" hash="fffffffffd75d2dc" filehash="314ec5cf14b2efc2" flags="110000" assembly="App_Web_ntgrkzap" type="ASP.templates_patients_patient_search_aspx">
+    <filedeps>
+        <filedep name="/C:/Program Files/Git/OpdCheck/Site.Master" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/patients/patient-search.aspx" />
+    </filedeps>
+</preserve>

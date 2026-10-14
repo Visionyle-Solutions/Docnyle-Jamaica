@@ -1,0 +1,4 @@
+Placeholder — settings domain templates (vitals-config, specialty-config,
+sequence-number-config, hospital-profile, doctor-fee-schedule) are scoped
+in docs/roadmap.md but not yet built. See patients/ for the working
+template pattern to follow when building these.

@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<preserve resultType="3" virtualPath="/C:/Program Files/Git/OpdCheck/templates/portal/self-book.aspx" hash="fffffffffd75d2dc" filehash="314f07133588fda6" flags="110000" assembly="App_Web_42dwrx02" type="ASP.templates_portal_self_book_aspx">
+    <filedeps>
+        <filedep name="/C:/Program Files/Git/OpdCheck/Site.Master" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/portal/self-book.aspx" />
+    </filedeps>
+</preserve>

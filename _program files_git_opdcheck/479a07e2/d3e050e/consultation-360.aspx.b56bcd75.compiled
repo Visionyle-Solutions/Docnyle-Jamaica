@@ -1,0 +1,20 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<preserve resultType="3" virtualPath="/C:/Program Files/Git/OpdCheck/templates/consultation/consultation-360.aspx" hash="fffffffffd75d2dc" filehash="1117f2c765364363" flags="110000" assembly="App_Web_hnv0yymg" type="ASP.templates_consultation_consultation_360_aspx">
+    <filedeps>
+        <filedep name="/C:/Program Files/Git/OpdCheck/Site.Master" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/consultation/consultation-360.aspx" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/consultation/consultation-confidential-notes.ascx" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/consultation/consultation-cpoe-card.ascx" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/consultation/consultation-diagnosis-card.ascx" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/consultation/consultation-followup.ascx" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/consultation/consultation-labs.ascx" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/consultation/consultation-referral.ascx" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/consultation/consultation-soap.ascx" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/consultation/consultation-symptoms.ascx" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/consultation/consultation-vitals.ascx" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/consultation/tier0-safety-strip.ascx" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/consultation/tier1-context-panel.ascx" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/shared/error-state.ascx" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/shared/patient-identifier-strip.ascx" />
+    </filedeps>
+</preserve>

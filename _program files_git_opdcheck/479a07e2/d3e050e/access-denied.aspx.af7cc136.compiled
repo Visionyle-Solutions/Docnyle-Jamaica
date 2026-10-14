@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<preserve resultType="3" virtualPath="/C:/Program Files/Git/OpdCheck/templates/shared/access-denied.aspx" hash="fffffffffd75d2dc" filehash="314f02664a6e6783" flags="110000" assembly="App_Web_qhjq5ipz" type="ASP.templates_shared_access_denied_aspx">
+    <filedeps>
+        <filedep name="/C:/Program Files/Git/OpdCheck/Site.Master" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/shared/access-denied.aspx" />
+    </filedeps>
+</preserve>

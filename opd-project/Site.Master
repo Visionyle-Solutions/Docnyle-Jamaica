@@ -1,0 +1,92 @@
+<%@ Master Language="C#" AutoEventWireup="true" CodeBehind="Site.Master.cs" Inherits="OpdProject.SiteMaster" %>
+<!DOCTYPE html>
+<html lang="en">
+<head runat="server">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Consult360</title>
+  <link rel="icon" type="image/png" href="<%: ResolveUrl("~/assets/icon-light.png") %>" />
+  <link rel="stylesheet" href="<%: Asset("~/assets/icons/tabler-icons.min.css") %>" />
+  <link rel="stylesheet" href="<%: Asset("~/css/tokens.css") %>" />
+  <link rel="stylesheet" href="<%: Asset("~/css/layout.css") %>" />
+  <link rel="stylesheet" href="<%: Asset("~/css/components.css") %>" />
+  <link rel="stylesheet" href="<%: Asset("~/css/print.css") %>" />
+  <link rel="stylesheet" href="<%: Asset("~/css/consultation-v4.css") %>" />
+  <link rel="stylesheet" href="<%: Asset("~/css/webforms.css") %>" />
+  <asp:ContentPlaceHolder ID="HeadContent" runat="server" />
+</head>
+<body>
+  <form id="AppForm" runat="server">
+    <!-- App shell — same five regions as the original SPA; every page renders inside #main-content. -->
+    <div id="app-shell" class="<%: ShellCss %>">
+      <asp:PlaceHolder ID="ChromeSidebar" runat="server">
+        <nav id="sidebar" aria-label="Primary navigation">
+          <div style="padding:16px 14px 10px; text-align:center; border-bottom:1px solid rgba(255,255,255,0.08);">
+            <div style="display:inline-block; padding:3px; border-radius:18px; background:linear-gradient(135deg, rgba(245,158,11,0.4), rgba(59,130,246,0.4)); margin-bottom:6px;">
+              <img src="<%: ResolveUrl("~/assets/icon-light.png") %>" alt="Consult360" style="width:72px; height:72px; border-radius:16px; display:block;" />
+            </div>
+            <div style="color:#fff; font-weight:800; font-size:16px; letter-spacing:0.4px;">Consult360</div>
+            <div style="margin-top:6px; padding:4px 12px; background:rgba(245,158,11,0.12); border:1px solid rgba(251,191,36,0.3); border-radius:12px; display:inline-block;">
+              <span style="color:#fbbf24; font-size:9.5px; font-weight:600; letter-spacing:0.2px;">Effortless, smart consultations with 360° insight</span>
+            </div>
+          </div>
+          <asp:Repeater ID="NavSections" runat="server" ItemType="OpdProject.Web.NavSection" OnItemDataBound="NavSections_ItemDataBound">
+            <ItemTemplate>
+              <div class="<%# Item.HasHeader ? "sidebar-group" : "sidebar-standalone" %>" data-group="<%#: Item.Key %>">
+                <asp:PlaceHolder runat="server" Visible="<%# Item.HasHeader %>">
+                <div class="sidebar-group-header" data-action="toggle-sidebar-group" role="button" tabindex="0">
+                  <span><%#: Item.Label %></span>
+                  <i class="ti ti-chevron-<%# Item.IsOpen ? "up" : "down" %>" style="font-size:12px; opacity:0.5;"></i>
+                </div>
+                </asp:PlaceHolder>
+                <div class="<%# Item.HasHeader ? "sidebar-group-items" : "sidebar-standalone-items" %>" style="<%# Item.IsOpen || !Item.HasHeader ? "" : "display:none;" %>">
+                  <asp:Repeater ID="NavItems" runat="server" ItemType="OpdProject.Web.NavItem">
+                    <ItemTemplate>
+                      <a class="nav-item<%# OpdProject.Web.Navigation.IsCurrent(Item, CurrentPath) ? " active" : "" %>" href="<%#: Item.Url %>">
+                        <i class="ti <%#: Item.Icon %>" aria-hidden="true"></i>
+                        <span class="nav-item-label"><%#: Item.Label %></span>
+                      </a>
+                    </ItemTemplate>
+                  </asp:Repeater>
+                </div>
+              </div>
+            </ItemTemplate>
+          </asp:Repeater>
+        </nav>
+        <header id="topbar">
+          <div style="flex:1; display:flex; align-items:center;">
+            <asp:Literal ID="HospitalLogo" runat="server" />
+            <span style="font-weight:800; font-size:17px; color:var(--text-primary, #1e293b); letter-spacing:0.2px;"><asp:Literal ID="HospitalName" runat="server" /></span>
+          </div>
+          <asp:Literal ID="TopbarBell" runat="server" />
+          <div class="text-sm" style="color:var(--text-secondary, #64748b);">
+            <asp:Literal ID="UserBadge" runat="server" /><span style="color:var(--color-primary); font-weight:600;">Consult360</span>
+          </div>
+          <asp:LinkButton ID="SignOutButton" runat="server" CssClass="btn btn--xs btn--ghost" style="margin-left:12px;" OnClick="SignOutButton_Click" CausesValidation="false">
+            <i class="ti ti-logout" aria-hidden="true"></i> Sign out
+          </asp:LinkButton>
+        </header>
+      </asp:PlaceHolder>
+      <main id="main-content" role="main">
+        <asp:ContentPlaceHolder ID="MainContent" runat="server" />
+      </main>
+      <div id="notification-drawer" aria-live="polite"><asp:Literal ID="FloatingBell" runat="server" /></div>
+    </div>
+
+    <div id="toastStack" class="toast-stack" role="status" aria-live="polite">
+      <asp:Repeater ID="Toasts" runat="server" ItemType="OpdProject.Web.ToastMessage">
+        <ItemTemplate>
+          <div class="toast toast--<%#: Item.Kind %>" data-autohide="true">
+            <button type="button" class="toast-close" aria-label="Close message" title="Close">&times;</button>
+            <strong><%#: Item.Title %></strong>
+            <asp:PlaceHolder runat="server" Visible="<%# !string.IsNullOrEmpty(Item.Message) %>"><div class="text-xs text-secondary mt-1"><%#: Item.Message %></div></asp:PlaceHolder>
+          </div>
+        </ItemTemplate>
+      </asp:Repeater>
+    </div>
+
+    <script src="<%: Asset("~/js/site.js") %>"></script>
+    <asp:ContentPlaceHolder ID="ScriptContent" runat="server" />
+  </form>
+</body>
+</html>

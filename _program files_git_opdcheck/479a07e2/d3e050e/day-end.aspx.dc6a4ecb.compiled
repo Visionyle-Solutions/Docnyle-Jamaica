@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<preserve resultType="3" virtualPath="/C:/Program Files/Git/OpdCheck/templates/billing/day-end.aspx" hash="fffffffffd75d2dc" filehash="ceb11637f72d8d9e" flags="110000" assembly="App_Web_zspfsatl" type="ASP.templates_billing_day_end_aspx">
+    <filedeps>
+        <filedep name="/C:/Program Files/Git/OpdCheck/Site.Master" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/billing/day-end.aspx" />
+    </filedeps>
+</preserve>

@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<preserve resultType="3" virtualPath="/C:/Program Files/Git/OpdCheck/templates/settings/data-import.aspx" hash="fffffffffd75d2dc" filehash="314ec8830d248ffe" flags="110000" assembly="App_Web_vfh3tfpv" type="ASP.templates_settings_data_import_aspx">
+    <filedeps>
+        <filedep name="/C:/Program Files/Git/OpdCheck/Site.Master" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/settings/data-import.aspx" />
+    </filedeps>
+</preserve>

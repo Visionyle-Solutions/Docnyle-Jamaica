@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<preserve resultType="3" virtualPath="/C:/Program Files/Git/OpdCheck/templates/billing/invoice-list.aspx" hash="fffffffffd75d2dc" filehash="ceb1193a14664188" flags="110000" assembly="App_Web_zspfsatl" type="ASP.templates_billing_invoice_list_aspx">
+    <filedeps>
+        <filedep name="/C:/Program Files/Git/OpdCheck/Site.Master" />
+        <filedep name="/C:/Program Files/Git/OpdCheck/templates/billing/invoice-list.aspx" />
+    </filedeps>
+</preserve>
