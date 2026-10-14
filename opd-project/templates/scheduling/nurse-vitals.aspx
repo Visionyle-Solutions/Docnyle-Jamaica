@@ -47,7 +47,7 @@
                                         <td style="padding: 8px 6px; font-weight: 600;"><%#: Item.Label %><asp:HiddenField ID="Code" runat="server" Value="<%# Item.Code %>" />
                                         </td>
                                         <td style="text-align: center;">
-                                            <asp:TextBox ID="Value" runat="server" CssClass="form-control" Style="width: 90px; text-align: center; margin: 0 auto;" placeholder="<%# Item.Placeholder %>" Text="<%# Item.Value %>" />
+                                            <asp:TextBox ID="Value" runat="server" CssClass="form-control" Style="width: 90px; text-align: center; margin: 0 auto;" placeholder="—" Text="<%# Item.Value %>" />
                                             <div class="vital-error">
                                                 <asp:Literal ID="Error" runat="server" /></div>
                                         </td>
