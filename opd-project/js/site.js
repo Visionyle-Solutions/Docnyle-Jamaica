@@ -43,7 +43,7 @@
   document.querySelectorAll('[data-autohide]').forEach(function (t) {
     var timer;
     var hide = function () { clearTimeout(timer); t.classList.add('toast--hiding'); setTimeout(function () { t.remove(); }, 400); };
-    var start = function () { clearTimeout(timer); timer = setTimeout(hide, 4000); };
+    var start = function () { clearTimeout(timer); timer = setTimeout(hide, 2000); };
     start();
     t.addEventListener('mouseenter', function () { clearTimeout(timer); });
     t.addEventListener('mouseleave', start);
@@ -124,7 +124,7 @@
       link.style.display = 'inline-block';
       link.style.marginTop = '6px';
       t.appendChild(link);
-      var hide = function () { t.classList.add('toast--hiding'); setTimeout(function () { t.remove(); }, 400); };
+      var hide = function () { t.classList.add('toast--hiding'); setTimeout(function () { t.remove(); }, 200); };
       close.addEventListener('click', hide);
       stack.appendChild(t);
       if (!n.critical) setTimeout(hide, 10000); /* critical results stay until closed */
