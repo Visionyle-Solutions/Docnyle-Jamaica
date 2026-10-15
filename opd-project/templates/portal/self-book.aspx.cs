@@ -59,6 +59,9 @@ namespace OpdProject.templates.portal
             QuestionsRepeater.DataSource = questions;
             QuestionsRepeater.DataBind();
             IntakeCard.Visible = questions.Count > 0;
+            LogoHtml.Text = string.IsNullOrEmpty(PortalHospital.LogoBase64)
+                ? "<img src=\"" + ResolveUrl("~/assets/Medcity.png") + "\" alt=\"Medcity Orthopaedic & Medical Centre\" style=\"max-height:70px;\" />"
+                : "<img src=\"" + HttpUtility.HtmlAttributeEncode(PortalHospital.LogoBase64) + "\" alt=\"\" style=\"max-height:50px;\" />";
             BindSlots();
         }
 
