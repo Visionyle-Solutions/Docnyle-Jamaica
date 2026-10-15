@@ -195,6 +195,15 @@ namespace OpdProject.templates.consultation
         protected global::OpdProject.templates.consultation.consultation_cpoe_card CpoeSection;
 
         /// <summary>
+        /// ServicesSection control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::OpdProject.templates.consultation.consultation_services ServicesSection;
+
+        /// <summary>
         /// ReferralSection control.
         /// </summary>
         /// <remarks>

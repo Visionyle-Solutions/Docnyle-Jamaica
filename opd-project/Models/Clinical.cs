@@ -267,6 +267,24 @@ namespace OpdProject.Models
         public DateTime CreatedAt { get; set; }
     }
 
+    /// <summary>
+    /// A service or procedure done during the visit (picked from the hospital's Service Charge Master). Holds no price:
+    /// sign-off turns each row into an invoice line at the master's amount and tax.
+    /// </summary>
+    public class ConsultationServiceItem
+    {
+        public string ConsultationServiceId { get; set; }
+        public string ConsultationId { get; set; }
+        public string PatientId { get; set; }
+        public string ServiceChargeId { get; set; }
+        public string ServiceName { get; set; }
+        public string Category { get; set; }
+        public int Qty { get; set; }
+        public string Notes { get; set; }
+        public string AddedByUserId { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
     /// <summary>Append-only post-lock correction.</summary>
     public class Addendum
     {

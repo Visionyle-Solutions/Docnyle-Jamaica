@@ -33,6 +33,8 @@ namespace OpdProject.templates.patients
             }
             Strip.PatientId = _patient.PatientId;
             NewPatientBanner.Visible = IsNewRegistration;
+            ManagePayersLink.Visible = Can("admin_hospital");
+            ManagePayersLink.NavigateUrl = Urls.To("settings") + "?tab=billing#insurers";
             if (!IsPostBack)
             {
                 CoverageFields.Reset(Hospital, _patient);
@@ -48,6 +50,7 @@ namespace OpdProject.templates.patients
             CoverageRepeater.DataBind();
             CoverageRepeater.Visible = coverages.Count > 0;
             NoCoverage.Visible = coverages.Count == 0;
+            BindConsent();
 
             if (IsNewRegistration)
             {
@@ -62,6 +65,37 @@ namespace OpdProject.templates.patients
                 BackLink.NavigateUrl = Urls.PatientSearch;
                 ContinueLink.Visible = false;
             }
+        }
+
+        private void BindConsent()
+        {
+            var docs = PatientService.ListConsentDocuments(_patient.PatientId);
+            ConsentRepeater.DataSource = docs;
+            ConsentRepeater.DataBind();
+            ConsentRepeater.Visible = docs.Count > 0;
+            ConsentBadge.Text = docs.Count > 0 ? "<span class=\"badge badge--success\">Signed copy on file</span>" : "<span class=\"badge badge--warning\">Not signed yet</span>";
+            PrintConsentLink.NavigateUrl = Urls.PatientConsentForm(_patient.PatientId);
+            NoDoctorHint.Visible = string.IsNullOrEmpty(_patient.PreferredDoctorId);
+            SetDoctorLink.NavigateUrl = Urls.PatientEdit(_patient.PatientId);
+        }
+
+        protected void UploadConsentButton_Click(object sender, EventArgs e)
+        {
+            ConsentErrorPanel.Visible = false;
+            var file = ConsentFile.PostedFile;
+            var error = !ConsentFile.HasFile ? "Choose the scanned, signed consent form to upload."
+                : LabService.CheckFile(file.FileName, file.ContentLength, file.InputStream, allowDicom: false);
+            if (error != null)
+            {
+                ConsentError.Text = error;
+                ConsentErrorPanel.Visible = true;
+                Bind();
+                return;
+            }
+            var doc = PatientService.SaveConsentDocument(_patient, file.FileName, file.ContentLength, file.InputStream, UserId);
+            Audit("CREATE", "PatientConsentDocument", doc.ConsentDocumentId, "Signed consent form " + doc.FormVersion + " uploaded: " + doc.FileName + " (" + LabService.FormatSize(doc.SizeBytes) + ")");
+            ToastSuccess("Signed consent uploaded", _patient.FullName + "'s signed consent form is on file.");
+            Bind();
         }
 
         protected string CoverageLabel(PatientCoverage c) { return PatientService.CoverageLabel(c, Hospital.Country); }

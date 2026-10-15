@@ -512,6 +512,36 @@ namespace OpdProject.Services
             return row;
         }
 
+        /* ── Services & procedures (billed from the Service Charge Master at sign-off) ── */
+
+        public static List<ConsultationServiceItem> ListServiceItems(string consultationId)
+        {
+            lock (DataStore.Sync) return DataStore.ConsultationServiceItems.Where(s => s.ConsultationId == consultationId).OrderBy(s => s.CreatedAt).ToList();
+        }
+
+        public static ConsultationServiceItem AddServiceItem(Consultation c, ServiceCharge svc, int qty, string notes, string userId)
+        {
+            var row = new ConsultationServiceItem
+            {
+                ConsultationServiceId = DataStore.NextId("CSV"), ConsultationId = c.ConsultationId, PatientId = c.PatientId,
+                ServiceChargeId = svc.ServiceChargeId, ServiceName = svc.ServiceName, Category = svc.Category,
+                Qty = Math.Max(1, qty), Notes = notes ?? "", AddedByUserId = userId, CreatedAt = DateTime.Now
+            };
+            lock (DataStore.Sync) DataStore.ConsultationServiceItems.Add(row);
+            return row;
+        }
+
+        public static void RemoveServiceItem(string consultationId, string itemId)
+        {
+            lock (DataStore.Sync) DataStore.ConsultationServiceItems.RemoveAll(s => s.ConsultationServiceId == itemId && s.ConsultationId == consultationId);
+        }
+
+        /// <summary>"Wound Dressing ×2 (left forearm)".</summary>
+        public static string ServiceItemLabel(ConsultationServiceItem s)
+        {
+            return s.ServiceName + (s.Qty > 1 ? " ×" + s.Qty : "") + (string.IsNullOrEmpty(s.Notes) ? "" : " (" + s.Notes + ")");
+        }
+
         public static void SaveFollowup(string consultationId, DateTime? date, string notes)
         {
             lock (DataStore.Sync)

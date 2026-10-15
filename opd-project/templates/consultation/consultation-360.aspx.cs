@@ -54,6 +54,7 @@ namespace OpdProject.templates.consultation
             new[] { "vitals", "Vitals", "ti-heart-rate-monitor", "1" }, new[] { "complaints", "Complaints", "ti-list-check", "1" },
             new[] { "diagnosis", "Diagnosis", "ti-stethoscope", "1" }, new[] { "soap", "Observations", "ti-notes", "0" },
             new[] { "labs", "Labs/Imaging", "ti-microscope", "0" }, new[] { "cpoe", "Prescriptions", "ti-prescription", "0" },
+            new[] { "services", "Services & Procedures", "ti-first-aid-kit", "0" },
             new[] { "referral", "Referral", "ti-transfer-out", "0" }, new[] { "followup", "Next Visit", "ti-calendar-plus", "0" },
         };
 
@@ -84,7 +85,7 @@ namespace OpdProject.templates.consultation
 
         private IEnumerable<ConsultationSection> Sections
         {
-            get { return new ConsultationSection[] { Tier0Section, Tier1Section, VitalsSection, SymptomsSection, DiagnosisSection, SoapSection, LabsSection, CpoeSection, ReferralSection, FollowupSection, NotesSection }; }
+            get { return new ConsultationSection[] { Tier0Section, Tier1Section, VitalsSection, SymptomsSection, DiagnosisSection, SoapSection, LabsSection, CpoeSection, ServicesSection, ReferralSection, FollowupSection, NotesSection }; }
         }
 
         /// <summary>The consultation workspace runs full-screen: no app sidebar or top bar.</summary>
@@ -201,6 +202,7 @@ namespace OpdProject.templates.consultation
             var orders = ConsultationService.ListOrders(cid);
             var meds = ConsultationService.ListPrescriptions(cid);
             var refs = ConsultationService.ListReferrals(cid);
+            var services = ConsultationService.ListServiceItems(cid);
             var c = _consultation;
             Func<bool, string> done = b => b ? "completed" : "pending";
             Func<string, bool, string> skippable = (k, b) => b ? "completed" : c.SkippedSteps.Contains(k) ? "skipped" : "pending";
@@ -216,6 +218,7 @@ namespace OpdProject.templates.consultation
                 { "soap", string.IsNullOrEmpty(c.SubjectiveText) ? "" : (c.SubjectiveText.Length > 40 ? c.SubjectiveText.Substring(0, 40) + "..." : c.SubjectiveText) },
                 { "labs", orders.Count > 0 ? orders.Count + " Ordered" : c.SkippedSteps.Contains("labs") ? "Not Needed" : "" },
                 { "cpoe", meds.Count > 0 ? meds.Count + " Prescribed" : "" },
+                { "services", services.Count > 0 ? services.Count + " Added" : c.SkippedSteps.Contains("services") ? "Not Needed" : "" },
                 { "referral", refs.Count > 0 ? refs[0].Specialty : c.SkippedSteps.Contains("referral") ? "Not Needed" : "" },
                 { "followup", c.FollowupDate.HasValue ? FmtDate(c.FollowupDate.Value) : c.SkippedSteps.Contains("followup") ? "Not Needed" : "" },
                 { "notes", ConsultationService.GetConfidentialNote(cid, UserId) != null ? "Saved" : "" },
@@ -228,6 +231,7 @@ namespace OpdProject.templates.consultation
                 { "soap", done(!string.IsNullOrEmpty(c.SubjectiveText) || !string.IsNullOrEmpty(c.ObjectiveText) || !string.IsNullOrEmpty(c.PlanText)) },
                 { "labs", skippable("labs", orders.Count > 0) },
                 { "cpoe", done(meds.Count > 0) },
+                { "services", skippable("services", services.Count > 0) },
                 { "referral", skippable("referral", refs.Count > 0) },
                 { "followup", skippable("followup", c.FollowupDate.HasValue) },
                 { "notes", "pending" },

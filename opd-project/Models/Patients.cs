@@ -142,4 +142,22 @@ namespace OpdProject.Models
         public string Notes { get; set; }
         public DateTime RecordedAt { get; set; }
     }
+
+    /// <summary>
+    /// Scanned copy of the patient's signed "Consent for Sharing Health Information" form (printed from the coverage page).
+    /// The file lives under App_Data/consent-forms and is only streamed after a permission check.
+    /// </summary>
+    public class PatientConsentDocument
+    {
+        public string ConsentDocumentId { get; set; }
+        public string PatientId { get; set; }
+        public string HospitalId { get; set; }
+        public string FormVersion { get; set; }
+        public string FileName { get; set; }
+        public string ContentType { get; set; }
+        public long SizeBytes { get; set; }
+        public string StoredFileName { get; set; }
+        public string UploadedByUserId { get; set; }
+        public DateTime UploadedAt { get; set; }
+    }
 }

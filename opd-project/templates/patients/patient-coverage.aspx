@@ -38,7 +38,11 @@
   </div>
 
   <asp:Panel ID="AddPanel" runat="server" CssClass="card mb-3" DefaultButton="SaveCoverageButton">
-    <div class="reg-section-title" style="border-top:0; padding-top:0; margin-top:0;">Add coverage</div>
+    <div class="reg-section-title" style="border-top:0; padding-top:0; margin-top:0; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+      <span>Add coverage</span>
+      <%-- Admins maintain the insurer list in Settings → Billing & Numbers --%>
+      <asp:HyperLink ID="ManagePayersLink" runat="server" CssClass="btn btn--xs btn--ghost" Visible="false"><i class="ti ti-building-plus" aria-hidden="true"></i> Manage insurance companies</asp:HyperLink>
+    </div>
     <asp:ValidationSummary runat="server" ValidationGroup="Coverage" CssClass="validation-summary" />
     <uc:CoverageForm ID="CoverageFields" runat="server" />
     <div style="display:flex; gap:8px; margin-top:8px;">
@@ -47,6 +51,48 @@
       </asp:LinkButton>
     </div>
   </asp:Panel>
+
+  <%-- Consent for Sharing Health Information: print (pre-filled), patient signs on paper, upload the scanned copy --%>
+  <div class="card mb-3">
+    <div class="reg-section-title" style="border-top:0; padding-top:0; margin-top:0; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+      <span>Consent for sharing health information</span>
+      <asp:Literal ID="ConsentBadge" runat="server" />
+    </div>
+    <p class="text-sm text-muted" style="margin-top:0;">
+      Print the consent form — it is pre-filled with the hospital, physician and patient details — have the patient (or their representative) sign it with a witness,
+      then scan it and upload the signed copy here.
+    </p>
+    <asp:PlaceHolder ID="NoDoctorHint" runat="server" Visible="false">
+      <div class="text-xs text-muted mb-3"><i class="ti ti-info-circle" aria-hidden="true"></i> No preferred physician on file, so the physician line on the form will be blank.
+        <asp:HyperLink ID="SetDoctorLink" runat="server">Set one in patient details</asp:HyperLink>.</div>
+    </asp:PlaceHolder>
+
+    <asp:Repeater ID="ConsentRepeater" runat="server" ItemType="OpdProject.Models.PatientConsentDocument">
+      <HeaderTemplate><table class="data-table mb-3"><thead><tr><th>Signed copy</th><th>Uploaded</th><th>By</th><th>Form</th></tr></thead><tbody></HeaderTemplate>
+      <ItemTemplate>
+        <tr>
+          <td><a href="<%#: OpdProject.Web.Urls.PatientConsentFile(Item.PatientId, Item.ConsentDocumentId) %>" target="_blank" rel="noopener"><i class="ti ti-file-certificate" aria-hidden="true"></i> <%#: Item.FileName %></a>
+            <span class="text-xs text-muted">(<%#: OpdProject.Services.LabService.FormatSize(Item.SizeBytes) %>)</span><%# Container.ItemIndex == 0 ? " <span class=\"badge badge--success\">Current</span>" : "" %></td>
+          <td class="text-xs"><%#: FmtDateTime(Item.UploadedAt) %></td>
+          <td class="text-xs"><%#: OpdProject.Services.UserService.UserName(Item.UploadedByUserId) %></td>
+          <td class="text-xs"><%#: Item.FormVersion %></td>
+        </tr>
+      </ItemTemplate>
+      <FooterTemplate></tbody></table></FooterTemplate>
+    </asp:Repeater>
+
+    <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+      <asp:HyperLink ID="PrintConsentLink" runat="server" CssClass="btn btn--ghost" Target="_blank"><i class="ti ti-printer" aria-hidden="true"></i> Print consent form</asp:HyperLink>
+      <asp:FileUpload ID="ConsentFile" runat="server" CssClass="form-control" style="max-width:320px;" accept=".pdf,.jpg,.jpeg,.png" />
+      <asp:LinkButton ID="UploadConsentButton" runat="server" CssClass="btn btn--primary" CausesValidation="false" OnClick="UploadConsentButton_Click">
+        <i class="ti ti-upload" aria-hidden="true"></i> Upload signed copy
+      </asp:LinkButton>
+    </div>
+    <div class="text-xs text-muted mt-1">PDF, JPG or PNG · up to <%: OpdProject.Services.LabService.MaxFileBytes / (1024 * 1024) %> MB</div>
+    <asp:PlaceHolder ID="ConsentErrorPanel" runat="server" Visible="false">
+      <div class="field-error mt-1"><asp:Literal ID="ConsentError" runat="server" Mode="Encode" /></div>
+    </asp:PlaceHolder>
+  </div>
 
   <div style="display:flex; gap:8px; justify-content:flex-end;">
     <asp:HyperLink ID="BackLink" runat="server" CssClass="btn btn--ghost" />

@@ -20,6 +20,8 @@ namespace OpdProject.Web
             routes.MapPageRoute("patient-edit", "patients/{patientId}/edit", "~/templates/patients/patient-registration.aspx");
             routes.MapPageRoute("patient-allergies", "patients/{patientId}/allergies", "~/templates/patients/patient-allergies.aspx");
             routes.MapPageRoute("patient-coverage", "patients/{patientId}/coverage", "~/templates/patients/patient-coverage.aspx");
+            routes.MapPageRoute("patient-consent-form", "patients/{patientId}/consent-form", "~/templates/patients/patient-consent-form.aspx");
+            routes.MapPageRoute("patient-consent-file", "patients/{patientId}/consent-file/{documentId}", "~/templates/patients/patient-consent-file.aspx");
 
             routes.MapPageRoute("consultation", "consultation/patient/{patientId}", "~/templates/consultation/consultation-360.aspx");
             routes.MapPageRoute("print", "print/{document}/{consultationId}", "~/templates/consultation/print-document.aspx");
@@ -81,6 +83,8 @@ namespace OpdProject.Web
         public static string PatientEdit(string patientId) { return To("patients/" + E(patientId) + "/edit"); }
         public static string Allergies(string patientId) { return To("patients/" + E(patientId) + "/allergies"); }
         public static string PatientCoverage(string patientId) { return To("patients/" + E(patientId) + "/coverage"); }
+        public static string PatientConsentForm(string patientId) { return To("patients/" + E(patientId) + "/consent-form"); }
+        public static string PatientConsentFile(string patientId, string documentId) { return To("patients/" + E(patientId) + "/consent-file/" + E(documentId)); }
         public static string Consultation(string patientId) { return To("consultation/patient/" + E(patientId)); }
         public static string ConsultationConfig { get { return To("settings/consultation"); } }
         public static string Print(string document, string consultationId) { return To("print/" + document + "/" + E(consultationId)); }

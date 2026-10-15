@@ -114,7 +114,8 @@ namespace OpdProject.Services
         }
 
         /// <summary>
-        /// Creates the visit's invoice: the consultation fee line (kept at 0 for free follow-ups so the receipt shows why).
+        /// Creates the visit's invoice: the consultation fee line (kept at 0 for free follow-ups so the receipt shows why),
+        /// then one line per service / procedure the doctor recorded, at the Service Charge Master's current amount and tax.
         /// Lab and imaging orders are NOT billed — the clinic has no in-house diagnostics; the patient takes the
         /// requisition to an outside lab / imaging centre and pays there. Returns the existing invoice if one exists.
         /// </summary>
@@ -140,6 +141,13 @@ namespace OpdProject.Services
                 DataStore.Invoices.Add(inv);
             }
             AddLineItem(inv.InvoiceId, null, charge.Description, "CONSULTATION", 1, charge.FeeAmount, 0, 0);
+            foreach (var item in ConsultationService.ListServiceItems(consultationId))
+            {
+                var svc = GetServiceCharge(item.ServiceChargeId);
+                if (svc == null) continue;
+                AddLineItem(inv.InvoiceId, svc.ServiceChargeId, svc.ServiceName + (string.IsNullOrEmpty(item.Notes) ? "" : " — " + item.Notes),
+                    svc.Category, item.Qty, svc.DefaultAmount, 0, svc.TaxPercent);
+            }
             return RecalculateTotals(inv.InvoiceId);
         }
 

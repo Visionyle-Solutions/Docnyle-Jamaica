@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Web.Hosting;
 using OpdProject.Models;
 
 namespace OpdProject.Services
@@ -297,6 +299,49 @@ namespace OpdProject.Services
             lock (DataStore.Sync) DataStore.FamilyHistory.RemoveAll(f => f.FamilyHistoryId == id);
         }
 
+        /* ── Signed consent form (Consent for Sharing Health Information) ── */
+
+        /// <summary>Printed on the form and stored with each signed copy, so a later wording change is traceable.</summary>
+        public const string ConsentFormVersion = "JM-SHARE-1.0";
+
+        private static string ConsentStorageRoot { get { return HostingEnvironment.MapPath("~/App_Data/consent-forms"); } }
+
+        /// <summary>Signed copies for the patient, newest first (the first one is the current consent).</summary>
+        public static List<PatientConsentDocument> ListConsentDocuments(string patientId)
+        {
+            lock (DataStore.Sync) return DataStore.ConsentDocuments.Where(d => d.PatientId == patientId).OrderByDescending(d => d.UploadedAt).ToList();
+        }
+
+        public static PatientConsentDocument GetConsentDocument(string documentId)
+        {
+            lock (DataStore.Sync) return DataStore.ConsentDocuments.FirstOrDefault(d => d.ConsentDocumentId == documentId);
+        }
+
+        /// <summary>Stores a file already checked with LabService.CheckFile(…, allowDicom: false) under App_Data (never web-served).</summary>
+        public static PatientConsentDocument SaveConsentDocument(Patient patient, string fileName, long length, Stream content, string userId)
+        {
+            var name = Path.GetFileName(fileName);
+            var ext = Path.GetExtension(name).ToLowerInvariant();
+            var doc = new PatientConsentDocument
+            {
+                ConsentDocumentId = DataStore.NextId("PCD"), PatientId = patient.PatientId, HospitalId = patient.HospitalId,
+                FormVersion = ConsentFormVersion, FileName = name, ContentType = LabService.ContentTypeFor(ext), SizeBytes = length,
+                StoredFileName = Guid.NewGuid().ToString("N") + ext, UploadedByUserId = userId, UploadedAt = DateTime.Now,
+            };
+            var dir = Path.Combine(ConsentStorageRoot, patient.HospitalId);
+            Directory.CreateDirectory(dir);
+            content.Position = 0;
+            using (var fs = new FileStream(Path.Combine(dir, doc.StoredFileName), FileMode.CreateNew, FileAccess.Write))
+                content.CopyTo(fs);
+            lock (DataStore.Sync) DataStore.ConsentDocuments.Add(doc);
+            return doc;
+        }
+
+        public static string ConsentDocumentPath(PatientConsentDocument doc)
+        {
+            return Path.Combine(ConsentStorageRoot, doc.HospitalId, doc.StoredFileName);
+        }
+
         /// <summary>Social history lives on the patient row (also editable at registration, except pack-years/activity/diet).</summary>
         public static void UpdateSocialHistory(string patientId, string smoking, int? packYears, string alcohol, string occupation, string activity, string diet)
         {
@@ -333,6 +378,45 @@ namespace OpdProject.Services
             lock (DataStore.Sync) return DataStore.Payers.FirstOrDefault(p => p.PayerId == payerId);
         }
 
+        /// <summary>Every payer of the category for the country, inactive ones included (Settings → Billing &amp; Numbers).</summary>
+        public static List<Payer> ListAllPayers(string country, string category)
+        {
+            lock (DataStore.Sync)
+                return DataStore.Payers.Where(p => p.Country == country && p.Category == category).OrderBy(p => p.Name).ToList();
+        }
+
+        /// <summary>
+        /// Adds a payer for the country (admin settings). Names are unique per country and category, ignoring case and
+        /// extra spaces; returns null for an active duplicate and reactivates an inactive one.
+        /// </summary>
+        public static Payer AddPayer(string name, string category, string country)
+        {
+            name = string.Join(" ", (name ?? "").Split((char[])null, StringSplitOptions.RemoveEmptyEntries));
+            lock (DataStore.Sync)
+            {
+                var existing = DataStore.Payers.FirstOrDefault(p => p.Country == country && p.Category == category
+                    && string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+                if (existing != null)
+                {
+                    if (existing.IsActive) return null;
+                    existing.IsActive = true;
+                    return existing;
+                }
+                var payer = new Payer { PayerId = DataStore.NextId("PAYER"), Name = name, Category = category, Country = country, IsActive = true };
+                DataStore.Payers.Add(payer);
+                return payer;
+            }
+        }
+
+        /// <summary>An inactive payer is no longer offered for new coverage; coverage already on file keeps it.</summary>
+        public static void TogglePayer(string payerId)
+        {
+            lock (DataStore.Sync)
+            {
+                var p = DataStore.Payers.FirstOrDefault(x => x.PayerId == payerId);
+                if (p != null) p.IsActive = !p.IsActive;
+            }
+        }
         public static List<PatientCoverage> ListCoverages(string patientId)
         {
             lock (DataStore.Sync)

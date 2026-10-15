@@ -118,6 +118,34 @@ namespace OpdProject.templates.settings
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
         protected global::System.Web.UI.WebControls.Repeater FeesRepeater;
 
+        /// <summary>PayersRepeater control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.Repeater PayersRepeater;
+
+        /// <summary>NoPayers control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.PlaceHolder NoPayers;
+
+        /// <summary>AddPayerPanel control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.Panel AddPayerPanel;
+
+        /// <summary>NewPayerName control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.TextBox NewPayerName;
+
+        /// <summary>AddPayerButton control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.LinkButton AddPayerButton;
+
+        /// <summary>PayerErrorPanel control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.PlaceHolder PayerErrorPanel;
+
+        /// <summary>PayerError control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.Literal PayerError;
+
         /// <summary>NotificationsTab control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
         protected global::System.Web.UI.WebControls.PlaceHolder NotificationsTab;

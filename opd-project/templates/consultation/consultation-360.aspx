@@ -8,6 +8,7 @@
 <%@ Register TagPrefix="uc" TagName="Soap" Src="~/templates/consultation/consultation-soap.ascx" %>
 <%@ Register TagPrefix="uc" TagName="Labs" Src="~/templates/consultation/consultation-labs.ascx" %>
 <%@ Register TagPrefix="uc" TagName="Cpoe" Src="~/templates/consultation/consultation-cpoe-card.ascx" %>
+<%@ Register TagPrefix="uc" TagName="Services" Src="~/templates/consultation/consultation-services.ascx" %>
 <%@ Register TagPrefix="uc" TagName="Referral" Src="~/templates/consultation/consultation-referral.ascx" %>
 <%@ Register TagPrefix="uc" TagName="Followup" Src="~/templates/consultation/consultation-followup.ascx" %>
 <%@ Register TagPrefix="uc" TagName="Notes" Src="~/templates/consultation/consultation-confidential-notes.ascx" %>
@@ -112,6 +113,7 @@
               <c360:ConsultCard Step="soap" runat="server"><uc:Soap ID="SoapSection" runat="server" /></c360:ConsultCard>
               <c360:ConsultCard Step="labs" runat="server"><uc:Labs ID="LabsSection" runat="server" /></c360:ConsultCard>
               <c360:ConsultCard Step="cpoe" runat="server"><uc:Cpoe ID="CpoeSection" runat="server" /></c360:ConsultCard>
+              <c360:ConsultCard Step="services" runat="server"><uc:Services ID="ServicesSection" runat="server" /></c360:ConsultCard>
               <c360:ConsultCard Step="referral" runat="server"><uc:Referral ID="ReferralSection" runat="server" /></c360:ConsultCard>
               <c360:ConsultCard Step="followup" runat="server"><uc:Followup ID="FollowupSection" runat="server" /></c360:ConsultCard>
               <c360:ConsultCard Step="notes" runat="server"><uc:Notes ID="NotesSection" runat="server" /></c360:ConsultCard>

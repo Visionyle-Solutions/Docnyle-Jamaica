@@ -100,6 +100,43 @@ namespace OpdProject.templates.settings
             ServicesRepeater.DataBind();
             FeesRepeater.DataSource = SchedulingService.ListFees(HospitalId);
             FeesRepeater.DataBind();
+            BindPayers();
+        }
+
+        private void BindPayers()
+        {
+            var payers = PatientService.ListAllPayers(Hospital.Country, "PRIVATE");
+            PayersRepeater.DataSource = payers;
+            PayersRepeater.DataBind();
+            NoPayers.Visible = payers.Count == 0;
+        }
+
+        protected void AddPayerButton_Click(object sender, EventArgs e)
+        {
+            PayerErrorPanel.Visible = false;
+            Validate("Payer");
+            if (!IsValid) return;
+            var payer = PatientService.AddPayer(NewPayerName.Text, "PRIVATE", Hospital.Country);
+            if (payer == null)
+            {
+                PayerError.Text = "\"" + NewPayerName.Text.Trim() + "\" is already in the list.";
+                PayerErrorPanel.Visible = true;
+                return;
+            }
+            Audit("CREATE", "Payer", payer.PayerId, "Insurance company added: " + payer.Name + " (" + payer.Country + ")");
+            ToastSuccess(payer.Name + " added", "It is now offered under Private Insurance on the Coverage page and at billing.");
+            NewPayerName.Text = "";
+            BindPayers();
+        }
+
+        protected void PayersRepeater_ItemCommand(object source, RepeaterCommandEventArgs e)
+        {
+            var payer = PatientService.GetPayer((string)e.CommandArgument);
+            if (payer == null || payer.Country != Hospital.Country || payer.Category != "PRIVATE") return;
+            PatientService.TogglePayer(payer.PayerId);
+            Audit("UPDATE", "Payer", payer.PayerId, payer.Name + (payer.IsActive ? " activated" : " deactivated"));
+            ToastSuccess(payer.Name + (payer.IsActive ? " activated" : " deactivated"));
+            BindPayers();
         }
 
         protected void SaveBillingButton_Click(object sender, EventArgs e)

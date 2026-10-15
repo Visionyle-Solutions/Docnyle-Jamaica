@@ -41,6 +41,7 @@ namespace OpdProject.Services
         public static List<MedicalEventItem> MedicalEventItems = new List<MedicalEventItem>();
         public static List<PatientMedicalEvent> PatientMedicalEvents = new List<PatientMedicalEvent>();
         public static List<PatientFamilyHistory> FamilyHistory = new List<PatientFamilyHistory>();
+        public static List<PatientConsentDocument> ConsentDocuments = new List<PatientConsentDocument>();
         public static List<Consultation> Consultations = new List<Consultation>();
         public static List<VitalConfig> VitalsConfig = new List<VitalConfig>();
         public static List<ConsultationVitals> Vitals = new List<ConsultationVitals>();
@@ -68,6 +69,7 @@ namespace OpdProject.Services
         public static List<LabResult> LabResults = new List<LabResult>();
         public static List<LabResultAttachment> LabResultAttachments = new List<LabResultAttachment>();
         public static List<Referral> Referrals = new List<Referral>();
+        public static List<ConsultationServiceItem> ConsultationServiceItems = new List<ConsultationServiceItem>();
         public static List<Addendum> Addenda = new List<Addendum>();
         public static List<ConsultationSketch> Sketches = new List<ConsultationSketch>();
         public static List<ConfidentialNote> ConfidentialNotes = new List<ConfidentialNote>();

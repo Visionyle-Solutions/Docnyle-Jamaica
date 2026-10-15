@@ -131,6 +131,8 @@ namespace OpdProject.templates.consultation
             add("Medications", MedsTable(ConsultationService.ListPrescriptions(cid)), "cpoe");
             var orders = ConsultationService.ListOrders(cid);
             add("Investigations ordered", orders.Count == 0 ? "" : H(string.Join(", ", orders.Select(o => o.TestName + " (" + o.TestType + ")"))), "labs");
+            var services = ConsultationService.ListServiceItems(cid);
+            add("Services & procedures", string.Join("<br/>", services.Select(s => H(ConsultationService.ServiceItemLabel(s)))), "services");
             var refs = ConsultationService.ListReferrals(cid);
             add("Referrals", string.Join("<br/>", refs.Select(r => H(r.Specialty + (string.IsNullOrEmpty(r.DoctorName) ? "" : " (Dr. " + r.DoctorName + ")") + " — " + r.Urgency + ": " + r.Reason))), "referral");
             add("Follow-Up", c.FollowupDate.HasValue ? H(FmtDate(c.FollowupDate.Value) + (string.IsNullOrEmpty(c.FollowupNotes) ? "" : " — " + c.FollowupNotes)) : "", "followup");

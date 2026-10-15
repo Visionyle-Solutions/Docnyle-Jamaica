@@ -201,6 +201,13 @@
     <Compile Include="templates\consultation\consultation-referral.ascx.designer.cs">
       <DependentUpon>consultation-referral.ascx</DependentUpon>
     </Compile>
+    <Compile Include="templates\consultation\consultation-services.ascx.cs">
+      <DependentUpon>consultation-services.ascx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="templates\consultation\consultation-services.ascx.designer.cs">
+      <DependentUpon>consultation-services.ascx</DependentUpon>
+    </Compile>
     <Compile Include="templates\consultation\consultation-soap.ascx.cs">
       <DependentUpon>consultation-soap.ascx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -305,6 +312,20 @@
     </Compile>
     <Compile Include="templates\patients\patient-medications-tab.ascx.designer.cs">
       <DependentUpon>patient-medications-tab.ascx</DependentUpon>
+    </Compile>
+    <Compile Include="templates\patients\patient-consent-file.aspx.cs">
+      <DependentUpon>patient-consent-file.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="templates\patients\patient-consent-file.aspx.designer.cs">
+      <DependentUpon>patient-consent-file.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="templates\patients\patient-consent-form.aspx.cs">
+      <DependentUpon>patient-consent-form.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="templates\patients\patient-consent-form.aspx.designer.cs">
+      <DependentUpon>patient-consent-form.aspx</DependentUpon>
     </Compile>
     <Compile Include="templates\patients\patient-coverage.aspx.cs">
       <DependentUpon>patient-coverage.aspx</DependentUpon>
@@ -558,6 +579,7 @@
     <Content Include="templates\consultation\consultation-followup.ascx" />
     <Content Include="templates\consultation\consultation-labs.ascx" />
     <Content Include="templates\consultation\consultation-referral.ascx" />
+    <Content Include="templates\consultation\consultation-services.ascx" />
     <Content Include="templates\consultation\consultation-soap.ascx" />
     <Content Include="templates\consultation\consultation-symptoms.ascx" />
     <Content Include="templates\consultation\consultation-vitals.ascx" />
@@ -574,6 +596,8 @@
     <Content Include="templates\patients\patient-family-social-tab.ascx" />
     <Content Include="templates\patients\patient-history-tab.ascx" />
     <Content Include="templates\patients\patient-medications-tab.ascx" />
+    <Content Include="templates\patients\patient-consent-file.aspx" />
+    <Content Include="templates\patients\patient-consent-form.aspx" />
     <Content Include="templates\patients\patient-coverage.aspx" />
     <Content Include="templates\patients\patient-form.ascx" />
     <Content Include="templates\patients\patient-visits-tab.ascx" />

@@ -27,6 +27,9 @@ namespace OpdProject.Services
 
         public static string AcceptedExtensions { get { return string.Join(",", FileTypes.Keys); } }
 
+        /// <summary>MIME type for an extension accepted by <see cref="CheckFile"/>.</summary>
+        public static string ContentTypeFor(string ext) { return FileTypes[ext]; }
+
         /* ── Lab partners (the organisations; their staff are LAB_PARTNER users) ── */
 
         public static List<LabPartner> ListLabPartners(string hospitalId)
@@ -221,12 +224,14 @@ namespace OpdProject.Services
         /// Checks one uploaded file before anything is saved: allowed extension, size, and that the content
         /// really is that format (file signature), so a renamed executable or HTML page is rejected.
         /// Returns an error message, or null when the file is acceptable. Leaves the stream at position 0.
+        /// Scanned documents (e.g. a signed consent form) pass allowDicom = false.
         /// </summary>
-        public static string CheckFile(string fileName, long length, Stream content)
+        public static string CheckFile(string fileName, long length, Stream content, bool allowDicom = true)
         {
             var name = Path.GetFileName(fileName ?? "");
             var ext = Path.GetExtension(name);
-            if (string.IsNullOrEmpty(name) || !FileTypes.ContainsKey(ext)) return name + ": only PDF, JPG, PNG or DICOM (.dcm) files are accepted";
+            if (!allowDicom && FileTypes.ContainsKey(ext) && FileTypes[ext] == "application/dicom") return name + ": only PDF, JPG or PNG files are accepted";
+            if (string.IsNullOrEmpty(name) || !FileTypes.ContainsKey(ext)) return name + (allowDicom ? ": only PDF, JPG, PNG or DICOM (.dcm) files are accepted" : ": only PDF, JPG or PNG files are accepted");
             if (length <= 0) return name + ": the file is empty";
             if (length > MaxFileBytes) return name + ": larger than " + (MaxFileBytes / (1024 * 1024)) + " MB";
 

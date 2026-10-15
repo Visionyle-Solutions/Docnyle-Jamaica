@@ -100,6 +100,8 @@ namespace OpdProject.templates.patients
             var orders = ConsultationService.ListOrders(cid);
             if (orders.Count > 0) row("Tests Ordered", H(string.Join(", ", orders.Select(o => o.TestName))));
 
+            var services = ConsultationService.ListServiceItems(cid);
+            if (services.Count > 0) row("Services", H(string.Join("; ", services.Select(ConsultationService.ServiceItemLabel))));
             var refs = ConsultationService.ListReferrals(cid);
             if (refs.Count > 0) row("Referral", H(string.Join("; ", refs.Select(r => r.Specialty))));
 

@@ -74,6 +74,24 @@
             <asp:RangeValidator runat="server" ControlToValidate="SvcTax" ValidationGroup="Service" Type="Double" MinimumValue="0" MaximumValue="100" Text="Tax 0–100" CssClass="field-error" Display="Dynamic" />
           </asp:Panel>
         </div>
+        <div class="settings-section mt-3" id="insurers">
+          <div class="settings-section-header">Insurance Companies <span class="text-xs text-muted" style="font-weight:400;">— offered under Private Insurance on the patient Coverage page and at billing (<%: Hospital.Country %>)</span></div>
+          <table class="data-table" style="font-size:12px;"><thead><tr><th>Insurance company</th><th>Status</th><th></th></tr></thead><tbody>
+            <asp:Repeater ID="PayersRepeater" runat="server" ItemType="OpdProject.Models.Payer" OnItemCommand="PayersRepeater_ItemCommand">
+              <ItemTemplate><tr><td><%#: Item.Name %></td>
+                <td><span class="badge <%# Item.IsActive ? "badge--success" : "badge--danger" %>"><%# Item.IsActive ? "Active" : "Inactive" %></span></td>
+                <td><asp:LinkButton runat="server" CssClass="btn btn--xs btn--ghost" CommandName="Toggle" CommandArgument="<%# Item.PayerId %>" CausesValidation="false"
+                  OnClientClick='<%# Item.IsActive ? "return confirm(\"Stop offering this insurance company for new coverage? Coverage already on file is kept.\");" : "" %>'><%# Item.IsActive ? "Deactivate" : "Activate" %></asp:LinkButton></td></tr></ItemTemplate>
+            </asp:Repeater>
+            <asp:PlaceHolder ID="NoPayers" runat="server" Visible="false"><tr class="empty-row"><td colspan="3">No insurance companies yet.</td></tr></asp:PlaceHolder>
+          </tbody></table>
+          <asp:Panel ID="AddPayerPanel" runat="server" DefaultButton="AddPayerButton" style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; align-items:flex-start;">
+            <asp:TextBox ID="NewPayerName" runat="server" CssClass="form-control" style="width:280px;" placeholder="New insurance company name" MaxLength="100" />
+            <asp:LinkButton ID="AddPayerButton" runat="server" CssClass="btn btn--sm btn--success" ValidationGroup="Payer" OnClick="AddPayerButton_Click"><i class="ti ti-plus"></i> Add insurance company</asp:LinkButton>
+            <asp:RequiredFieldValidator runat="server" ControlToValidate="NewPayerName" ValidationGroup="Payer" Text="Enter the company name" CssClass="field-error" Display="Dynamic" />
+            <asp:PlaceHolder ID="PayerErrorPanel" runat="server" Visible="false"><span class="field-error"><asp:Literal ID="PayerError" runat="server" Mode="Encode" /></span></asp:PlaceHolder>
+          </asp:Panel>
+        </div>
         <div class="settings-section mt-3">
           <div class="settings-section-header">Doctor Fee Schedule <span class="text-xs text-muted" style="font-weight:400;">— edit fees in <a href="<%: Urls.To("settings/scheduling") %>?tab=doctors">Schedule Settings → Doctors</a></span></div>
           <table class="data-table" style="font-size:12px;"><thead><tr><th>Doctor</th><th>Type</th><th style="text-align:right;">Amount</th><th>Effective</th></tr></thead><tbody>

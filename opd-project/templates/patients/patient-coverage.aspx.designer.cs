@@ -49,5 +49,45 @@ namespace OpdProject.templates.patients
         /// <summary>ContinueLink control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
         protected global::System.Web.UI.WebControls.HyperLink ContinueLink;
+
+        /// <summary>ConsentBadge control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.Literal ConsentBadge;
+
+        /// <summary>NoDoctorHint control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.PlaceHolder NoDoctorHint;
+
+        /// <summary>SetDoctorLink control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.HyperLink SetDoctorLink;
+
+        /// <summary>ConsentRepeater control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.Repeater ConsentRepeater;
+
+        /// <summary>PrintConsentLink control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.HyperLink PrintConsentLink;
+
+        /// <summary>ConsentFile control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.FileUpload ConsentFile;
+
+        /// <summary>UploadConsentButton control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.LinkButton UploadConsentButton;
+
+        /// <summary>ConsentErrorPanel control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.PlaceHolder ConsentErrorPanel;
+
+        /// <summary>ConsentError control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.Literal ConsentError;
+
+        /// <summary>ManagePayersLink control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.HyperLink ManagePayersLink;
     }
 }
