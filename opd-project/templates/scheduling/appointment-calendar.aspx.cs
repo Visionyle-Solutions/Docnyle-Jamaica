@@ -90,7 +90,7 @@ namespace OpdProject.templates.scheduling
 
         protected bool CanConsult(AppointmentView a)
         {
-            return Role == "DOCTOR" && Can("consultation") && a.DoctorId == UserId && (a.Status == "CHECKED_IN" || a.Status == "IN_CONSULT");
+            return HasRole("DOCTOR") && Can("consultation") && a.DoctorId == UserId && (a.Status == "CHECKED_IN" || a.Status == "IN_CONSULT");
         }
 
         /* ── Row actions ── */

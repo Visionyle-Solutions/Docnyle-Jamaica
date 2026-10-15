@@ -22,57 +22,17 @@ namespace OpdProject.templates.portal
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
         protected global::System.Web.UI.WebControls.Panel FormPanel;
 
-        /// <summary>FullName control.</summary>
+        /// <summary>PatientFields control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox FullName;
+        protected global::OpdProject.templates.patients.patient_form PatientFields;
 
-        /// <summary>Phone control.</summary>
+        /// <summary>DuplicatePanel control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox Phone;
+        protected global::System.Web.UI.WebControls.PlaceHolder DuplicatePanel;
 
-        /// <summary>Gender control.</summary>
+        /// <summary>DuplicateText control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.DropDownList Gender;
-
-        /// <summary>Dob control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox Dob;
-
-        /// <summary>Email control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox Email;
-
-        /// <summary>Address control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox Address;
-
-        /// <summary>HealthIdMark control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.PlaceHolder HealthIdMark;
-
-        /// <summary>HealthId control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox HealthId;
-
-        /// <summary>HealthIdRequired control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.RequiredFieldValidator HealthIdRequired;
-
-        /// <summary>EmergencyName control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox EmergencyName;
-
-        /// <summary>EmergencyPhone control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox EmergencyPhone;
-
-        /// <summary>Insurance control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox Insurance;
-
-        /// <summary>PolicyNo control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox PolicyNo;
+        protected global::System.Web.UI.WebControls.Literal DuplicateText;
 
         /// <summary>ConsentCheck control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>

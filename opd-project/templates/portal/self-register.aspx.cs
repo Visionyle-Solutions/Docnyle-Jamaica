@@ -7,7 +7,11 @@ using OpdProject.Web;
 
 namespace OpdProject.templates.portal
 {
-    /// <summary>Public self-registration: validated on the server, issues an MRN, audited as a portal registration.</summary>
+    /// <summary>
+    /// Public self-registration: the same patient-form fields as staff registration, validated on the server,
+    /// issues an MRN, audited as a portal registration. Duplicates (same phone / TRN / health id) are blocked,
+    /// but — this page being public — without revealing who the existing record belongs to.
+    /// </summary>
     public partial class self_register : BasePage
     {
         protected override bool AllowAnonymous { get { return true; } }
@@ -23,7 +27,6 @@ namespace OpdProject.templates.portal
             }
         }
 
-        protected string HealthIdLabelText { get { return string.IsNullOrEmpty(PortalHospital.NationalHealthIdLabel) ? "National ID" : PortalHospital.NationalHealthIdLabel; } }
         protected string PatientIdLabelText { get { return string.IsNullOrEmpty(PortalHospital.PatientIdLabel) ? "MRN" : PortalHospital.PatientIdLabel; } }
         protected string BookUrl { get { return Urls.To("portal/book") + "?h=" + HttpUtility.UrlEncode(PortalHospital.HospitalId); } }
 
@@ -34,33 +37,34 @@ namespace OpdProject.templates.portal
 
         protected void Page_Load(object sender, EventArgs e)
         {
-            HealthIdRequired.Enabled = HealthIdMark.Visible = PortalHospital.NationalHealthIdMandatory;
-            HealthIdRequired.ErrorMessage = HealthIdLabelText + " is required";
+            PatientFields.Hospital = PortalHospital;
+            PatientFields.Setup();
             LogoHtml.Text = string.IsNullOrEmpty(PortalHospital.LogoBase64)
                 ? "<img src=\"" + ResolveUrl("~/assets/logo.png") + "\" alt=\"Consult360\" style=\"max-height:70px;\" />"
                 : "<img src=\"" + HttpUtility.HtmlAttributeEncode(PortalHospital.LogoBase64) + "\" alt=\"\" style=\"max-height:50px;\" />";
         }
 
-        protected void Dob_ServerValidate(object source, ServerValidateEventArgs args)
-        {
-            var d = ParseDate(args.Value);
-            args.IsValid = d.HasValue && d.Value <= DateTime.Today && d.Value >= DateTime.Today.AddYears(-130);
-        }
-
         protected void Consent_ServerValidate(object source, ServerValidateEventArgs args) { args.IsValid = ConsentCheck.Checked; }
-
-        private static string Clean(string s) { s = (s ?? "").Trim(); return s.Length == 0 ? null : s; }
 
         protected void SubmitButton_Click(object sender, EventArgs e)
         {
             if (!IsValid) return;
-            var p = PatientService.Create(new Patient
+            var record = new Patient { HospitalId = PortalHospital.HospitalId, RegisteredVia = "PATIENT_PORTAL" };
+            PatientFields.ApplyTo(record);
+
+            var dup = PatientService.FindDuplicate(record);
+            if (dup != null)
             {
-                HospitalId = PortalHospital.HospitalId, FullName = FullName.Text.Trim(), Phone = Phone.Text.Trim(), Gender = Gender.SelectedValue,
-                Dob = ParseDate(Dob.Text), Email = Clean(Email.Text), Address = Clean(Address.Text), NationalHealthId = Clean(HealthId.Text),
-                EmergencyContactName = Clean(EmergencyName.Text), EmergencyContactPhone = Clean(EmergencyPhone.Text),
-                InsuranceProvider = Clean(Insurance.Text), InsurancePolicyNo = Clean(PolicyNo.Text), RegisteredVia = "PATIENT_PORTAL",
-            });
+                DuplicateText.Text = "A patient with this " + Server.HtmlEncode(PatientFields.DuplicateFieldLabel(dup.Field))
+                    + " is already registered with the clinic. Use <a href=\"" + Server.HtmlEncode(BookUrl) + "\">Book an appointment</a> with your "
+                    + Server.HtmlEncode(PatientIdLabelText) + " or phone number, or contact the clinic"
+                    + (string.IsNullOrEmpty(PortalHospital.ContactNumber) ? "" : " on " + Server.HtmlEncode(PortalHospital.ContactNumber)) + " if your details have changed.";
+                DuplicatePanel.Visible = true;
+                PatientFields.FocusDuplicate(dup.Field);
+                return;
+            }
+
+            var p = PatientService.Create(record);
             AuditService.Record(PortalHospital.HospitalId, null, "CREATE", "Patient", p.PatientId, "Self-registered via patient portal");
             NewMrn.Text = HttpUtility.HtmlEncode(p.Mrn);
             FormPanel.Visible = false;

@@ -64,7 +64,7 @@ namespace OpdProject.Services
             lock (DataStore.Sync)
             {
                 var tpl = HospitalService.GetSetting(hospitalId, "DOCTOR_NAME_TEMPLATE");
-                foreach (var u in DataStore.Users.Where(x => x.HospitalId == hospitalId && x.Role == "DOCTOR"))
+                foreach (var u in DataStore.Users.Where(x => x.HospitalId == hospitalId && x.HasRole("DOCTOR")))
                     u.FullName = RenderDoctorName(u, tpl);
             }
         }

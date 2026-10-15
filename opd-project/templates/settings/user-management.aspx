@@ -10,14 +10,14 @@
   </div>
   <div class="card">
     <table class="data-table">
-      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Specialty / Lab</th><th>Active</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Name</th><th>Email</th><th>Roles</th><th>Specialty / Lab</th><th>Active</th><th>Actions</th></tr></thead>
       <tbody>
         <asp:Repeater ID="UsersRepeater" runat="server" ItemType="OpdProject.Models.AppUser" OnItemCommand="UsersRepeater_ItemCommand">
           <ItemTemplate>
             <tr>
               <td><%#: Item.FullName %></td>
               <td class="text-xs"><%#: Item.Email %></td>
-              <td><span class="badge <%# Item.Role == "ADMIN" ? "badge--danger" : Item.Role == "DOCTOR" ? "badge--success" : "badge--info" %>" style="font-size:10px;"><%#: Item.Role %></span></td>
+              <td><%# RoleBadges(Item, "10px") %></td>
               <td class="text-xs"><%#: SpecialtyOrLab(Item) %></td>
               <td><span class="badge <%# Item.IsActive ? "badge--success" : "badge--danger" %>"><%# Item.IsActive ? "Active" : "Inactive" %></span></td>
               <td style="white-space:nowrap;">
@@ -46,7 +46,9 @@
           <asp:RequiredFieldValidator runat="server" ControlToValidate="UserEmail" ValidationGroup="User" ErrorMessage="Email is required" Text="Required" CssClass="field-error" Display="Dynamic" />
           <asp:RegularExpressionValidator runat="server" ControlToValidate="UserEmail" ValidationGroup="User" ValidationExpression="^[^@\s]+@[^@\s]+\.[^@\s]+$" ErrorMessage="Enter a valid email" Text="Invalid email" CssClass="field-error" Display="Dynamic" />
           <asp:CustomValidator ID="EmailUniqueValidator" runat="server" ControlToValidate="UserEmail" ValidationGroup="User" OnServerValidate="EmailUniqueValidator_ServerValidate" ErrorMessage="Another user already has this email" Text="Already in use" CssClass="field-error" Display="Dynamic" /></div>
-        <div class="form-group"><label class="form-label" for="<%= UserRole.ClientID %>">Role *</label><asp:DropDownList ID="UserRole" runat="server" CssClass="form-select" AutoPostBack="true" OnSelectedIndexChanged="UserRole_SelectedIndexChanged" /></div>
+        <div class="form-group form-group--full"><span class="form-label">Roles * <span class="text-xs text-muted" style="font-weight:400;">— tick every role this user performs; access is the combination of all ticked roles</span></span>
+          <asp:CheckBoxList ID="UserRoles" runat="server" CssClass="role-checks" RepeatLayout="UnorderedList" AutoPostBack="true" OnSelectedIndexChanged="UserRoles_SelectedIndexChanged" />
+          <asp:CustomValidator ID="RolesValidator" runat="server" ValidationGroup="User" OnServerValidate="RolesValidator_ServerValidate" ErrorMessage="Select at least one role" Text="Required" CssClass="field-error" Display="Dynamic" /></div>
         <asp:PlaceHolder ID="SpecialtyHolder" runat="server">
           <div class="form-group"><label class="form-label" for="<%= UserSpecialty.ClientID %>">Specialty</label><asp:DropDownList ID="UserSpecialty" runat="server" CssClass="form-select" /></div>
         </asp:PlaceHolder>

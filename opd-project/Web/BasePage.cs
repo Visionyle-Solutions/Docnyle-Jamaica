@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Linq;
 using System.Web;
 using System.Web.UI;
 using OpdProject.Models;
@@ -25,7 +26,17 @@ namespace OpdProject.Web
 
         protected AppUser CurrentUser { get; private set; }
         protected string UserId { get { return CurrentUser != null ? CurrentUser.UserId : null; } }
-        protected string Role { get { return CurrentUser != null ? CurrentUser.Role : null; } }
+        /// <summary>True when the signed-in user holds this role (a user may hold several).</summary>
+        protected bool HasRole(string role) { return CurrentUser != null && CurrentUser.HasRole(role); }
+        /// <summary>Doctor-only users see just their own patients/appointments; see AppUser.SeesOwnPatientsOnly.</summary>
+        protected bool SeesOwnPatientsOnly { get { return CurrentUser != null && CurrentUser.SeesOwnPatientsOnly; } }
+
+        /// <summary>One coloured badge per role, for user lists.</summary>
+        protected static string RoleBadges(AppUser u, string fontSize)
+        {
+            return string.Join(" ", u.Roles.Select(r => "<span class=\"badge " + (r == "ADMIN" ? "badge--danger" : r == "DOCTOR" ? "badge--success" : "badge--info")
+                + "\" style=\"font-size:" + fontSize + ";\">" + HttpUtility.HtmlEncode(r) + "</span>"));
+        }
 
         /// <summary>Signed-in user's hospital; for anonymous pages, the first (demo) hospital.</summary>
         protected string HospitalId { get { return CurrentUser != null ? CurrentUser.HospitalId : "HOSP-001"; } }
@@ -40,7 +51,7 @@ namespace OpdProject.Web
             /* endResponse: true — nothing on a guarded page may run for an unauthorised request */
             if (CurrentUser == null && !AllowAnonymous)
                 Response.Redirect(Urls.Login + "?returnUrl=" + HttpUtility.UrlEncode(Request.RawUrl), true);
-            if (CurrentUser != null && !UserService.HasPermission(CurrentUser.Role, RequiredPermission))
+            if (CurrentUser != null && !UserService.HasPermission(CurrentUser, RequiredPermission))
                 Response.Redirect(Urls.To("access-denied") + "?page=" + HttpUtility.UrlEncode(PageTitle), true);
         }
 
@@ -50,7 +61,7 @@ namespace OpdProject.Web
             Title = PageTitle + " · Consult360";
         }
 
-        protected bool Can(string feature) { return CurrentUser != null && UserService.HasPermission(CurrentUser.Role, feature); }
+        protected bool Can(string feature) { return UserService.HasPermission(CurrentUser, feature); }
 
         /* ── Route / query values ── */
 
@@ -104,6 +115,18 @@ namespace OpdProject.Web
         {
             if (value == null) return "";
             return FmtDate(value) + " " + FmtTime(value);
+        }
+
+        /// <summary>One-line coverage identifiers: card number for a govt scheme (NHF …), member/policy/group and claim mode for private cover, plus validity.</summary>
+        protected string CoverageIdent(PatientCoverage c)
+        {
+            var scheme = PatientService.GetGovtSchemeProfile(Hospital.Country);
+            var ident = c.CoverageType == "GOVT_SCHEME"
+                ? scheme.CardLabel + ": " + (string.IsNullOrEmpty(c.GovtCardNumber) ? "—" : c.GovtCardNumber)
+                : "Member: " + (string.IsNullOrEmpty(c.MemberId) ? "—" : c.MemberId) + " · Policy: " + (string.IsNullOrEmpty(c.PolicyNumber) ? "—" : c.PolicyNumber)
+                  + (string.IsNullOrEmpty(c.GroupNumber) ? "" : " · Group: " + c.GroupNumber) + " · " + TitleCase(c.ClaimMode);
+            if (c.EffectiveDate.HasValue || c.ExpiryDate.HasValue) ident += " · Valid " + (c.EffectiveDate.HasValue ? FmtDate(c.EffectiveDate.Value) : "—") + " → " + (c.ExpiryDate.HasValue ? FmtDate(c.ExpiryDate.Value) : "—");
+            return ident;
         }
 
         /// <summary>Stored codes (DRUG, ACTIVE, CHECKED_IN) shown as Title Case ("Checked In").</summary>

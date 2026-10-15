@@ -17,7 +17,7 @@ namespace OpdProject.templates.settings
         protected override string RequiredPermission { get { return "admin_phrases"; } }
         public override string PageTitle { get { return "Phrase Library"; } }
 
-        protected bool IsAdmin { get { return Role == "ADMIN"; } }
+        protected bool IsAdmin { get { return HasRole("ADMIN"); } }
 
         protected void Page_Load(object sender, EventArgs e)
         {

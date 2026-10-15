@@ -18,7 +18,7 @@ namespace OpdProject.templates.settings
         protected void Page_Load(object sender, EventArgs e)
         {
             if (!IsPostBack && CurrentUser != null)
-                Go(Navigation.LandingFor(CurrentUser.Role));
+                Go(Navigation.LandingFor(CurrentUser));
             HospitalNameText.Text = Server.HtmlEncode(Hospital.Name);
             HospitalAddressText.Text = Server.HtmlEncode(Hospital.LegalAddress);
         }
@@ -39,7 +39,7 @@ namespace OpdProject.templates.settings
 
             var returnUrl = Request.QueryString["returnUrl"];
             bool local = !string.IsNullOrEmpty(returnUrl) && returnUrl.StartsWith("/") && !returnUrl.StartsWith("//");
-            Go(local ? returnUrl : Navigation.LandingFor(user.Role));
+            Go(local ? returnUrl : Navigation.LandingFor(user));
         }
     }
 }

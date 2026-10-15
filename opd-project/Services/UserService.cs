@@ -47,7 +47,7 @@ namespace OpdProject.Services
 
         public static List<AppUser> ListActiveDoctors(string hospitalId)
         {
-            lock (DataStore.Sync) return DataStore.Users.Where(u => u.HospitalId == hospitalId && u.Role == "DOCTOR" && u.IsActive).ToList();
+            lock (DataStore.Sync) return DataStore.Users.Where(u => u.HospitalId == hospitalId && u.HasRole("DOCTOR") && u.IsActive).ToList();
         }
 
         public static string UserName(string userId)
@@ -62,18 +62,32 @@ namespace OpdProject.Services
                 return DataStore.Users.Any(u => u.UserId != exceptUserId && string.Equals(u.Email, email, StringComparison.OrdinalIgnoreCase));
         }
 
-        /// <summary>labPartnerId is kept only for LAB_PARTNER accounts; specialty only for clinic roles.</summary>
-        public static AppUser CreateUser(string hospitalId, string fullName, string email, string role, string specialtyId, string password, string labPartnerId)
+        /// <summary>
+        /// Distinct, known roles in canonical (Roles) order. Returns null when the combination is not allowed:
+        /// no roles, or LAB_PARTNER mixed with a clinic role (an outside lab must never inherit clinical access).
+        /// </summary>
+        public static List<string> NormalizeRoles(IEnumerable<string> roles)
         {
-            bool lab = role == "LAB_PARTNER";
+            var set = new HashSet<string>(roles ?? Enumerable.Empty<string>());
+            var list = Roles.Where(set.Contains).ToList();
+            if (list.Count == 0 || (list.Contains("LAB_PARTNER") && list.Count > 1)) return null;
+            return list;
+        }
+
+        /// <summary>labPartnerId is kept only for LAB_PARTNER accounts; specialty only for clinic roles.</summary>
+        public static AppUser CreateUser(string hospitalId, string fullName, string email, IEnumerable<string> roles, string specialtyId, string password, string labPartnerId)
+        {
+            var list = NormalizeRoles(roles);
+            if (list == null) throw new ArgumentException("Invalid role combination", "roles");
+            bool lab = list.Contains("LAB_PARTNER");
             var user = new AppUser
             {
                 UserId = DataStore.NextId("USR"), HospitalId = hospitalId, FullName = fullName, Email = email, Phone = "",
-                Role = role, SpecialtyId = lab || string.IsNullOrWhiteSpace(specialtyId) ? null : specialtyId,
+                Roles = list, SpecialtyId = lab || string.IsNullOrWhiteSpace(specialtyId) ? null : specialtyId,
                 LabPartnerId = lab ? labPartnerId : null,
                 Password = string.IsNullOrEmpty(password) ? "demo123" : password, IsActive = true
             };
-            if (role == "DOCTOR")
+            if (user.HasRole("DOCTOR"))
             {
                 var parts = fullName.Replace("Dr.", "").Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
                 user.Prefix = "Dr.";
@@ -84,16 +98,18 @@ namespace OpdProject.Services
             return user;
         }
 
-        public static void UpdateUser(string userId, string fullName, string email, string role, string specialtyId, string labPartnerId)
+        public static void UpdateUser(string userId, string fullName, string email, IEnumerable<string> roles, string specialtyId, string labPartnerId)
         {
-            bool lab = role == "LAB_PARTNER";
+            var list = NormalizeRoles(roles);
+            if (list == null) throw new ArgumentException("Invalid role combination", "roles");
+            bool lab = list.Contains("LAB_PARTNER");
             lock (DataStore.Sync)
             {
                 var u = DataStore.Users.FirstOrDefault(x => x.UserId == userId);
                 if (u == null) return;
                 u.FullName = fullName;
                 u.Email = email;
-                u.Role = role;
+                u.Roles = list;
                 u.SpecialtyId = lab || string.IsNullOrWhiteSpace(specialtyId) ? null : specialtyId;
                 u.LabPartnerId = lab ? labPartnerId : null;
             }
@@ -110,6 +126,13 @@ namespace OpdProject.Services
         }
 
         /* ── Permission matrix ── */
+
+        /// <summary>True when any of the user's roles grants the feature (null/empty feature = any signed-in user).</summary>
+        public static bool HasPermission(AppUser user, string feature)
+        {
+            if (string.IsNullOrEmpty(feature)) return true;
+            return user != null && user.Roles.Any(r => HasPermission(r, feature));
+        }
 
         public static bool HasPermission(string role, string feature)
         {

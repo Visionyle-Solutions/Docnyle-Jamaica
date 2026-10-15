@@ -55,7 +55,10 @@ namespace OpdProject.Models
         public bool IsActive { get; set; }
     }
 
-    /// <summary>ApplicationUsers table. Roles: ADMIN, DOCTOR, RECEPTIONIST, BILLING, NURSE, LAB_PARTNER.</summary>
+    /// <summary>
+    /// ApplicationUsers table. Roles: ADMIN, DOCTOR, RECEPTIONIST, BILLING, NURSE, LAB_PARTNER.
+    /// A user may hold several roles (sec.UserRole); permissions are the union of what the roles grant.
+    /// </summary>
     public class AppUser
     {
         public string UserId { get; set; }
@@ -64,7 +67,37 @@ namespace OpdProject.Models
         public string Email { get; set; }
         public string Phone { get; set; }
         public string Password { get; set; }
-        public string Role { get; set; }
+
+        private List<string> _roles = new List<string>();
+
+        /// <summary>Every role the user holds, in UserService.Roles order (kept normalised by UserService).</summary>
+        public List<string> Roles
+        {
+            get { return _roles; }
+            set { _roles = value ?? new List<string>(); }
+        }
+
+        /// <summary>
+        /// Primary (first) role, for display only — use HasRole for decisions. Setting it replaces
+        /// all roles with that one, which keeps single-role seed data and doctor creation simple.
+        /// </summary>
+        public string Role
+        {
+            get { return _roles.Count > 0 ? _roles[0] : null; }
+            set { _roles = string.IsNullOrEmpty(value) ? new List<string>() : new List<string> { value }; }
+        }
+
+        public bool HasRole(string role) { return _roles.Contains(role); }
+
+        /// <summary>"ADMIN, DOCTOR"</summary>
+        public string RolesLabel { get { return string.Join(", ", _roles); } }
+
+        /// <summary>
+        /// Doctor-scoped views (own patients/appointments only) apply to a user whose only role is DOCTOR;
+        /// a doctor who also holds a front-desk or admin role sees the whole clinic like that role does.
+        /// </summary>
+        public bool SeesOwnPatientsOnly { get { return _roles.Count == 1 && _roles[0] == "DOCTOR"; } }
+
         public string SpecialtyId { get; set; }
         public string LicenseNumber { get; set; }
         public string Prefix { get; set; }

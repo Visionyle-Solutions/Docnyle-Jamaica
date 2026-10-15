@@ -22,7 +22,7 @@ namespace OpdProject.templates.patients
         public void Bind()
         {
             var user = AppSession.CurrentUser;
-            var canPrint = UserService.HasPermission(user.Role, "print");
+            var canPrint = UserService.HasPermission(user, "print");
             var meds = ConsultationService.ListMedicationHistory(PatientId);
             var visits = ConsultationService.ListPastVisits(PatientId).Select(v =>
             {
@@ -45,7 +45,7 @@ namespace OpdProject.templates.patients
         {
             var sb = new StringBuilder();
             /* A doctor can reopen only their own consultation (the consultation page enforces the same rule) */
-            if (user.Role == "DOCTOR" && c.DoctorId == user.UserId)
+            if (user.HasRole("DOCTOR") && c.DoctorId == user.UserId)
                 Link(sb, Urls.Consultation(c.PatientId) + "?cid=" + HttpUtility.UrlEncode(c.ConsultationId), "ti-stethoscope", "Open Visit", false);
             if (canPrint)
             {

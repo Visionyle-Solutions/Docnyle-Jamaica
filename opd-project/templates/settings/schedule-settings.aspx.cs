@@ -44,7 +44,7 @@ namespace OpdProject.templates.settings
         }
 
         /// <summary>Doctors can edit only their own profile/timetable; administrators can edit everyone.</summary>
-        private bool IsAdmin { get { return Role == "ADMIN"; } }
+        private bool IsAdmin { get { return HasRole("ADMIN"); } }
 
         protected string SelectedDoctorId
         {

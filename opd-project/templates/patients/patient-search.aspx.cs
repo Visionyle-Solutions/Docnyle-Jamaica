@@ -11,7 +11,7 @@ namespace OpdProject.templates.patients
         public override string PageTitle { get { return "Patient Search"; } }
 
         /// <summary>Only doctors open a consultation (it is recorded under the signed-in doctor).</summary>
-        protected bool CanConsult { get { return Role == "DOCTOR" && Can("consultation"); } }
+        protected bool CanConsult { get { return HasRole("DOCTOR") && Can("consultation"); } }
 
         protected void Page_Load(object sender, EventArgs e)
         {

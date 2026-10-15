@@ -98,7 +98,7 @@ namespace OpdProject.templates.consultation
             var patientId = RouteValue("patientId");
             Patient = PatientService.Get(patientId);
             if (Patient == null || Patient.HospitalId != HospitalId) { ShowError("Patient not found."); return; }
-            if (Role != "DOCTOR") { ShowError("Only doctors can open a consultation — it is recorded under the signed-in doctor."); return; }
+            if (!HasRole("DOCTOR")) { ShowError("Only doctors can open a consultation — it is recorded under the signed-in doctor."); return; }
 
             var cid = ViewState["cid"] as string ?? Request.QueryString["cid"];
             var existing = cid != null ? ConsultationService.Get(cid) : null;

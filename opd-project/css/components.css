@@ -51,6 +51,27 @@
 }
 .form-grid .form-group--full { grid-column: 1 / -1; }
 
+/* Sectioned registration form (patient-registration.aspx): small uppercase section
+   headings over rows of up to four auto-fitting fields. */
+.reg-section-title {
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px;
+  color: var(--text-secondary); margin: 18px 0 10px; padding-top: 14px;
+  border-top: 1px solid var(--border-default);
+}
+.reg-form .validation-summary + .reg-section-title,
+.reg-form > div:first-child + .reg-section-title { border-top: 0; padding-top: 0; margin-top: 4px; }
+.reg-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0 var(--space-3);
+}
+.reg-fields .form-group { min-width: 0; }
+
+/* Multi-role checkboxes (user-management.aspx) */
+.role-checks { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 4px 0 0; padding: 0; list-style: none; }
+.role-checks li { display: flex; align-items: center; }
+.role-checks label { margin-left: 4px; font-size: 13px; cursor: pointer; }
+
 /* Cards */
 .card {
   background: var(--surface-card);

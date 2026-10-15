@@ -13,7 +13,7 @@ namespace OpdProject
         protected void Page_Load(object sender, EventArgs e)
         {
             var user = AppSession.CurrentUser;
-            Response.Redirect(user != null ? Navigation.LandingFor(user.Role) : Urls.Login, true);
+            Response.Redirect(user != null ? Navigation.LandingFor(user) : Urls.Login, true);
         }
     }
 }

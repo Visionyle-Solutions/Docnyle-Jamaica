@@ -136,7 +136,7 @@
             <span><a class="btn btn--sm btn--primary" href="<%: Urls.To("settings/users") %>"><i class="ti ti-users"></i> Manage users</a> <a class="btn btn--sm btn--ghost" href="<%: Urls.To("settings/permissions") %>"><i class="ti ti-shield-lock"></i> Permission matrix</a></span></div>
           <table class="data-table" style="font-size:11px;"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Active</th><th></th></tr></thead><tbody>
             <asp:Repeater ID="UsersRepeater" runat="server" ItemType="OpdProject.Models.AppUser" OnItemCommand="UsersRepeater_ItemCommand">
-              <ItemTemplate><tr><td><%#: Item.FullName %></td><td><%#: Item.Email %></td><td><span class="badge <%# Item.Role == "ADMIN" ? "badge--danger" : Item.Role == "DOCTOR" ? "badge--success" : "badge--info" %>" style="font-size:9px;"><%#: Item.Role %></span></td>
+              <ItemTemplate><tr><td><%#: Item.FullName %></td><td><%#: Item.Email %></td><td><%# RoleBadges(Item, "9px") %></td>
                 <td><%# Item.IsActive ? "✓" : "✗" %></td>
                 <td><asp:LinkButton runat="server" CssClass="btn btn--xs btn--ghost" CommandName="Toggle" CommandArgument="<%# Item.UserId %>" CausesValidation="false" Visible="<%# Item.UserId != CurrentUserId %>"><%# Item.IsActive ? "Disable" : "Enable" %></asp:LinkButton></td></tr></ItemTemplate>
             </asp:Repeater>

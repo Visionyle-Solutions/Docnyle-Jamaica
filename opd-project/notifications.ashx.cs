@@ -35,7 +35,7 @@ namespace OpdProject
             if (open != null)
             {
                 var n = UserNotificationService.MarkRead(open, user.UserId);
-                var url = n != null && n.Url != null && n.Url.StartsWith("/") && !n.Url.StartsWith("//") ? n.Url : Navigation.LandingFor(user.Role);
+                var url = n != null && n.Url != null && n.Url.StartsWith("/") && !n.Url.StartsWith("//") ? n.Url : Navigation.LandingFor(user);
                 res.Redirect(url, false);
                 return;
             }

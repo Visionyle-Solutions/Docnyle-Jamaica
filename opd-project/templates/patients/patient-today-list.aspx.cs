@@ -16,7 +16,7 @@ namespace OpdProject.templates.patients
         protected override string RequiredPermission { get { return "patients"; } }
         public override string PageTitle { get { return "Today's Patients"; } }
 
-        protected bool ShowDoctor { get { return Role != "DOCTOR"; } }
+        protected bool ShowDoctor { get { return !SeesOwnPatientsOnly; } }
 
         protected void Page_Load(object sender, EventArgs e)
         {
@@ -124,7 +124,7 @@ namespace OpdProject.templates.patients
             var appt = SchedulingService.GetAppointment((string)e.CommandArgument);
             /* same checks as the button: scheduling permission, this hospital, (for a doctor) their own patient, booked for today */
             var allowed = appt != null && Can("scheduling") && appt.HospitalId == HospitalId && appt.SlotStart.Date == DateTime.Today
-                && (Role != "DOCTOR" || appt.DoctorId == UserId);
+                && (!SeesOwnPatientsOnly || appt.DoctorId == UserId);
             var updated = allowed ? SchedulingService.UpdateStatus(appt.AppointmentId, "CHECKED_IN", UserId) : null;
             if (updated != null && updated.Status == "CHECKED_IN")
             {
@@ -138,7 +138,7 @@ namespace OpdProject.templates.patients
         /* The consultation is opened by the appointment's own doctor, once the patient is checked in */
         protected bool CanConsult(AppointmentView a)
         {
-            return Role == "DOCTOR" && Can("consultation") && a.DoctorId == UserId && a.SlotStart.Date == DateTime.Today && (a.Status == "CHECKED_IN" || a.Status == "IN_CONSULT");
+            return HasRole("DOCTOR") && Can("consultation") && a.DoctorId == UserId && a.SlotStart.Date == DateTime.Today && (a.Status == "CHECKED_IN" || a.Status == "IN_CONSULT");
         }
 
         protected bool CanCheckIn(AppointmentView a) { return Can("scheduling") && a.Status == "BOOKED" && a.SlotStart.Date == DateTime.Today; }

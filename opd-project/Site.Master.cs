@@ -31,7 +31,7 @@ namespace OpdProject
         {
             var user = AppSession.CurrentUser;
             ChromeSidebar.Visible = user != null && !HideChrome;
-            bool bell = user != null && UserService.HasPermission(user.Role, "consultation");
+            bool bell = user != null && UserService.HasPermission(user, "consultation");
             if (bell && HideChrome) FloatingBell.Text = BellHtml(user.UserId, true);
             if (!ChromeSidebar.Visible) return;
             if (bell) TopbarBell.Text = BellHtml(user.UserId, false);
@@ -40,9 +40,9 @@ namespace OpdProject
             HospitalName.Text = HttpUtility.HtmlEncode(hospital != null ? hospital.Name : "");
             if (hospital != null && !string.IsNullOrEmpty(hospital.LogoBase64))
                 HospitalLogo.Text = "<img src=\"" + HttpUtility.HtmlAttributeEncode(hospital.LogoBase64) + "\" alt=\"\" style=\"max-height:28px; margin-right:10px;\" />";
-            UserBadge.Text = HttpUtility.HtmlEncode(user.FullName + " · " + user.Role) + " · ";
+            UserBadge.Text = HttpUtility.HtmlEncode(user.FullName + " · " + user.RolesLabel) + " · ";
 
-            NavSections.DataSource = Navigation.ForRole(user.Role, CurrentPath);
+            NavSections.DataSource = Navigation.ForUser(user, CurrentPath);
             NavSections.DataBind();
         }
 

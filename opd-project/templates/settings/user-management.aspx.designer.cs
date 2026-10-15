@@ -46,9 +46,13 @@ namespace OpdProject.templates.settings
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
         protected global::System.Web.UI.WebControls.CustomValidator EmailUniqueValidator;
 
-        /// <summary>UserRole control.</summary>
+        /// <summary>UserRoles control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.DropDownList UserRole;
+        protected global::System.Web.UI.WebControls.CheckBoxList UserRoles;
+
+        /// <summary>RolesValidator control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.CustomValidator RolesValidator;
 
         /// <summary>UserSpecialty control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>

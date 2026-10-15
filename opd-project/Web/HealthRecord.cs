@@ -12,7 +12,7 @@ namespace OpdProject.Web
 
         /// <summary>Read-only tab of signed visits; shown to these roles only.</summary>
         public const string VisitsTab = "visits";
-        public static bool CanSeeVisits(string role) { return role == "DOCTOR" || role == "NURSE"; }
+        public static bool CanSeeVisits(Models.AppUser user) { return user != null && (user.HasRole("DOCTOR") || user.HasRole("NURSE")); }
 
         /// <summary>"Mar 2018", "2015" or "—".</summary>
         public static string SinceLabel(int? month, int? year)

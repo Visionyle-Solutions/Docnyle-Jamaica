@@ -51,11 +51,50 @@ namespace OpdProject.Services
                 if (p == null) return null;
                 p.FullName = changes.FullName; p.Gender = changes.Gender; p.Dob = changes.Dob; p.Phone = changes.Phone;
                 p.Email = changes.Email; p.Address = changes.Address; p.NationalHealthId = changes.NationalHealthId;
-                p.SmokingStatus = changes.SmokingStatus; p.AlcoholUse = changes.AlcoholUse; p.Occupation = changes.Occupation;
+                p.Occupation = changes.Occupation;
                 p.BloodGroup = changes.BloodGroup; p.EmergencyContactName = changes.EmergencyContactName;
-                p.EmergencyContactPhone = changes.EmergencyContactPhone; p.InsuranceProvider = changes.InsuranceProvider;
-                p.InsurancePolicyNo = changes.InsurancePolicyNo;
+                p.EmergencyContactPhone = changes.EmergencyContactPhone;
+                p.Prefix = changes.Prefix; p.FirstName = changes.FirstName; p.MiddleName = changes.MiddleName; p.LastName = changes.LastName;
+                p.Trn = changes.Trn; p.CountryCode = changes.CountryCode; p.Mobile = changes.Mobile; p.PreferredLanguage = changes.PreferredLanguage;
+                p.AddrLine1 = changes.AddrLine1; p.AddrLine2 = changes.AddrLine2; p.City = changes.City; p.Region = changes.Region; p.Country = changes.Country;
+                p.MaritalStatus = changes.MaritalStatus; p.ReferralSource = changes.ReferralSource; p.PreferredDoctorId = changes.PreferredDoctorId;
                 return p;
+            }
+        }
+
+        /// <summary>
+        /// Duplicate guard for new registrations: another patient in the hospital with the same
+        /// national health id / TRN, or the same phone number (digits compared, trailing-match so
+        /// "+1-876-555-0101" and "8765550101" collide). Returns the clash, or null.
+        /// </summary>
+        public static PatientDuplicate FindDuplicate(Patient fields)
+        {
+            Func<string, string> digits = v => new string((v ?? "").Where(char.IsDigit).ToArray());
+            Func<string, string> norm = v => (v ?? "").Replace(" ", "").Replace("-", "").ToLowerInvariant();
+            lock (DataStore.Sync)
+            {
+                var others = DataStore.Patients.Where(p => p.HospitalId == fields.HospitalId && p.PatientId != fields.PatientId).ToList();
+                if (norm(fields.NationalHealthId).Length > 0)
+                {
+                    var hit = others.FirstOrDefault(p => norm(p.NationalHealthId) == norm(fields.NationalHealthId));
+                    if (hit != null) return new PatientDuplicate { Field = "NationalHealthId", Value = fields.NationalHealthId, Patient = hit };
+                }
+                if (norm(fields.Trn).Length > 0)
+                {
+                    var hit = others.FirstOrDefault(p => norm(p.Trn) == norm(fields.Trn));
+                    if (hit != null) return new PatientDuplicate { Field = "Trn", Value = fields.Trn, Patient = hit };
+                }
+                var mob = digits(fields.Mobile);
+                if (mob.Length >= 7)
+                {
+                    var hit = others.FirstOrDefault(p =>
+                    {
+                        var d = digits(string.IsNullOrEmpty(p.Mobile) ? p.Phone : p.Mobile);
+                        return d.Length >= 7 && (d == mob || d.EndsWith(mob) || mob.EndsWith(d));
+                    });
+                    if (hit != null) return new PatientDuplicate { Field = "Mobile", Value = fields.Mobile, Patient = hit };
+                }
+                return null;
             }
         }
 

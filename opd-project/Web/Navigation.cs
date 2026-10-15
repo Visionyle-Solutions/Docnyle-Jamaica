@@ -71,24 +71,25 @@ namespace OpdProject.Web
             };
         }
 
-        /// <summary>Sections filtered to the items the role may open; the section holding the current page starts open.</summary>
-        public static List<NavSection> ForRole(string role, string currentPath)
+        /// <summary>Sections filtered to the items any of the user's roles may open; the section holding the current page starts open.</summary>
+        public static List<NavSection> ForUser(Models.AppUser user, string currentPath)
         {
             var sections = All();
             foreach (var s in sections)
             {
-                s.Items = s.Items.Where(i => Services.UserService.HasPermission(role, i.Permission)).ToList();
+                s.Items = s.Items.Where(i => Services.UserService.HasPermission(user, i.Permission)).ToList();
                 s.IsOpen = s.Items.Any(i => IsCurrent(i, currentPath));
             }
             return sections.Where(s => s.Items.Count > 0).ToList();
         }
 
         /// <summary>Where a user lands after sign-in: lab partners → Lab Portal, everyone else → Dashboard (or their first allowed page).</summary>
-        public static string LandingFor(string role)
+        public static string LandingFor(Models.AppUser user)
         {
-            if (role == "LAB_PARTNER") return Urls.LabPortal;
-            if (Services.UserService.HasPermission(role, "patients")) return Urls.Dashboard;
-            var first = ForRole(role, null).SelectMany(s => s.Items).FirstOrDefault();
+            if (user == null) return Urls.Login;
+            if (user.HasRole("LAB_PARTNER")) return Urls.LabPortal;
+            if (Services.UserService.HasPermission(user, "patients")) return Urls.Dashboard;
+            var first = ForUser(user, null).SelectMany(s => s.Items).FirstOrDefault();
             return first != null ? first.Url : Urls.Login;
         }
 

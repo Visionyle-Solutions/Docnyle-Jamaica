@@ -103,6 +103,13 @@
     <Compile Include="Web\Navigation.cs" />
     <Compile Include="Web\RouteConfig.cs" />
     <Compile Include="Web\VitalUnitUi.cs" />
+    <Compile Include="templates\billing\coverage-form.ascx.cs">
+      <DependentUpon>coverage-form.ascx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="templates\billing\coverage-form.ascx.designer.cs">
+      <DependentUpon>coverage-form.ascx</DependentUpon>
+    </Compile>
     <Compile Include="templates\billing\billing-checkout.aspx.cs">
       <DependentUpon>billing-checkout.aspx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -298,6 +305,20 @@
     </Compile>
     <Compile Include="templates\patients\patient-medications-tab.ascx.designer.cs">
       <DependentUpon>patient-medications-tab.ascx</DependentUpon>
+    </Compile>
+    <Compile Include="templates\patients\patient-coverage.aspx.cs">
+      <DependentUpon>patient-coverage.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="templates\patients\patient-coverage.aspx.designer.cs">
+      <DependentUpon>patient-coverage.aspx</DependentUpon>
+    </Compile>
+    <Compile Include="templates\patients\patient-form.ascx.cs">
+      <DependentUpon>patient-form.ascx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="templates\patients\patient-form.ascx.designer.cs">
+      <DependentUpon>patient-form.ascx</DependentUpon>
     </Compile>
     <Compile Include="templates\patients\patient-visits-tab.ascx.cs">
       <DependentUpon>patient-visits-tab.ascx</DependentUpon>
@@ -523,6 +544,7 @@
     <Content Include="js\site.js" />
     <Content Include="js\components\component-drawing-pad.js" />
     <Content Include="js\engines\engine-voice-soap.js" />
+    <Content Include="templates\billing\coverage-form.ascx" />
     <Content Include="templates\billing\billing-checkout.aspx" />
     <Content Include="templates\billing\day-end.aspx" />
     <Content Include="templates\billing\invoice-list.aspx" />
@@ -552,6 +574,8 @@
     <Content Include="templates\patients\patient-family-social-tab.ascx" />
     <Content Include="templates\patients\patient-history-tab.ascx" />
     <Content Include="templates\patients\patient-medications-tab.ascx" />
+    <Content Include="templates\patients\patient-coverage.aspx" />
+    <Content Include="templates\patients\patient-form.ascx" />
     <Content Include="templates\patients\patient-visits-tab.ascx" />
     <Content Include="templates\patients\patient-registration.aspx" />
     <Content Include="templates\patients\patient-search.aspx" />

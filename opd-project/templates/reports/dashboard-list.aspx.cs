@@ -25,7 +25,7 @@ namespace OpdProject.templates.reports
         };
 
         /// <summary>Doctors see only their own rows, so the doctor column is shown to other roles only.</summary>
-        protected bool ShowDoctor { get { return Role != "DOCTOR"; } }
+        protected bool ShowDoctor { get { return !SeesOwnPatientsOnly; } }
 
         private string Kind { get { return Request.QueryString["kind"]; } }
         private string Period { get { return Request.QueryString["period"]; } }
@@ -48,14 +48,14 @@ namespace OpdProject.templates.reports
             string kind = Kind, period = Period, status = Status;
             DateTime from, to;
             ReportService.PeriodRange(period, DateTime.Today, out from, out to);
-            var rows = ReportService.DashboardList(HospitalId, Role == "DOCTOR" ? UserId : null, kind, period, status, DateTime.Today);
+            var rows = ReportService.DashboardList(HospitalId, SeesOwnPatientsOnly ? UserId : null, kind, period, status, DateTime.Today);
             RowsRepeater.DataSource = rows;
             RowsRepeater.DataBind();
             EmptyRow.Visible = rows.Count == 0;
 
             TitleText.Text = HttpUtility.HtmlEncode(KindTitles[kind] + " · " + PeriodTitles[period] + (status != null ? " · " + StatusLabel(status) : ""));
             SubtitleText.Text = HttpUtility.HtmlEncode((from == to ? FmtDate(from) : FmtDate(from) + " – " + FmtDate(to)) + " · " + rows.Count + (rows.Count == 1 ? " visit" : " visits")
-                + (Role == "DOCTOR" ? " · your patients" : " · all doctors"));
+                + (SeesOwnPatientsOnly ? " · your patients" : " · all doctors"));
         }
 
         protected void RowsRepeater_ItemCommand(object source, RepeaterCommandEventArgs e)
@@ -64,7 +64,7 @@ namespace OpdProject.templates.reports
             var appt = SchedulingService.GetAppointment((string)e.CommandArgument);
             /* same checks as the button: scheduling permission, this hospital, (for a doctor) their own patient, booked for today */
             var allowed = appt != null && Can("scheduling") && appt.HospitalId == HospitalId && appt.SlotStart.Date == DateTime.Today
-                && (Role != "DOCTOR" || appt.DoctorId == UserId);
+                && (!SeesOwnPatientsOnly || appt.DoctorId == UserId);
             var updated = allowed ? SchedulingService.UpdateStatus(appt.AppointmentId, "CHECKED_IN", UserId) : null;
             if (updated != null && updated.Status == "CHECKED_IN")
             {
@@ -83,7 +83,7 @@ namespace OpdProject.templates.reports
 
         protected bool CanConsult(AppointmentView a)
         {
-            return Role == "DOCTOR" && Can("consultation") && a.DoctorId == UserId && a.SlotStart.Date == DateTime.Today
+            return HasRole("DOCTOR") && Can("consultation") && a.DoctorId == UserId && a.SlotStart.Date == DateTime.Today
                 && (a.Status == "CHECKED_IN" || a.Status == "IN_CONSULT");
         }
     }

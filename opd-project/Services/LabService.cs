@@ -65,7 +65,7 @@ namespace OpdProject.Services
         private static readonly TimeSpan ClaimWindow = TimeSpan.FromMinutes(15);
         private static readonly Dictionary<string, List<DateTime>> ClaimFailures = new Dictionary<string, List<DateTime>>();
 
-        private static bool IsPartner(AppUser user) { return user != null && user.Role == "LAB_PARTNER"; }
+        private static bool IsPartner(AppUser user) { return user != null && user.HasRole("LAB_PARTNER"); }
 
         /// <summary>Whether the user may act on the order: same hospital, and for a lab partner, an order it claimed.</summary>
         public static bool CanHandle(AppUser user, InvestigationOrder order)
@@ -296,7 +296,7 @@ namespace OpdProject.Services
         {
             if (user == null || att == null || att.HospitalId != user.HospitalId) return false;
             if (IsPartner(user)) return !string.IsNullOrEmpty(user.LabPartnerId) && att.LabPartnerId == user.LabPartnerId;
-            return UserService.HasPermission(user.Role, "consultation") || UserService.HasPermission(user.Role, "lab_portal");
+            return UserService.HasPermission(user, "consultation") || UserService.HasPermission(user, "lab_portal");
         }
 
         public static string FormatSize(long bytes)

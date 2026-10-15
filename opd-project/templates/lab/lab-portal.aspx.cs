@@ -18,7 +18,7 @@ namespace OpdProject.templates.lab
         protected override string RequiredPermission { get { return "lab_portal"; } }
         public override string PageTitle { get { return "Lab Partner Portal"; } }
 
-        protected bool IsPartner { get { return Role == "LAB_PARTNER"; } }
+        protected bool IsPartner { get { return HasRole("LAB_PARTNER"); } }
 
         protected void Page_Load(object sender, EventArgs e)
         {

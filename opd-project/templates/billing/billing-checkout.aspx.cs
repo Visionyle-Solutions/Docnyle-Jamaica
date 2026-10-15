@@ -153,16 +153,6 @@ namespace OpdProject.templates.billing
 
         protected bool Expired(PatientCoverage c) { return c.ExpiryDate.HasValue && c.ExpiryDate.Value.Date < DateTime.Today; }
 
-        protected string CoverageIdent(PatientCoverage c)
-        {
-            var ident = c.CoverageType == "GOVT_SCHEME"
-                ? Scheme.CardLabel + ": " + (string.IsNullOrEmpty(c.GovtCardNumber) ? "—" : c.GovtCardNumber)
-                : "Member: " + (string.IsNullOrEmpty(c.MemberId) ? "—" : c.MemberId) + " · Policy: " + (string.IsNullOrEmpty(c.PolicyNumber) ? "—" : c.PolicyNumber)
-                  + (string.IsNullOrEmpty(c.GroupNumber) ? "" : " · Group: " + c.GroupNumber) + " · " + TitleCase(c.ClaimMode);
-            if (c.EffectiveDate.HasValue || c.ExpiryDate.HasValue) ident += " · Valid " + (c.EffectiveDate.HasValue ? FmtDate(c.EffectiveDate.Value) : "—") + " → " + (c.ExpiryDate.HasValue ? FmtDate(c.ExpiryDate.Value) : "—");
-            return ident;
-        }
-
         protected void CoverageRepeater_ItemDataBound(object sender, RepeaterItemEventArgs e)
         {
             var cov = e.Item.DataItem as PatientCoverage;
@@ -253,53 +243,21 @@ namespace OpdProject.templates.billing
 
         protected void AddCoverageButton_Click(object sender, EventArgs e)
         {
-            CovType.Items.Clear();
-            CovType.Items.Add(new ListItem("Private Insurance", "PRIVATE_INSURANCE"));
-            CovType.Items.Add(new ListItem(Scheme.Label, "GOVT_SCHEME"));
-            CovPayerPrivate.DataSource = PatientService.ListPayers(Hospital.Country, "PRIVATE");
-            CovPayerPrivate.DataTextField = "Name"; CovPayerPrivate.DataValueField = "PayerId"; CovPayerPrivate.DataBind();
-            CovPayerGovt.DataSource = PatientService.ListPayers(Hospital.Country, "GOVT_SCHEME");
-            CovPayerGovt.DataTextField = "Name"; CovPayerGovt.DataValueField = "PayerId"; CovPayerGovt.DataBind();
-            CardLabel.Text = H(Scheme.CardLabel);
-            CovGovtValidator.ErrorMessage = "Enter the " + Scheme.CardLabel;
-            CovPlan.Text = CovMember.Text = CovPolicy.Text = CovGroup.Text = CovCard.Text = CovEffective.Text = CovExpiry.Text = "";
-            CovHolder.Text = _patient.FullName;
-            CovType_Changed(null, EventArgs.Empty);
+            CoverageFields.Reset(Hospital, _patient);
             AddCoverageModal.Visible = true;
         }
 
-        protected void CovType_Changed(object sender, EventArgs e)
+        /* The coverage type drop-down posts back; keep the modal open. */
+        protected void CoverageFields_TypeChanged(object sender, EventArgs e)
         {
-            CovPrivate.Visible = CovType.SelectedValue != "GOVT_SCHEME";
-            CovGovt.Visible = CovType.SelectedValue == "GOVT_SCHEME";
             AddCoverageModal.Visible = true;
-        }
-
-        protected void CovPrivateValidator_ServerValidate(object source, ServerValidateEventArgs args)
-        {
-            args.IsValid = CovType.SelectedValue != "PRIVATE_INSURANCE" || CovMember.Text.Trim().Length > 0 || CovPolicy.Text.Trim().Length > 0;
-        }
-
-        protected void CovGovtValidator_ServerValidate(object source, ServerValidateEventArgs args)
-        {
-            args.IsValid = CovType.SelectedValue != "GOVT_SCHEME" || CovCard.Text.Trim().Length > 0;
         }
 
         protected void ConfirmCoverageButton_Click(object sender, EventArgs e)
         {
             Validate("Coverage");
             if (!IsValid) { AddCoverageModal.Visible = true; return; }
-            var govt = CovType.SelectedValue == "GOVT_SCHEME";
-            var record = new PatientCoverage
-            {
-                HospitalId = HospitalId, PatientId = _patient.PatientId, CoverageType = CovType.SelectedValue,
-                PayerId = govt ? CovPayerGovt.SelectedValue : CovPayerPrivate.SelectedValue,
-                PlanName = govt ? Scheme.Label : CovPlan.Text.Trim(), MemberId = govt ? "" : CovMember.Text.Trim(), PolicyNumber = govt ? "" : CovPolicy.Text.Trim(),
-                GroupNumber = govt ? "" : CovGroup.Text.Trim(), PolicyHolderName = govt ? _patient.FullName : CovHolder.Text.Trim(),
-                Relationship = govt ? "Self" : CovRelation.SelectedValue, ClaimMode = govt ? "" : CovMode.SelectedValue,
-                GovtCardNumber = govt ? CovCard.Text.Trim() : "", EffectiveDate = ParseDate(CovEffective.Text), ExpiryDate = ParseDate(CovExpiry.Text), Status = CovStatus.SelectedValue,
-            };
-            var saved = PatientService.AddCoverage(record);
+            var saved = PatientService.AddCoverage(CoverageFields.BuildRecord(HospitalId, _patient));
             Audit("CREATE", "PatientCoverage", saved.CoverageId, CoverageLabel(saved));
             ToastSuccess("Coverage added", "Verify it to apply to this invoice.");
             AddCoverageModal.Visible = false;

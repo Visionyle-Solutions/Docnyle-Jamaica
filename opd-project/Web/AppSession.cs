@@ -52,7 +52,7 @@ namespace OpdProject.Web
         public static bool Can(string feature)
         {
             var u = CurrentUser;
-            return u != null && UserService.HasPermission(u.Role, feature);
+            return UserService.HasPermission(u, feature);
         }
 
         /// <summary>Queues a toast. It survives a redirect because it lives in session until rendered.</summary>

@@ -11,7 +11,7 @@ namespace OpdProject.templates.lab
         protected override string RequiredPermission { get { return "consultation"; } }
         public override string PageTitle { get { return "Lab Results Inbox"; } }
 
-        protected bool CanConsult { get { return Role == "DOCTOR"; } }
+        protected bool CanConsult { get { return HasRole("DOCTOR"); } }
 
         protected void Page_Load(object sender, EventArgs e)
         {

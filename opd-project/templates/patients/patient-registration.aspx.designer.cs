@@ -22,77 +22,17 @@ namespace OpdProject.templates.patients
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
         protected global::System.Web.UI.WebControls.Literal MrnText;
 
-        /// <summary>FullNameInput control.</summary>
+        /// <summary>PatientFields control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox FullNameInput;
+        protected global::OpdProject.templates.patients.patient_form PatientFields;
 
-        /// <summary>GenderInput control.</summary>
+        /// <summary>DuplicatePanel control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.DropDownList GenderInput;
+        protected global::System.Web.UI.WebControls.PlaceHolder DuplicatePanel;
 
-        /// <summary>DobInput control.</summary>
+        /// <summary>DuplicateText control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox DobInput;
-
-        /// <summary>DobValidator control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.CustomValidator DobValidator;
-
-        /// <summary>PhoneInput control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox PhoneInput;
-
-        /// <summary>EmailInput control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox EmailInput;
-
-        /// <summary>HealthIdRequiredMark control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.PlaceHolder HealthIdRequiredMark;
-
-        /// <summary>HealthIdInput control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox HealthIdInput;
-
-        /// <summary>HealthIdRequired control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.RequiredFieldValidator HealthIdRequired;
-
-        /// <summary>AddressInput control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox AddressInput;
-
-        /// <summary>SmokingInput control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.DropDownList SmokingInput;
-
-        /// <summary>AlcoholInput control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.DropDownList AlcoholInput;
-
-        /// <summary>OccupationInput control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox OccupationInput;
-
-        /// <summary>BloodGroupInput control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.DropDownList BloodGroupInput;
-
-        /// <summary>EmergencyNameInput control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox EmergencyNameInput;
-
-        /// <summary>EmergencyPhoneInput control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox EmergencyPhoneInput;
-
-        /// <summary>InsuranceProviderInput control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox InsuranceProviderInput;
-
-        /// <summary>InsurancePolicyInput control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.TextBox InsurancePolicyInput;
+        protected global::System.Web.UI.WebControls.Literal DuplicateText;
 
         /// <summary>SaveButton control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>

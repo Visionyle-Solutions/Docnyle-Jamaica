@@ -35,7 +35,7 @@ namespace OpdProject.templates.patients
         protected int VisitsCount { get; private set; }
 
         /// <summary>Past visits (with diagnoses) are clinical detail: doctors and nurses only.</summary>
-        protected bool CanSeeVisits { get { return HealthRecord.CanSeeVisits(Role); } }
+        protected bool CanSeeVisits { get { return HealthRecord.CanSeeVisits(CurrentUser); } }
         protected string AllergySummary { get; private set; }
         protected string ConditionSummary { get; private set; }
         protected string MedsSummary { get; private set; }
@@ -81,7 +81,7 @@ namespace OpdProject.templates.patients
             Strip.PatientId = Body.PatientId = AllergyForm.PatientId = PatientId;
             History.PatientId = Medications.PatientId = FamilySocial.PatientId = Visits.PatientId = PatientId;
             ConsultLink.NavigateUrl = Urls.Consultation(PatientId);
-            ConsultLink.Visible = Role == "DOCTOR" && Can("consultation");
+            ConsultLink.Visible = HasRole("DOCTOR") && Can("consultation");
 
             AllergiesTab.Visible = ActiveTab == "allergies";
             HistoryTabHolder.Visible = ActiveTab == "history";

@@ -27,6 +27,25 @@ namespace OpdProject.Models
         public string InsurancePolicyNo { get; set; }
         public string RegisteredVia { get; set; }
 
+        /* Structured registration fields. FullName, Phone and Address stay the composed
+           values the rest of the app reads; these keep the parts the registration form edits. */
+        public string Prefix { get; set; }
+        public string FirstName { get; set; }
+        public string MiddleName { get; set; }
+        public string LastName { get; set; }
+        public string Trn { get; set; }
+        public string CountryCode { get; set; }
+        public string Mobile { get; set; }
+        public string PreferredLanguage { get; set; }
+        public string AddrLine1 { get; set; }
+        public string AddrLine2 { get; set; }
+        public string City { get; set; }
+        public string Region { get; set; }
+        public string Country { get; set; }
+        public string MaritalStatus { get; set; }
+        public string ReferralSource { get; set; }
+        public string PreferredDoctorId { get; set; }
+
         public int? AgeYears
         {
             get
@@ -38,6 +57,15 @@ namespace OpdProject.Models
                 return age;
             }
         }
+    }
+
+    /// <summary>A registration clash found by PatientService.FindDuplicate.</summary>
+    public class PatientDuplicate
+    {
+        /// <summary>"NationalHealthId", "Trn" or "Mobile".</summary>
+        public string Field { get; set; }
+        public string Value { get; set; }
+        public Patient Patient { get; set; }
     }
 
     public class PatientAllergy

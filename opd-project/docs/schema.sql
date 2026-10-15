@@ -419,7 +419,7 @@ CREATE TABLE sec.ApplicationUser (
     Email NVARCHAR(100) NOT NULL,                           -- ENCRYPTION: DETERMINISTIC
     PasswordHash NVARCHAR(200) NOT NULL,                    -- ENCRYPTION: RANDOMIZED
     Phone NVARCHAR(20) NULL,                                -- ENCRYPTION: DETERMINISTIC
-    [Role] NVARCHAR(20) NOT NULL CONSTRAINT CK_sec_Usr_Role CHECK ([Role] IN ('ADMIN','DOCTOR','RECEPTIONIST','BILLING','NURSE','LAB_PARTNER')),
+    -- Roles live in sec.UserRole (a user may hold several); permissions are the union of the user's roles.
     SpecialtyId UNIQUEIDENTIFIER NULL, LicenseNumber NVARCHAR(50) NULL, LabPartnerId UNIQUEIDENTIFIER NULL,
     -- Doctor profile (Schedule Settings → Doctors). FullName is rendered from these via
     -- the DOCTOR_NAME_TEMPLATE hospital setting unless DisplayNameOverride is set.
@@ -437,6 +437,19 @@ CREATE TABLE sec.ApplicationUser (
     CONSTRAINT FK_sec_Usr_SpecialtyId FOREIGN KEY (SpecialtyId) REFERENCES cfg.Specialty(SpecialtyId),
     INDEX IX_sec_Usr_HospitalId NONCLUSTERED (HospitalId),
     INDEX IX_sec_Usr_Email NONCLUSTERED (Email)
+);
+
+-- One row per role a user holds. LAB_PARTNER is exclusive: a lab partner account holds no other role
+-- (enforced in UserService.NormalizeRoles).
+CREATE TABLE sec.UserRole (
+    UserRolePkId BIGINT IDENTITY(1,1) NOT NULL,
+    UserId UNIQUEIDENTIFIER NOT NULL,
+    [Role] NVARCHAR(20) NOT NULL CONSTRAINT CK_sec_UsrRole_Role CHECK ([Role] IN ('ADMIN','DOCTOR','RECEPTIONIST','BILLING','NURSE','LAB_PARTNER')),
+    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_sec_UsrRole_CreatedAt DEFAULT SYSUTCDATETIME(),
+    CreatedBy UNIQUEIDENTIFIER NULL,
+    CONSTRAINT PK_sec_UsrRole PRIMARY KEY CLUSTERED (UserRolePkId),
+    CONSTRAINT UQ_sec_UsrRole_User_Role UNIQUE (UserId, [Role]),
+    CONSTRAINT FK_sec_UsrRole_UserId FOREIGN KEY (UserId) REFERENCES sec.ApplicationUser(UserId)
 );
 
 -- A doctor may have several specialties; ApplicationUser.SpecialtyId stays the primary.
@@ -526,6 +539,14 @@ CREATE TABLE opd.Patient (  -- TEMPORAL: Phase 4
     PhotoBase64 NVARCHAR(MAX) NULL,                         -- ENCRYPTION: RANDOMIZED
     EmergencyContactName NVARCHAR(200) NULL,                -- ENCRYPTION: RANDOMIZED
     EmergencyContactPhone NVARCHAR(20) NULL,                -- ENCRYPTION: RANDOMIZED
+    -- Structured registration fields (FullName / Phone / Address above hold the composed values)
+    Prefix NVARCHAR(10) NULL, FirstName NVARCHAR(60) NULL, MiddleName NVARCHAR(60) NULL, LastName NVARCHAR(60) NULL,
+    Trn NVARCHAR(20) NULL,                                  -- ENCRYPTION: DETERMINISTIC
+    CountryCode NVARCHAR(5) NULL, Mobile NVARCHAR(16) NULL, -- ENCRYPTION: DETERMINISTIC (Mobile)
+    PreferredLanguage NVARCHAR(40) NULL,
+    AddrLine1 NVARCHAR(150) NULL, AddrLine2 NVARCHAR(150) NULL, City NVARCHAR(80) NULL, Region NVARCHAR(80) NULL, Country NVARCHAR(60) NULL,
+    MaritalStatus NVARCHAR(10) NULL CONSTRAINT CK_opd_Pat_Marital CHECK (MaritalStatus IN ('SINGLE','MARRIED','OTHER')),
+    ReferralSource NVARCHAR(80) NULL, PreferredDoctorId UNIQUEIDENTIFIER NULL,
     -- Social history (Health Record → Family & Social)
     SmokingStatus NVARCHAR(10) NULL CONSTRAINT CK_opd_Pat_Smoking CHECK (SmokingStatus IN ('NEVER','FORMER','CURRENT')),
     SmokingPackYears INT NULL, AlcoholUse NVARCHAR(12) NULL CONSTRAINT CK_opd_Pat_Alcohol CHECK (AlcoholUse IN ('NONE','OCCASIONAL','REGULAR')),
