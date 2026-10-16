@@ -3,6 +3,10 @@
 <%-- Nurse vitals pre-entry for checked-in patients; saved into the visit the doctor will open. Units follow the
      Consultation Setup (default unit, or any enabled unit with the unit switch on). Route: /nurse/vitals --%>
 <asp:Content ContentPlaceHolderID="MainContent" runat="server">
+    <style>
+        .vital-ok  { border: 2px solid #16a34a !important; box-shadow: 0 0 0 2px rgba(22,163,74,.15); }
+        .vital-bad { border: 2px solid #dc2626 !important; box-shadow: 0 0 0 2px rgba(220,38,38,.15); }
+    </style>
     <div class="page-container">
         <div style="display: grid; grid-template-columns: 280px 1fr; gap: 16px;">
             <div>
@@ -64,4 +68,73 @@
             </div>
         </div>
     </div>
+    <script>
+        (function () {
+            // Pull the two numbers out of range text like "90-110 °F" -> {min:90, max:110}.
+            // Returns null for ranges we can't compare numerically (e.g. feet/inches 4'0"-7'0").
+            function parseRange(text) {
+                if (!text || text.indexOf("'") >= 0) return null;
+                var nums = text.match(/\d+(\.\d+)?/g);
+                if (!nums || nums.length < 2) return null;
+                return { min: parseFloat(nums[0]), max: parseFloat(nums[1]) };
+            }
+
+            function rowParts(tr) {
+                var tds = tr.children;
+                if (tds.length < 4) return null;
+                return {
+                    input: tds[1].querySelector("input[type=text]"),
+                    unit: tds[2].querySelector("select"),
+                    rangeText: tds[3].textContent.trim()
+                };
+            }
+
+            function evaluate(tr) {
+                var p = rowParts(tr);
+                if (!p || !p.input) return;
+                var input = p.input;
+                input.classList.remove("vital-ok", "vital-bad");
+
+                var raw = input.value.trim();
+                if (raw === "") return;                         // empty -> neutral
+
+                // The displayed range is for the default unit; if the nurse switched
+                // units, don't judge (the server still validates on save).
+                if (p.unit) {
+                    if (!p.unit.dataset.def) p.unit.dataset.def = p.unit.value;
+                    if (p.unit.value !== p.unit.dataset.def) return;
+                }
+
+                var range = parseRange(p.rangeText);
+                if (!range) return;
+                if (!/^\d+(\.\d+)?$/.test(raw)) { input.classList.add("vital-bad"); return; }
+
+                var v = parseFloat(raw);
+                input.classList.add(v >= range.min && v <= range.max ? "vital-ok" : "vital-bad");
+            }
+
+            function rowOf(el) { return el.closest("tr"); }
+
+            // Live feedback while typing / changing unit
+            document.addEventListener("input", function (e) {
+                if (e.target.matches("#<%= VitalsCard.ClientID %> input[type=text]")) evaluate(rowOf(e.target));
+    });
+    document.addEventListener("change", function (e) {
+        if (e.target.matches("#<%= VitalsCard.ClientID %> select.vital-unit")) evaluate(rowOf(e.target));
+    });
+
+    // Remember each dropdown's default unit and color any prefilled values on load
+    function init() {
+        var card = document.getElementById("<%= VitalsCard.ClientID %>");
+                if (!card) return;
+                card.querySelectorAll("tbody tr").forEach(function (tr) {
+                    var p = rowParts(tr);
+                    if (p && p.unit && !p.unit.dataset.def) p.unit.dataset.def = p.unit.value;
+                    evaluate(tr);
+                });
+            }
+            if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+            else init();
+        })();
+    </script>
 </asp:Content>
