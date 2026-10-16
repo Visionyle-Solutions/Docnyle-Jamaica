@@ -7,7 +7,8 @@
     <div class="form-group"><label class="form-label" for="<%= HpName.ClientID %>">Hospital name <span class="required">*</span></label><asp:TextBox ID="HpName" runat="server" CssClass="form-control" MaxLength="120" />
       <asp:RequiredFieldValidator runat="server" ControlToValidate="HpName" ValidationGroup="Profile" ErrorMessage="Hospital name is required" Text="Required" CssClass="field-error" Display="Dynamic" /></div>
     <div class="form-group"><label class="form-label" for="<%= HpAddress.ClientID %>">Address</label><asp:TextBox ID="HpAddress" runat="server" CssClass="form-control" MaxLength="250" /></div>
-    <div class="form-group"><label class="form-label" for="<%= HpPhone.ClientID %>">Phone</label><asp:TextBox ID="HpPhone" runat="server" CssClass="form-control" MaxLength="30" /></div>
+    <div class="form-group"><label class="form-label" for="<%= HpPhone.ClientID %>">Phone</label><asp:TextBox ID="HpPhone" runat="server" CssClass="form-control" MaxLength="30" placeholder="876-555-1234" />
+      <c360:PhoneValidator runat="server" ControlToValidate="HpPhone" ValidationGroup="Profile" /></div>
     <div class="form-group"><label class="form-label" for="<%= HpEmail.ClientID %>">Email</label><asp:TextBox ID="HpEmail" runat="server" CssClass="form-control" TextMode="Email" MaxLength="120" />
       <asp:RegularExpressionValidator runat="server" ControlToValidate="HpEmail" ValidationGroup="Profile" ValidationExpression="^[^@\s]+@[^@\s]+\.[^@\s]+$" ErrorMessage="Enter a valid email" Text="Invalid email" CssClass="field-error" Display="Dynamic" /></div>
     <div class="form-group"><label class="form-label" for="<%= HpCountry.ClientID %>">Country</label>

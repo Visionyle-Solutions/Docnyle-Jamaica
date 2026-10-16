@@ -31,7 +31,7 @@
      - Tables live in cfg/sec/opd/cln/bil/inv/msg, not dbo; config is keyed on
        (SchemaName, TableName) and triggers are created in the table's schema.
      - RecordId is the external {Model}Id UNIQUEIDENTIFIER (the NEWSEQUENTIALID
-       column the API exposes), not the internal {Table}PkId. Tables without one
+       column the API exposes), not the internal Id. Tables without one
        fall back to their primary key; composite keys (sec.DoctorSpecialty,
        cfg.LabTestSpecialty) are rendered as "Col1=...;Col2=...".
      - HospitalId / ActorId are UNIQUEIDENTIFIER. Tables without a HospitalId
@@ -65,7 +65,7 @@ GO
    ------------------------------------------------------------ */
 IF OBJECT_ID(N'sec.AuditConfig', N'U') IS NULL
 CREATE TABLE sec.AuditConfig (
-    AuditConfigPkId INT IDENTITY(1,1) NOT NULL,
+    Id INT IDENTITY(1,1) NOT NULL,
     SchemaName SYSNAME NOT NULL,
     TableName SYSNAME NOT NULL,
     Tier TINYINT NOT NULL CONSTRAINT CK_sec_AC_Tier CHECK (Tier BETWEEN 0 AND 3),
@@ -87,7 +87,7 @@ CREATE TABLE sec.AuditConfig (
     CreatedAt DATETIMEOFFSET(3) NOT NULL CONSTRAINT DF_sec_AC_CreatedAt DEFAULT SYSUTCDATETIME(),
     CreatedBy UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_sec_AC_CreatedBy DEFAULT '00000000-0000-0000-0000-000000000000',
     ModifiedAt DATETIMEOFFSET(3) NULL, ModifiedBy UNIQUEIDENTIFIER NULL,
-    CONSTRAINT PK_sec_AC PRIMARY KEY CLUSTERED (AuditConfigPkId),
+    CONSTRAINT PK_sec_AC PRIMARY KEY CLUSTERED (Id),
     CONSTRAINT UQ_sec_AC_Table UNIQUE NONCLUSTERED (SchemaName, TableName)
 );
 GO
@@ -100,7 +100,7 @@ GO
    ------------------------------------------------------------ */
 IF OBJECT_ID(N'sec.DataAuditLog', N'U') IS NULL
 CREATE TABLE sec.DataAuditLog (
-    DataAuditLogPkId BIGINT IDENTITY(1,1) NOT NULL,
+    Id BIGINT IDENTITY(1,1) NOT NULL,
     DataAuditLogId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_sec_DAL_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NULL,                   -- NULL for global tables (cfg.Payer, cfg.Compliance, ...)
     ActorId UNIQUEIDENTIFIER NULL,                      -- NULL = not known; never the System user
@@ -114,7 +114,7 @@ CREATE TABLE sec.DataAuditLog (
     CreatedAt DATETIMEOFFSET(3) NOT NULL CONSTRAINT DF_sec_DAL_CreatedAt DEFAULT SYSUTCDATETIME(),
     CreatedBy UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_sec_DAL_CreatedBy DEFAULT '00000000-0000-0000-0000-000000000000',
     ModifiedAt DATETIMEOFFSET(3) NULL, ModifiedBy UNIQUEIDENTIFIER NULL,
-    CONSTRAINT PK_sec_DAL PRIMARY KEY CLUSTERED (DataAuditLogPkId),
+    CONSTRAINT PK_sec_DAL PRIMARY KEY CLUSTERED (Id),
     CONSTRAINT UQ_sec_DAL_Id UNIQUE NONCLUSTERED (DataAuditLogId)
 );
 GO
@@ -342,7 +342,7 @@ or re-run with @AllowUnreviewed = 1 if you accept that.', 16, 1);
             GOTO NextTable;
         END;
 
-        -- Primary key: joins inserted to deleted. PkId is an IDENTITY and never changes.
+        -- Primary key: joins inserted to deleted. Id is an IDENTITY and never changes.
         SELECT @pkCount = COUNT(*), @pk1 = MAX(CASE WHEN ic.key_ordinal = 1 THEN c.name ELSE N'' END),
                @join = STUFF((SELECT N' AND i.' + QUOTENAME(c2.name) + N' = d.' + QUOTENAME(c2.name)
                               FROM sys.index_columns ic2

@@ -170,17 +170,17 @@ namespace OpdProject.Services
 
             Users.AddRange(new[]
             {
-                Doctor("USR-001", "HOSP-001", "Dr. A. Sharma", "drsharma@sunrise.in", "+91-9000000001", "SPEC-GEN", "MCI-4432", "A.", "Sharma", "MBBS, MD (General Medicine)", "OPD-1", "English, Telugu, Hindi", "Consultant physician — general medicine."),
-                new AppUser { UserId = "USR-002", HospitalId = "HOSP-001", FullName = "Priya Nair", Email = "priya@sunrise.in", Phone = "+91-9000000002", Password = "demo123", Role = "RECEPTIONIST", IsActive = true },
+                Doctor("USR-001", "HOSP-001", "Dr. A. Sharma", "drsharma@sunrise.in", "+1-876-555-0001", "SPEC-GEN", "MCI-4432", "A.", "Sharma", "MBBS, MD (General Medicine)", "OPD-1", "English, Telugu, Hindi", "Consultant physician — general medicine."),
+                new AppUser { UserId = "USR-002", HospitalId = "HOSP-001", FullName = "Priya Nair", Email = "priya@sunrise.in", Phone = "+1-876-555-0002", Password = "demo123", Role = "RECEPTIONIST", IsActive = true },
                 Doctor("USR-003", "HOSP-002", "Dr. K. Bailey", "k.bailey@kingstonfhc.example", "+1-876-5550101", "SPEC-GEN", "JMC-1187", "K.", "Bailey", "MBBS, DM (Family Medicine)", "Room 2", "English", "Family physician."),
                 new AppUser { UserId = "USR-004", HospitalId = "HOSP-001", FullName = "Admin User", Email = "admin@sunrise.in", Phone = "", Password = "admin123", Role = "ADMIN", IsActive = true },
                 new AppUser { UserId = "USR-005", HospitalId = "HOSP-001", FullName = "Billing Staff", Email = "billing@sunrise.in", Phone = "", Password = "demo123", Role = "BILLING", IsActive = true },
-                new AppUser { UserId = "USR-006", HospitalId = "HOSP-001", FullName = "Sunrise Diagnostics Lab", Email = "lab@sunrisediag.in", Phone = "+91-9333333333", Password = "lab123", Role = "LAB_PARTNER", LabPartnerId = "LAB-001", IsActive = true },
-                new AppUser { UserId = "USR-007", HospitalId = "HOSP-001", FullName = "City Imaging Center", Email = "imaging@cityimaging.in", Phone = "+91-9444444444", Password = "lab123", Role = "LAB_PARTNER", LabPartnerId = "LAB-002", IsActive = true },
-                Doctor("USR-008", "HOSP-001", "Dr. Ravi Teja Varma", "ravi.varma@sunrise.in", "+91-9000000008", "SPEC-GEN", "APMC-58213", "Ravi Teja", "Varma", "MBBS", "OPD-2", "English, Telugu", "General physician."),
-                Doctor("USR-009", "HOSP-001", "Dr. Lakshmi Prasanna", "lakshmi.prasanna@sunrise.in", "+91-9000000009", "SPEC-GEN", "APMC-61047", "Lakshmi", "Prasanna", "MBBS", "OPD-3", "English, Telugu, Tamil", "General physician."),
-                Doctor("USR-010", "HOSP-001", "Dr. Suresh Reddy", "suresh.reddy@sunrise.in", "+91-9000000010", "SPEC-CARD", "APMC-40982", "Suresh", "Reddy", "MBBS, MD, DM (Cardiology)", "Cardiology OPD", "English, Telugu, Hindi", "Visiting consultant cardiologist."),
-                Doctor("USR-011", "HOSP-001", "Dr. Kavitha Rao", "kavitha.rao@sunrise.in", "+91-9000000011", "SPEC-PED", "APMC-47315", "Kavitha", "Rao", "MBBS, MD (Pediatrics)", "Child Care OPD", "English, Telugu, Kannada", "Visiting consultant pediatrician."),
+                new AppUser { UserId = "USR-006", HospitalId = "HOSP-001", FullName = "Sunrise Diagnostics Lab", Email = "lab@sunrisediag.in", Phone = "+1-876-555-3333", Password = "lab123", Role = "LAB_PARTNER", LabPartnerId = "LAB-001", IsActive = true },
+                new AppUser { UserId = "USR-007", HospitalId = "HOSP-001", FullName = "City Imaging Center", Email = "imaging@cityimaging.in", Phone = "+1-876-555-4444", Password = "lab123", Role = "LAB_PARTNER", LabPartnerId = "LAB-002", IsActive = true },
+                Doctor("USR-008", "HOSP-001", "Dr. Ravi Teja Varma", "ravi.varma@sunrise.in", "+1-876-555-0008", "SPEC-GEN", "APMC-58213", "Ravi Teja", "Varma", "MBBS", "OPD-2", "English, Telugu", "General physician."),
+                Doctor("USR-009", "HOSP-001", "Dr. Lakshmi Prasanna", "lakshmi.prasanna@sunrise.in", "+1-876-555-0009", "SPEC-GEN", "APMC-61047", "Lakshmi", "Prasanna", "MBBS", "OPD-3", "English, Telugu, Tamil", "General physician."),
+                Doctor("USR-010", "HOSP-001", "Dr. Suresh Reddy", "suresh.reddy@sunrise.in", "+1-876-555-0010", "SPEC-CARD", "APMC-40982", "Suresh", "Reddy", "MBBS, MD, DM (Cardiology)", "Cardiology OPD", "English, Telugu, Hindi", "Visiting consultant cardiologist."),
+                Doctor("USR-011", "HOSP-001", "Dr. Kavitha Rao", "kavitha.rao@sunrise.in", "+1-876-555-0011", "SPEC-PED", "APMC-47315", "Kavitha", "Rao", "MBBS, MD (Pediatrics)", "Child Care OPD", "English, Telugu, Kannada", "Visiting consultant pediatrician."),
                 new AppUser { UserId = "USR-012", HospitalId = "HOSP-001", FullName = "Nurse Anitha", Email = "nurse@sunrise.in", Phone = "", Password = "demo123", Role = "NURSE", IsActive = true },
             });
 
@@ -232,11 +232,11 @@ namespace OpdProject.Services
         {
             Patients.AddRange(new[]
             {
-                new Patient { PatientId = "PAT-001", HospitalId = "HOSP-001", Mrn = "MRN-90821", FullName = "John Doe", Dob = D("1992-03-14"), Gender = "MALE", Phone = "+91-9111111111", Email = "", Address = "", NationalHealthId = "" },
-                new Patient { PatientId = "PAT-002", HospitalId = "HOSP-001", Mrn = "MRN-90822", FullName = "Priya Reddy", Dob = D("1988-07-22"), Gender = "FEMALE", Phone = "+91-9111111112", Email = "", Address = "", NationalHealthId = "NHID-1122-3344" },
-                new Patient { PatientId = "PAT-003", HospitalId = "HOSP-001", Mrn = "MRN-90823", FullName = "Ramesh Kumar", Dob = D("1965-11-02"), Gender = "MALE", Phone = "+91-9111111113", Email = "", Address = "", NationalHealthId = "" },
-                new Patient { PatientId = "PAT-004", HospitalId = "HOSP-001", Mrn = "MRN-90824", FullName = "Ananya Iyer", Dob = D("2001-01-30"), Gender = "FEMALE", Phone = "+91-9111111114", Email = "", Address = "", NationalHealthId = "" },
-                new Patient { PatientId = "PAT-005", HospitalId = "HOSP-001", Mrn = "MRN-90825", FullName = "Vikram Singh", Dob = D("1979-05-18"), Gender = "MALE", Phone = "+91-9111111115", Email = "", Address = "", NationalHealthId = "", SmokingStatus = "CURRENT", SmokingPackYears = 10, AlcoholUse = "OCCASIONAL", Occupation = "Business owner" },
+                new Patient { PatientId = "PAT-001", HospitalId = "HOSP-001", Mrn = "MRN-90821", FullName = "John Doe", Dob = D("1992-03-14"), Gender = "MALE", Phone = "+1-876-555-1111", Email = "", Address = "", NationalHealthId = "" },
+                new Patient { PatientId = "PAT-002", HospitalId = "HOSP-001", Mrn = "MRN-90822", FullName = "Priya Reddy", Dob = D("1988-07-22"), Gender = "FEMALE", Phone = "+1-876-555-1112", Email = "", Address = "", NationalHealthId = "NHID-1122-3344" },
+                new Patient { PatientId = "PAT-003", HospitalId = "HOSP-001", Mrn = "MRN-90823", FullName = "Ramesh Kumar", Dob = D("1965-11-02"), Gender = "MALE", Phone = "+1-876-555-1113", Email = "", Address = "", NationalHealthId = "" },
+                new Patient { PatientId = "PAT-004", HospitalId = "HOSP-001", Mrn = "MRN-90824", FullName = "Ananya Iyer", Dob = D("2001-01-30"), Gender = "FEMALE", Phone = "+1-876-555-1114", Email = "", Address = "", NationalHealthId = "" },
+                new Patient { PatientId = "PAT-005", HospitalId = "HOSP-001", Mrn = "MRN-90825", FullName = "Vikram Singh", Dob = D("1979-05-18"), Gender = "MALE", Phone = "+1-876-555-1115", Email = "", Address = "", NationalHealthId = "", SmokingStatus = "CURRENT", SmokingPackYears = 10, AlcoholUse = "OCCASIONAL", Occupation = "Business owner" },
             });
 
             Allergies.Add(new PatientAllergy { AllergyId = "ALG-001", PatientId = "PAT-001", AllergyType = "DRUG", AllergyName = "Penicillin", ReactionType = "Allergy", ReactionDescription = "Skin rash, hives", Severity = "SEVERE", Status = "ACTIVE", SinceWhen = D("2018-06-01"), Notes = "" });

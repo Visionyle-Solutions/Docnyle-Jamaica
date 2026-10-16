@@ -78,13 +78,13 @@
   <div class="form-group">
     <label class="form-label" for="<%= CountryCodeInput.ClientID %>">Country code</label>
     <asp:TextBox ID="CountryCodeInput" runat="server" CssClass="form-control" MaxLength="5" />
-    <asp:RegularExpressionValidator runat="server" ControlToValidate="CountryCodeInput" ValidationExpression="^\+?[0-9]{1,4}$" ErrorMessage="Country code must look like +1 or +91" Text="Invalid code" CssClass="field-error" Display="Dynamic" />
+    <asp:RegularExpressionValidator ID="CountryCodeValidator" runat="server" ControlToValidate="CountryCodeInput" ValidationExpression="^\+?[0-9]{1,4}$" ErrorMessage="Country code must look like +1 or +91" Text="Invalid code" CssClass="field-error" Display="Dynamic" />
   </div>
   <div class="form-group">
     <label class="form-label" for="<%= MobileInput.ClientID %>">Mobile <span class="required">*</span></label>
     <asp:TextBox ID="MobileInput" runat="server" CssClass="form-control" MaxLength="16" />
     <asp:RequiredFieldValidator runat="server" ControlToValidate="MobileInput" ErrorMessage="Mobile number is required" Text="Required" CssClass="field-error" Display="Dynamic" />
-    <asp:RegularExpressionValidator runat="server" ControlToValidate="MobileInput" ValidationExpression="^[0-9][0-9\- ]{5,15}$" ErrorMessage="Mobile number may contain only digits, spaces and '-'" Text="Invalid mobile" CssClass="field-error" Display="Dynamic" />
+    <c360:PhoneValidator ID="MobileValidator" runat="server" ControlToValidate="MobileInput" />
   </div>
   <div class="form-group">
     <label class="form-label" for="<%= EmailInput.ClientID %>">Email</label>
@@ -127,7 +127,8 @@
 <div class="reg-section-title">Emergency contact</div>
 <div class="reg-fields">
   <div class="form-group"><label class="form-label" for="<%= EmergencyNameInput.ClientID %>">Name</label><asp:TextBox ID="EmergencyNameInput" runat="server" CssClass="form-control" MaxLength="120" /></div>
-  <div class="form-group"><label class="form-label" for="<%= EmergencyPhoneInput.ClientID %>">Phone</label><asp:TextBox ID="EmergencyPhoneInput" runat="server" CssClass="form-control" MaxLength="20" /></div>
+  <div class="form-group"><label class="form-label" for="<%= EmergencyPhoneInput.ClientID %>">Phone</label><asp:TextBox ID="EmergencyPhoneInput" runat="server" CssClass="form-control" MaxLength="20" />
+    <c360:PhoneValidator ID="EmergencyPhoneValidator" runat="server" ControlToValidate="EmergencyPhoneInput" /></div>
 </div>
 
 <div class="reg-section-title">Other</div>

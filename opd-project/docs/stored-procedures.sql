@@ -49,8 +49,8 @@
    - Every hospital-scoped list/search/get procedure accepts
      @HospitalId and filters WHERE HospitalId = @HospitalId.
    - Every table access uses the external UNIQUEIDENTIFIER
-     {Table}Id column, never the internal {Table}PkId — callers
-     never see PkId (see schema.sql header, dual-key pattern).
+     {Table}Id column, never the internal Id — callers
+     never see Id (see schema.sql header, dual-key pattern).
    - New rows: INSERT ... OUTPUT inserted.* — NEWSEQUENTIALID()
      default supplies the id (see DF_{schema}_{tbl}_Id defaults
      in schema.sql), matching data.js's nextId(prefix) pattern.
@@ -325,6 +325,66 @@ AS BEGIN
 END;
 GO
 
+-- Settings → Hospital profile. A NULL parameter keeps the current value, so callers send only what changed.
+-- @Timezone must be a cfg.TimeZone id (IANA); it decides the hospital's "today", report dates and appointment times.
+-- @RemoveLogo = 1 clears the logo (a new @LogoBase64 replaces it).
+CREATE OR ALTER PROCEDURE cfg.usp_UpdateHospital
+    @HospitalId                UNIQUEIDENTIFIER,
+    @Name                      NVARCHAR(200) = NULL,
+    @LegalAddress              NVARCHAR(500) = NULL,
+    @ContactNumber             NVARCHAR(20)  = NULL,
+    @PrimaryEmail              NVARCHAR(100) = NULL,
+    @Country                   NVARCHAR(5)   = NULL,
+    @Currency                  NVARCHAR(5)   = NULL,
+    @Timezone                  NVARCHAR(50)  = NULL,
+    @LicenseNumber             NVARCHAR(50)  = NULL,
+    @PatientIdLabel            NVARCHAR(30)  = NULL,
+    @NationalHealthIdLabel     NVARCHAR(50)  = NULL,
+    @NationalHealthIdMandatory BIT           = NULL,
+    @GrowthChartStandard       NVARCHAR(5)   = NULL,
+    @DefaultTempUnit           NVARCHAR(1)   = NULL,
+    @DefaultRxValidityDays     INT           = NULL,
+    @RxPrefix                  NVARCHAR(10)  = NULL,
+    @ReceiptPrefix             NVARCHAR(10)  = NULL,
+    @InvoicePrefix             NVARCHAR(10)  = NULL,
+    @LabChargePerTest          DECIMAL(10,2) = NULL,
+    @LogoBase64                NVARCHAR(MAX) = NULL,
+    @RemoveLogo                BIT           = 0,
+    @ModifiedBy                UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM cfg.Hospital WHERE HospitalId = @HospitalId) THROW 50070, N'Hospital not found.', 1;
+    IF @Timezone IS NOT NULL AND NOT EXISTS (SELECT 1 FROM cfg.TimeZone WHERE TimeZoneId = @Timezone AND IsActive = 1)
+        THROW 50071, N'Unknown time zone: choose one from cfg.usp_ListTimeZones.', 1;
+    IF @Name IS NOT NULL AND LTRIM(RTRIM(@Name)) = N'' THROW 50072, N'Hospital name is required.', 1;
+    IF @DefaultRxValidityDays IS NOT NULL AND @DefaultRxValidityDays < 1 THROW 50073, N'Prescription validity must be at least 1 day.', 1;
+
+    UPDATE cfg.Hospital SET
+        Name                      = COALESCE(LTRIM(RTRIM(@Name)), Name),
+        LegalAddress              = COALESCE(@LegalAddress, LegalAddress),
+        ContactNumber             = COALESCE(@ContactNumber, ContactNumber),
+        PrimaryEmail              = COALESCE(@PrimaryEmail, PrimaryEmail),
+        Country                   = COALESCE(@Country, Country),
+        Currency                  = COALESCE(@Currency, Currency),
+        Timezone                  = COALESCE(@Timezone, Timezone),
+        LicenseNumber             = COALESCE(@LicenseNumber, LicenseNumber),
+        PatientIdLabel            = COALESCE(NULLIF(LTRIM(RTRIM(@PatientIdLabel)), N''), PatientIdLabel),
+        NationalHealthIdLabel     = COALESCE(NULLIF(LTRIM(RTRIM(@NationalHealthIdLabel)), N''), NationalHealthIdLabel),
+        NationalHealthIdMandatory = COALESCE(@NationalHealthIdMandatory, NationalHealthIdMandatory),
+        GrowthChartStandard       = COALESCE(@GrowthChartStandard, GrowthChartStandard),
+        DefaultTempUnit           = COALESCE(@DefaultTempUnit, DefaultTempUnit),
+        DefaultRxValidityDays     = COALESCE(@DefaultRxValidityDays, DefaultRxValidityDays),
+        RxPrefix                  = COALESCE(@RxPrefix, RxPrefix),
+        ReceiptPrefix             = COALESCE(@ReceiptPrefix, ReceiptPrefix),
+        InvoicePrefix             = COALESCE(@InvoicePrefix, InvoicePrefix),
+        LabChargePerTest          = COALESCE(@LabChargePerTest, LabChargePerTest),
+        LogoBase64                = CASE WHEN @LogoBase64 IS NOT NULL THEN @LogoBase64 WHEN @RemoveLogo = 1 THEN NULL ELSE LogoBase64 END,
+        ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+    WHERE HospitalId = @HospitalId;
+    EXEC cfg.usp_GetHospital @HospitalId = @HospitalId;
+END;
+GO
+
 CREATE OR ALTER PROCEDURE cfg.usp_ListSpecialties
     @HospitalId     UNIQUEIDENTIFIER
 AS BEGIN
@@ -579,7 +639,7 @@ AS BEGIN
     DECLARE @Out TABLE (PatientId UNIQUEIDENTIFIER, Mrn NVARCHAR(20), FullName NVARCHAR(200), CreatedAt DATETIMEOFFSET(3));
     -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='CREATE', EntityType='Patient')
     DECLARE @Mrn NVARCHAR(20);
-    SELECT @Mrn = 'MRN-' + RIGHT('000000' + CAST(ISNULL(MAX(PatientPkId), 0) + 1 AS NVARCHAR), 6)
+    SELECT @Mrn = 'MRN-' + RIGHT('000000' + CAST(ISNULL(MAX(Id), 0) + 1 AS NVARCHAR), 6)
     FROM opd.Patient WHERE HospitalId = @HospitalId;
 
     INSERT INTO opd.Patient (HospitalId, Mrn, FullName, Gender, Dob, Phone, Email,
@@ -1020,6 +1080,32 @@ BEGIN
 END;
 GO
 
+-- A doctor's display name (sec.ApplicationUser.FullName): DisplayNameOverride if set, else DOCTOR_NAME_TEMPLATE with
+-- tokens {prefix} {first} {middle} {last} {finitial} {minitial} {suffix} {suffixComma} (suffix = Qualifications),
+-- spaces collapsed. No first or last name → @CurrentName unchanged. Same rules as SchedulingService.RenderDoctorName.
+CREATE OR ALTER FUNCTION cfg.fn_RenderDoctorName (
+    @Template NVARCHAR(200), @Override NVARCHAR(200), @Prefix NVARCHAR(20), @FirstName NVARCHAR(100),
+    @MiddleName NVARCHAR(100), @LastName NVARCHAR(100), @Qualifications NVARCHAR(200), @CurrentName NVARCHAR(200))
+RETURNS NVARCHAR(200) AS
+BEGIN
+    IF NULLIF(LTRIM(RTRIM(@Override)), N'') IS NOT NULL RETURN LTRIM(RTRIM(@Override));
+    IF NULLIF(@FirstName, N'') IS NULL AND NULLIF(@LastName, N'') IS NULL RETURN @CurrentName;
+    DECLARE @q NVARCHAR(200) = ISNULL(@Qualifications, N'');
+    DECLARE @s NVARCHAR(400) = COALESCE(NULLIF(@Template, N''), N'{prefix} {first} {last}');
+    SET @s = REPLACE(@s, N'{prefix}', ISNULL(@Prefix, N''));
+    SET @s = REPLACE(@s, N'{first}', ISNULL(@FirstName, N''));
+    SET @s = REPLACE(@s, N'{middle}', ISNULL(@MiddleName, N''));
+    SET @s = REPLACE(@s, N'{last}', ISNULL(@LastName, N''));
+    SET @s = REPLACE(@s, N'{finitial}', LEFT(ISNULL(@FirstName, N''), 1));
+    SET @s = REPLACE(@s, N'{minitial}', LEFT(ISNULL(@MiddleName, N''), 1));
+    SET @s = REPLACE(@s, N'{suffixComma}', CASE WHEN LEN(@q) > 0 THEN N', ' + @q ELSE N'' END);
+    SET @s = REPLACE(@s, N'{suffix}', @q);
+    WHILE CHARINDEX(N'  ', @s) > 0 SET @s = REPLACE(@s, N'  ', N' ');
+    SET @s = REPLACE(@s, N' ,', N',');
+    RETURN LEFT(LTRIM(RTRIM(@s)), 200);
+END;
+GO
+
 CREATE OR ALTER PROCEDURE opd.usp_ListAvailableSlots
     @DoctorId        UNIQUEIDENTIFIER,
     @HospitalId      UNIQUEIDENTIFIER,
@@ -1134,7 +1220,13 @@ AS BEGIN
     WHEN MATCHED THEN UPDATE SET [Value] = s.[Value], ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
     WHEN NOT MATCHED THEN INSERT (HospitalId, SettingKey, [Value], ModifiedAt, ModifiedBy)
         VALUES (@HospitalId, s.SettingKey, s.[Value], SYSUTCDATETIME(), @ModifiedBy);
-    -- DOCTOR_NAME_TEMPLATE changed → the API layer re-renders sec.ApplicationUser.FullName for the hospital's doctors
+    -- A new DOCTOR_NAME_TEMPLATE re-renders the display name of every doctor of the hospital.
+    IF EXISTS (SELECT 1 FROM OPENJSON(@ValuesJson) WHERE [key] = 'DOCTOR_NAME_TEMPLATE')
+        UPDATE u SET FullName = cfg.fn_RenderDoctorName(cfg.fn_ResolveSetting(@HospitalId, NULL, 'DOCTOR_NAME_TEMPLATE'),
+                                    u.DisplayNameOverride, u.Prefix, u.FirstName, u.MiddleName, u.LastName, u.Qualifications, u.FullName),
+                     ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+        FROM sec.ApplicationUser u
+        WHERE u.HospitalId = @HospitalId AND EXISTS (SELECT 1 FROM sec.UserRole r WHERE r.UserId = u.UserId AND r.[Role] = 'DOCTOR');
     EXEC cfg.usp_GetHospitalSettings @HospitalId = @HospitalId;
 END;
 GO
@@ -1261,10 +1353,102 @@ AS BEGIN
 END;
 GO
 
--- sec.usp_SaveDoctorProfile: INSERT/UPDATE sec.ApplicationUser (+ a sec.UserRole 'DOCTOR' row) + replace
--- sec.DoctorSpecialty rows; FullName = DisplayNameOverride or the DOCTOR_NAME_TEMPLATE
--- rendering (done in the API layer, same rules as data.js _renderDoctorName). A new doctor
--- also gets ₹0 NEW / FOLLOWUP rows in bil.DoctorFeeSchedule.
+-- Create (@DoctorId NULL) or update a doctor: sec.ApplicationUser, its 'DOCTOR' role, and its specialties.
+-- @SpecialtyIdsJson is an ordered JSON array of SpecialtyIds — the first valid one becomes the primary
+-- (ApplicationUser.SpecialtyId); ids of another hospital are ignored. FullName is rendered here
+-- (cfg.fn_RenderDoctorName with the hospital's DOCTOR_NAME_TEMPLATE). A new doctor needs @PasswordHash and
+-- gets zero-amount NEW / FOLLOWUP fee rows effective from the hospital's today, in its currency.
+CREATE OR ALTER PROCEDURE sec.usp_SaveDoctorProfile
+    @DoctorId            UNIQUEIDENTIFIER = NULL,
+    @HospitalId          UNIQUEIDENTIFIER,
+    @Email               NVARCHAR(100),
+    @PasswordHash        NVARCHAR(200) = NULL,       -- required when creating; ignored on update
+    @Prefix              NVARCHAR(20)  = NULL,
+    @FirstName           NVARCHAR(100) = NULL,
+    @MiddleName          NVARCHAR(100) = NULL,
+    @LastName            NVARCHAR(100) = NULL,
+    @Qualifications      NVARCHAR(200) = NULL,
+    @DisplayNameOverride NVARCHAR(200) = NULL,
+    @LicenseNumber       NVARCHAR(50)  = NULL,
+    @Phone               NVARCHAR(20)  = NULL,
+    @Room                NVARCHAR(50)  = NULL,
+    @Languages           NVARCHAR(200) = NULL,
+    @Bio                 NVARCHAR(1000) = NULL,
+    @SpecialtyIdsJson    NVARCHAR(MAX) = N'[]',      -- ["<SpecialtyId>", …], primary first
+    @UserId              UNIQUEIDENTIFIER = NULL     -- who is saving (CreatedBy / ModifiedBy)
+AS BEGIN
+    SET NOCOUNT ON; SET XACT_ABORT ON;
+    DECLARE @Actor UNIQUEIDENTIFIER = ISNULL(@UserId, '00000000-0000-0000-0000-000000000000');
+    SET @Email = LTRIM(RTRIM(@Email));
+    IF NULLIF(@Email, N'') IS NULL THROW 50060, N'Email is required.', 1;
+    IF NULLIF(@FirstName, N'') IS NULL AND NULLIF(@LastName, N'') IS NULL AND NULLIF(@DisplayNameOverride, N'') IS NULL
+        THROW 50061, N'Enter the doctor''s name.', 1;
+    IF EXISTS (SELECT 1 FROM sec.ApplicationUser WHERE Email = @Email AND (@DoctorId IS NULL OR UserId <> @DoctorId))
+        THROW 50062, N'Another user already has this email.', 1;
+    IF ISJSON(ISNULL(@SpecialtyIdsJson, N'[]')) = 0 THROW 50063, N'@SpecialtyIdsJson must be a JSON array.', 1;
+
+    DECLARE @Spec TABLE (Ord INT PRIMARY KEY, SpecialtyId UNIQUEIDENTIFIER);
+    INSERT INTO @Spec (Ord, SpecialtyId)
+    SELECT CAST(j.[key] AS INT), s.SpecialtyId
+    FROM OPENJSON(ISNULL(@SpecialtyIdsJson, N'[]')) j
+    INNER JOIN cfg.Specialty s ON s.SpecialtyId = TRY_CAST(j.[value] AS UNIQUEIDENTIFIER) AND s.HospitalId = @HospitalId;
+    DECLARE @Primary UNIQUEIDENTIFIER = (SELECT TOP (1) SpecialtyId FROM @Spec ORDER BY Ord);
+    DECLARE @Template NVARCHAR(200) = cfg.fn_ResolveSetting(@HospitalId, NULL, 'DOCTOR_NAME_TEMPLATE');
+
+    BEGIN TRAN;
+    IF @DoctorId IS NULL
+    BEGIN
+        IF NULLIF(@PasswordHash, N'') IS NULL THROW 50064, N'A new doctor needs @PasswordHash.', 1;
+        DECLARE @New TABLE (UserId UNIQUEIDENTIFIER);
+        INSERT INTO sec.ApplicationUser (HospitalId, FullName, Email, PasswordHash, Phone, SpecialtyId, LicenseNumber,
+                                         Prefix, FirstName, MiddleName, LastName, Qualifications, DisplayNameOverride,
+                                         Room, Languages, Bio, CreatedBy)
+        OUTPUT inserted.UserId INTO @New
+        VALUES (@HospitalId,
+                cfg.fn_RenderDoctorName(@Template, @DisplayNameOverride, @Prefix, @FirstName, @MiddleName, @LastName, @Qualifications, N''),
+                @Email, @PasswordHash, @Phone, @Primary, @LicenseNumber,
+                @Prefix, @FirstName, @MiddleName, @LastName, @Qualifications, @DisplayNameOverride,
+                @Room, @Languages, @Bio, @Actor);
+        SELECT @DoctorId = UserId FROM @New;
+
+        DECLARE @Today DATE = cfg.fn_HospitalToday(@HospitalId);
+        INSERT INTO bil.DoctorFeeSchedule (HospitalId, DoctorId, ConsultationType, FeeAmount, Currency, EffectiveFrom, CreatedBy)
+        SELECT @HospitalId, @DoctorId, t.ConsultationType, 0, h.Currency, @Today, @Actor
+        FROM (VALUES ('NEW'), ('FOLLOWUP')) t(ConsultationType)
+        CROSS JOIN cfg.Hospital h WHERE h.HospitalId = @HospitalId;
+    END
+    ELSE
+    BEGIN
+        UPDATE sec.ApplicationUser SET
+            Email = @Email, Phone = @Phone, SpecialtyId = @Primary, LicenseNumber = @LicenseNumber,
+            Prefix = @Prefix, FirstName = @FirstName, MiddleName = @MiddleName, LastName = @LastName,
+            Qualifications = @Qualifications, DisplayNameOverride = @DisplayNameOverride,
+            Room = @Room, Languages = @Languages, Bio = @Bio,
+            FullName = cfg.fn_RenderDoctorName(@Template, @DisplayNameOverride, @Prefix, @FirstName, @MiddleName, @LastName, @Qualifications, FullName),
+            ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @UserId
+        WHERE UserId = @DoctorId AND HospitalId = @HospitalId AND IsActive = 1;
+        IF @@ROWCOUNT = 0 THROW 50065, N'Doctor not found in this hospital.', 1;
+    END;
+
+    IF NOT EXISTS (SELECT 1 FROM sec.UserRole WHERE UserId = @DoctorId AND [Role] = 'DOCTOR')
+        INSERT INTO sec.UserRole (UserId, [Role], CreatedBy) VALUES (@DoctorId, 'DOCTOR', @Actor);
+
+    DELETE FROM sec.DoctorSpecialty WHERE DoctorId = @DoctorId;
+    INSERT INTO sec.DoctorSpecialty (DoctorId, SpecialtyId, CreatedBy)
+    SELECT DISTINCT @DoctorId, SpecialtyId, @Actor FROM @Spec;
+    COMMIT;
+
+    -- 1: the profile (PasswordHash is never returned); 2: its specialties, primary first
+    SELECT u.UserId AS DoctorId, u.HospitalId, u.FullName, u.Email, u.Phone, u.SpecialtyId, u.LicenseNumber,
+           u.Prefix, u.FirstName, u.MiddleName, u.LastName, u.Qualifications, u.DisplayNameOverride,
+           u.Room, u.Languages, u.Bio, u.IsActive
+    FROM sec.ApplicationUser u WHERE u.UserId = @DoctorId;
+    SELECT ds.SpecialtyId, s.SpecialtyName, CAST(CASE WHEN ds.SpecialtyId = @Primary THEN 1 ELSE 0 END AS BIT) AS IsPrimary
+    FROM sec.DoctorSpecialty ds INNER JOIN cfg.Specialty s ON s.SpecialtyId = ds.SpecialtyId
+    WHERE ds.DoctorId = @DoctorId
+    ORDER BY CASE WHEN ds.SpecialtyId = @Primary THEN 0 ELSE 1 END, s.SpecialtyName;
+END;
+GO
 
 CREATE OR ALTER PROCEDURE bil.usp_GetConsultationCharge
     @ConsultationId UNIQUEIDENTIFIER
@@ -1393,7 +1577,7 @@ CREATE OR ALTER PROCEDURE opd.usp_RecordConsent
     @SignedByName NVARCHAR(200), @Method NVARCHAR(10) = 'IN_CLINIC'
 AS BEGIN
     SET NOCOUNT ON;
-    DECLARE @Out TABLE (ConsentRecordPkId BIGINT, ConsentRecordId UNIQUEIDENTIFIER, HospitalId UNIQUEIDENTIFIER, ConsentFormId UNIQUEIDENTIFIER, PatientId UNIQUEIDENTIFIER, AppointmentId UNIQUEIDENTIFIER, ConsultationId UNIQUEIDENTIFIER, SignedByName NVARCHAR(200), Method NVARCHAR(10), FormVersion INT, TitleSnapshot NVARCHAR(200), BodySnapshot NVARCHAR(MAX), SignedAt DATETIMEOFFSET(3), CreatedAt DATETIMEOFFSET(3), CreatedBy UNIQUEIDENTIFIER, ModifiedAt DATETIMEOFFSET(3), ModifiedBy UNIQUEIDENTIFIER);
+    DECLARE @Out TABLE (Id BIGINT, ConsentRecordId UNIQUEIDENTIFIER, HospitalId UNIQUEIDENTIFIER, ConsentFormId UNIQUEIDENTIFIER, PatientId UNIQUEIDENTIFIER, AppointmentId UNIQUEIDENTIFIER, ConsultationId UNIQUEIDENTIFIER, SignedByName NVARCHAR(200), Method NVARCHAR(10), FormVersion INT, TitleSnapshot NVARCHAR(200), BodySnapshot NVARCHAR(MAX), SignedAt DATETIMEOFFSET(3), CreatedAt DATETIMEOFFSET(3), CreatedBy UNIQUEIDENTIFIER, ModifiedAt DATETIMEOFFSET(3), ModifiedBy UNIQUEIDENTIFIER);
     -- v4.0: RecordedBy column dropped (ConsentRecord model has no such property).
     -- append-only: snapshot the current form text so later edits never change this record
     INSERT INTO opd.ConsentRecord (HospitalId, ConsentFormId, PatientId, AppointmentId, ConsultationId, SignedByName, Method,
@@ -1403,7 +1587,7 @@ AS BEGIN
     SELECT @HospitalId, f.ConsentFormId, @PatientId, @AppointmentId, @ConsultationId, @SignedByName, @Method,
            f.Version, f.Title, f.BodyText
     FROM cfg.ConsentForm f WHERE f.ConsentFormId = @ConsentFormId;
-    SELECT ConsentRecordPkId, ConsentRecordId, HospitalId, ConsentFormId, PatientId, AppointmentId, ConsultationId, SignedByName, Method, FormVersion, TitleSnapshot, BodySnapshot, SignedAt, CreatedAt, CreatedBy, ModifiedAt, ModifiedBy FROM @Out;
+    SELECT Id, ConsentRecordId, HospitalId, ConsentFormId, PatientId, AppointmentId, ConsultationId, SignedByName, Method, FormVersion, TitleSnapshot, BodySnapshot, SignedAt, CreatedAt, CreatedBy, ModifiedAt, ModifiedBy FROM @Out;
 END;
 GO
 
@@ -2669,7 +2853,7 @@ AS BEGIN
     SET NOCOUNT ON;
     DECLARE @Out TABLE (InvoiceId UNIQUEIDENTIFIER, InvoiceNumber NVARCHAR(30), Status NVARCHAR(10), CreatedAt DATETIMEOFFSET(3));
     DECLARE @InvoiceNumber NVARCHAR(30);
-    SELECT @InvoiceNumber = 'INV-' + RIGHT('000000' + CAST(ISNULL(MAX(InvoicePkId), 0) + 1 AS NVARCHAR), 6)
+    SELECT @InvoiceNumber = 'INV-' + RIGHT('000000' + CAST(ISNULL(MAX(Id), 0) + 1 AS NVARCHAR), 6)
     FROM bil.Invoice WHERE HospitalId = @HospitalId;
 
     INSERT INTO bil.Invoice (HospitalId, InvoiceNumber, ConsultationId, PatientId,
@@ -2752,7 +2936,7 @@ AS BEGIN
     WHERE InvoiceId = @InvoiceId;
 
     DECLARE @CnNumber NVARCHAR(30);
-    SELECT @CnNumber = 'CN-' + RIGHT('000000' + CAST(ISNULL(MAX(CreditNotePkId), 0) + 1 AS NVARCHAR), 6)
+    SELECT @CnNumber = 'CN-' + RIGHT('000000' + CAST(ISNULL(MAX(Id), 0) + 1 AS NVARCHAR), 6)
     FROM bil.CreditNote WHERE HospitalId = @HospitalId;
 
     INSERT INTO bil.CreditNote (HospitalId, CreditNoteNumber, InvoiceId, Amount, Reason, IssuedBy)
@@ -2843,14 +3027,14 @@ AS BEGIN
     -- Liability per line in priority order: PERCENT follows the charge, AMOUNT (or a manual
     -- override) stays fixed; each is capped to what earlier lines left of the charge.
     ;WITH raw AS (
-        SELECT CoverageLineId, Priority, CoverageLinePkId,
+        SELECT CoverageLineId, Priority, Id,
                CASE WHEN ApprovedType = 'PERCENT' AND IsManualAmount = 0 THEN ROUND(@Charge * ApprovedValue / 100, 2)
                     WHEN IsManualAmount = 1 THEN Liability
                     ELSE ApprovedValue END AS Wanted
         FROM bil.InvoiceCoverageLine WHERE InvoiceId = @InvoiceId AND Status = 'VERIFIED'
     ), ordered AS (
         SELECT CoverageLineId, Wanted,
-               ISNULL(SUM(Wanted) OVER (ORDER BY Priority, CoverageLinePkId ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS WantedBefore
+               ISNULL(SUM(Wanted) OVER (ORDER BY Priority, Id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS WantedBefore
         FROM raw
     )
     UPDATE l SET Liability = CASE WHEN o.WantedBefore >= @Charge THEN 0
@@ -2949,7 +3133,7 @@ AS BEGIN
     OUTPUT inserted.TransactionId, inserted.TransactionNumber, inserted.Amount, inserted.PaidAt
     INTO @Out
     SELECT @HospitalId, @InvoiceId,
-           'TXN-' + RIGHT('000000' + CAST(ISNULL(MAX(PaymentPkId), 0) + 1 AS NVARCHAR), 6),
+           'TXN-' + RIGHT('000000' + CAST(ISNULL(MAX(Id), 0) + 1 AS NVARCHAR), 6),
            @ComponentType, CASE WHEN @ComponentType = 'INSURANCE' THEN @CoverageLineId END,
            @PaymentMethod, @Amount, @Reference, @ReceivedBy
     FROM bil.Payment WHERE HospitalId = @HospitalId;
@@ -3009,7 +3193,7 @@ AS BEGIN
     -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='PRINT', EntityType='Receipt') on print
     -- v4.0: Receipt.PaymentId dropped — a receipt belongs to the invoice (Receipt model).
     DECLARE @ReceiptNumber NVARCHAR(30);
-    SELECT @ReceiptNumber = 'RCP-' + RIGHT('000000' + CAST(ISNULL(MAX(ReceiptPkId), 0) + 1 AS NVARCHAR), 6)
+    SELECT @ReceiptNumber = 'RCP-' + RIGHT('000000' + CAST(ISNULL(MAX(Id), 0) + 1 AS NVARCHAR), 6)
     FROM bil.Receipt WHERE HospitalId = @HospitalId;
 
     INSERT INTO bil.Receipt (HospitalId, ReceiptNumber, InvoiceId, PatientId, TotalAmount, Currency)
@@ -3850,7 +4034,7 @@ AS BEGIN
     FROM inv.StockMovement m
     INNER JOIN inv.StockBatch b ON b.StockBatchId = m.StockBatchId
     WHERE m.InventoryItemId = @InventoryItemId
-    ORDER BY m.CreatedAt DESC, m.StockMovementPkId DESC;
+    ORDER BY m.CreatedAt DESC, m.Id DESC;
 END;
 GO
 
@@ -4030,7 +4214,7 @@ AS BEGIN
     BEGIN TRAN;
         -- Lock the usable batches of every item involved, then take from each in expiry order until the need is met.
         SELECT b.StockBatchId, b.HospitalId, b.InventoryItemId, b.QtyOnHand, n.Needed,
-               RunTotal = SUM(b.QtyOnHand) OVER (PARTITION BY b.InventoryItemId ORDER BY b.ExpiryDate, b.ReceivedAt, b.StockBatchPkId ROWS UNBOUNDED PRECEDING)
+               RunTotal = SUM(b.QtyOnHand) OVER (PARTITION BY b.InventoryItemId ORDER BY b.ExpiryDate, b.ReceivedAt, b.Id ROWS UNBOUNDED PRECEDING)
         INTO #Batches
         FROM inv.StockBatch b WITH (UPDLOCK, HOLDLOCK)
         INNER JOIN (SELECT InventoryItemId, SUM(ItemQty) AS Needed FROM cln.ConsultationServiceItem
@@ -4101,6 +4285,11 @@ GO
 -- (cfg.ConsultationFormConfig, sec.UserNotification,
 -- opd.PatientConsentDocument,
 -- cln.ConsultationCustomValue) and cln.LabResultAttachment.
+--
+-- v3.3: sec.usp_SaveDoctorProfile and cfg.usp_UpdateHospital (the two endpoints
+-- the API spec had no procedure for); cfg.fn_RenderDoctorName renders doctor
+-- display names, and cfg.usp_SaveHospitalSettings now re-renders them itself
+-- when DOCTOR_NAME_TEMPLATE changes.
 --
 -- v3.2: UTC everywhere — every point in time is DATETIMEOFFSET (+00:00); section 0
 -- adds cfg.fn_HospitalWindowsTz / cfg.fn_HospitalToday; "today", report ranges and

@@ -41,6 +41,7 @@ namespace OpdProject.templates.portal
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            PatientPhoneValidator.HospitalId = Hid;   // anonymous page: the portal hospital's phone rule
             if (IsPostBack) return;
             foreach (var d in UserService.ListActiveDoctors(Hid))
             {

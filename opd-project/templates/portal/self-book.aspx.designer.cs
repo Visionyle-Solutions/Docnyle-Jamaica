@@ -50,6 +50,10 @@ namespace OpdProject.templates.portal
         /// </remarks>
         protected global::System.Web.UI.WebControls.TextBox PatientPhone;
 
+        /// <summary>PatientPhoneValidator control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::OpdProject.Web.PhoneValidator PatientPhoneValidator;
+
         /// <summary>
         /// DoctorList control.
         /// </summary>

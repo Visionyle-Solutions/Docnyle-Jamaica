@@ -185,7 +185,7 @@ routing, the 5 clinical engines, the schema, and the stored procedures.
 
 7. **Additive, not a rewrite of decided architecture.** Table names,
    schema namespaces (`opd`/`cln`/`bil`/`cfg`/`sec`/`msg`), the 14-verb
-   method taxonomy, and the dual-key pattern (`{Table}PkId` internal /
+   method taxonomy, and the dual-key pattern (`Id` internal /
    `{Table}Id` external `UNIQUEIDENTIFIER`) are binding and are not
    revisited here.
 
@@ -316,7 +316,7 @@ against that design:
 
 - EF Core Code-First migrations would want to *own* the schema and
   generate its own DDL, conflicting with `schema.sql`'s hand-authored
-  dual-key pattern (`{Table}PkId BIGINT IDENTITY` clustered PK,
+  dual-key pattern (`Id BIGINT IDENTITY` clustered PK,
   `{Table}Id UNIQUEIDENTIFIER DEFAULT NEWSEQUENTIALID()` external key) and
   its explicit constraint-naming convention (`PK_{Schema}_{Table}`,
   `FK_{Schema}_{Table}_{Column}`, etc. — `DATA-LAYER-ARCHITECTURE.md` §5.5).

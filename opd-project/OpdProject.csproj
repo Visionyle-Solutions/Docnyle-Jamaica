@@ -79,6 +79,7 @@
     <Compile Include="Services\CatalogService.cs" />
     <Compile Include="Services\InventoryService.cs" />
     <Compile Include="Services\TimeZoneService.cs" />
+    <Compile Include="Services\PhoneService.cs" />
     <Compile Include="Services\ClinicalEngines.cs" />
     <Compile Include="Services\ConsultationService.cs" />
     <Compile Include="Services\ConsultationConfigService.cs" />
@@ -104,6 +105,7 @@
     </Compile>
     <Compile Include="Web\HealthRecord.cs" />
     <Compile Include="Web\Navigation.cs" />
+    <Compile Include="Web\PhoneValidator.cs" />
     <Compile Include="Web\RouteConfig.cs" />
     <Compile Include="Web\VitalUnitUi.cs" />
     <Compile Include="templates\billing\coverage-form.ascx.cs">

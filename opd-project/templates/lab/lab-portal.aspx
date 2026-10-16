@@ -17,8 +17,9 @@
     <div class="text-xs text-muted mb-2">Enter the patient's mobile number to see their open lab and imaging orders, then receive the ones you will do. They are then added to your list.</div>
     <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
       <div class="form-group" style="margin:0;"><label class="form-label" for="<%= ClaimMobile.ClientID %>">Patient Mobile Number <span class="required">*</span></label>
-        <asp:TextBox ID="ClaimMobile" runat="server" CssClass="form-control" TextMode="Phone" MaxLength="20" placeholder="e.g., 9111111115" autocomplete="off" />
-        <asp:RequiredFieldValidator runat="server" ControlToValidate="ClaimMobile" ValidationGroup="Claim" Text="Required" CssClass="field-error" Display="Dynamic" /></div>
+        <asp:TextBox ID="ClaimMobile" runat="server" CssClass="form-control" TextMode="Phone" MaxLength="20" placeholder="e.g., 876-555-1115" autocomplete="off" />
+        <asp:RequiredFieldValidator runat="server" ControlToValidate="ClaimMobile" ValidationGroup="Claim" Text="Required" CssClass="field-error" Display="Dynamic" />
+        <c360:PhoneValidator runat="server" ControlToValidate="ClaimMobile" ValidationGroup="Claim" /></div>
       <asp:LinkButton ID="FindButton" runat="server" CssClass="btn btn--primary" ValidationGroup="Claim" OnClick="FindButton_Click"><i class="ti ti-search" aria-hidden="true"></i> Find Orders</asp:LinkButton>
     </div>
     <asp:PlaceHolder ID="ClaimErrorPanel" runat="server" Visible="false"><div class="field-error mt-2"><asp:Literal ID="ClaimError" runat="server" /></div></asp:PlaceHolder>

@@ -50,6 +50,16 @@ namespace OpdProject.templates.patients
         public void Setup()
         {
             HealthIdRequired.Enabled = HealthIdRequiredMark.Visible = Hospital.NationalHealthIdMandatory;
+            // Phone rule of this hospital (also on the anonymous self-registration page): Jamaican numbers, country code +1.
+            MobileValidator.HospitalId = EmergencyPhoneValidator.HospitalId = Hospital.HospitalId;
+            if (PhoneService.UsesJamaicaRule(Hospital.HospitalId))
+            {
+                CountryCodeValidator.ValidationExpression = @"^\+?1$";
+                CountryCodeValidator.ErrorMessage = "Jamaican numbers use country code +1";
+                CountryCodeValidator.Text = "Use +1";
+                MobileInput.Attributes["placeholder"] = PhoneService.Example(Hospital.HospitalId);
+                EmergencyPhoneInput.Attributes["placeholder"] = PhoneService.Example(Hospital.HospitalId);
+            }
             HealthIdRequired.ErrorMessage = HealthIdLabel + " is required";
             TrnGroup.Visible = IsJamaica;
             RegionList.Visible = IsJamaica;
@@ -131,6 +141,8 @@ namespace OpdProject.templates.patients
             var cc = Clean(CountryCodeInput.Text);
             if (cc != null && !cc.StartsWith("+")) cc = "+" + cc;
             var mobile = MobileInput.Text.Trim();
+            // A Jamaican number may be typed with its +1; the country code has its own field, so keep "876-555-1234" here.
+            if (PhoneService.UsesJamaicaRule(Hospital.HospitalId) && PhoneService.IsValid(Hospital.HospitalId, mobile)) { mobile = PhoneService.JamaicaLocal(mobile); cc = "+1"; }
             var region = Clean(IsJamaica ? RegionList.SelectedValue : RegionInput.Text);
             var country = Clean(CountryInput.Text);
             var line1 = Clean(AddrLine1Input.Text);
