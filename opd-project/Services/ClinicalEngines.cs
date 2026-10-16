@@ -114,7 +114,7 @@ namespace OpdProject.Services
             return double.TryParse(Regex.Replace(s ?? "", "[^0-9.]", ""), NumberStyles.Any, CultureInfo.InvariantCulture, out v) ? v : 0;
         }
 
-        public static List<ClinicalAlert> Reconcile(string medicineName, string strength, string genericClass, List<Prescription> activePatientMeds, List<Prescription> currentVisitMeds)
+        public static List<ClinicalAlert> Reconcile(string medicineName, string strength, string genericClass, List<Prescription> activePatientMeds, List<Prescription> currentVisitMeds, string hospitalId)
         {
             var alerts = new List<ClinicalAlert>();
             var name = (medicineName ?? "").ToLowerInvariant();
@@ -136,7 +136,7 @@ namespace OpdProject.Services
                 }
                 var dup = sameDrug.FirstOrDefault(m => m.Strength == strength);
                 if (dup != null)
-                    alerts.Add(new ClinicalAlert { Severity = "CRITICAL", Type = "DUPLICATE_ACTIVE", Message = "Duplicate active drug: Patient is already on " + medicineName + " " + dup.Strength + " prescribed on " + dup.PrescribedDate.ToString("yyyy-MM-dd") + "." });
+                    alerts.Add(new ClinicalAlert { Severity = "CRITICAL", Type = "DUPLICATE_ACTIVE", Message = "Duplicate active drug: Patient is already on " + medicineName + " " + dup.Strength + " prescribed on " + HospitalService.FormatDate(hospitalId, dup.PrescribedDate) + "." });
             }
             if (currentVisitMeds.Any(m => (m.MedicineName ?? "").ToLowerInvariant() == name))
                 alerts.Add(new ClinicalAlert { Severity = "WARNING", Type = "DUPLICATE_VISIT", Message = medicineName + " has already been added in this consultation." });
@@ -154,7 +154,7 @@ namespace OpdProject.Services
     public static class SoapComposer
     {
         public static SoapDraft Compose(ConsultationVitals v, List<string> yes, List<string> no, List<ConsultationDiagnosis> diagnoses,
-            List<Prescription> meds, List<InvestigationOrder> orders, DateTime? followupDate, string followupNotes)
+            List<Prescription> meds, List<InvestigationOrder> orders, DateTime? followupDate, string followupNotes, string hospitalId)
         {
             var s = "";
             if (yes.Count > 0) s += "Patient presents with " + string.Join(", ", yes) + ".";
@@ -190,7 +190,7 @@ namespace OpdProject.Services
                 plan.Add("Investigations ordered:");
                 plan.AddRange(orders.Select(x => "• " + x.TestName + " (" + x.TestType + ")"));
             }
-            if (followupDate.HasValue) plan.Add("Follow-Up: " + followupDate.Value.ToString("yyyy-MM-dd") + (string.IsNullOrEmpty(followupNotes) ? "" : " — " + followupNotes));
+            if (followupDate.HasValue) plan.Add("Follow-Up: " + HospitalService.FormatDate(hospitalId, followupDate.Value) + (string.IsNullOrEmpty(followupNotes) ? "" : " — " + followupNotes));
             return new SoapDraft { Subjective = s.Trim(), Objective = o.Trim(), Assessment = a, Plan = plan.Count > 0 ? string.Join("\n", plan) : "Plan to be determined." };
         }
 

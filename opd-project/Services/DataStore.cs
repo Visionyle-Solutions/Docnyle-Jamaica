@@ -199,7 +199,7 @@ namespace OpdProject.Services
             var defaults = new Dictionary<string, string>
             {
                 { "APPT_SLOT_MINS", "15" }, { "APPT_BUFFER_MINS", "0" }, { "FREE_FOLLOWUP_ALLOWED", "true" }, { "FREE_FOLLOWUP_DAYS", "7" },
-                { "DATE_FORMAT", "YYYY-MM-DD" }, { "TIME_FORMAT", "12h" }, { "MRN_PREFIX", "MRN" }, { "MRN_FORMAT", "{prefix}-{seq:5}" },
+                { "DATE_FORMAT", "DD/MM/YYYY" }, { "TIME_FORMAT", "12h" }, { "MRN_PREFIX", "MRN" }, { "MRN_FORMAT", "{prefix}-{seq:5}" },
                 { "DOCTOR_NAME_TEMPLATE", "{prefix} {first} {last}" },
             };
             var mrnSeq = new Dictionary<string, string> { { "HOSP-001", "90825" }, { "HOSP-002", "10000" } };

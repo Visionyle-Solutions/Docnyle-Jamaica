@@ -80,8 +80,21 @@ namespace OpdProject.Services
         {
             DateTime from, to;
             PeriodRange(period, today, out from, out to);
+            return AppointmentsInRange(hid, doctorId, kind, from, to);
+        }
+
+        /* Callers hold DataStore.Sync */
+        private static List<Appointment> AppointmentsInRange(string hid, string doctorId, string kind, DateTime from, DateTime to)
+        {
             return DataStore.Appointments.Where(a => a.HospitalId == hid && (doctorId == null || a.DoctorId == doctorId)
                 && MatchesKind(a, kind) && InRange(a.SlotStart, from, to)).ToList();
+        }
+
+        /// <summary>Appointment Summary with a custom date range (both days inclusive), oldest first.</summary>
+        public static List<AppointmentView> AppointmentList(string hid, string doctorId, string kind, DateTime from, DateTime to)
+        {
+            lock (DataStore.Sync)
+                return SchedulingService.ToViews(AppointmentsInRange(hid, doctorId, kind, from.Date, to.Date).OrderBy(a => a.SlotStart));
         }
 
         /// <summary>Home dashboard: consultations, appointments and cancelled appointments for today / this week / this month,
@@ -119,7 +132,7 @@ namespace OpdProject.Services
         {
             lock (DataStore.Sync)
                 return DataStore.Consultations.Where(c => c.HospitalId == hid && InRange(c.VisitDate, from, to))
-                    .GroupBy(c => c.VisitDate.Date).OrderBy(g => g.Key).Select(g => new CountRow { Label = g.Key.ToString("yyyy-MM-dd"), Count = g.Count() }).ToList();
+                    .GroupBy(c => c.VisitDate.Date).OrderBy(g => g.Key).Select(g => new CountRow { Label = HospitalService.FormatDate(hid, g.Key), Count = g.Count() }).ToList();
         }
 
         public static List<CountRow> DiagnosisFrequency(string hid, DateTime from, DateTime to)

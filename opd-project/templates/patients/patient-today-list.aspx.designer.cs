@@ -43,7 +43,7 @@ namespace OpdProject.templates.patients
 
         /// <summary>StatusFilter control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.DropDownList PeriodFilter;
+        protected global::System.Web.UI.WebControls.TextBox DateFilter;
         protected global::System.Web.UI.WebControls.DropDownList KindFilter;
         protected global::System.Web.UI.WebControls.DropDownList StatusFilter;
 

@@ -1,6 +1,6 @@
 ﻿<%@ Page Title="Today's Patients" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="patient-today-list.aspx.cs" Inherits="OpdProject.templates.patients.patient_today_list" %>
-<%-- Appointment summary: today's appointment queue by default; the dashboard tiles open it with
-     ?kind=appointments|consultations|cancelled &period=today|week|month [&status=…] preselected. Today's queue, not a flat alphabetical roster. A doctor sees their own queue; the
+<%-- Appointment summary: one day's appointment queue (today by default, ?date=yyyy-MM-dd for another day); dashboard
+     tiles open it with ?kind=appointments|consultations|cancelled [&status=…] preselected. A day's queue, not a flat alphabetical roster. A doctor sees their own queue; the
      front desk (receptionist, admin, nurse) sees every doctor's appointments for the day and checks
      patients in. Visit lifecycle: BOOKED → CHECKED_IN → IN_CONSULT → COMPLETED. --%>
 <asp:Content ContentPlaceHolderID="MainContent" runat="server">
@@ -18,8 +18,8 @@
         </div>
       </asp:PlaceHolder>
       <div class="form-group" style="margin:0;">
-        <label class="form-label" for="<%= PeriodFilter.ClientID %>">Period</label>
-        <asp:DropDownList ID="PeriodFilter" runat="server" CssClass="form-select" AutoPostBack="true" OnSelectedIndexChanged="PeriodFilter_Changed" />
+        <label class="form-label" for="<%= DateFilter.ClientID %>">Date</label>
+        <asp:TextBox ID="DateFilter" runat="server" CssClass="form-control" TextMode="Date" AutoPostBack="true" OnTextChanged="DateFilter_Changed" />
       </div>
       <div class="form-group" style="margin:0;">
         <label class="form-label" for="<%= KindFilter.ClientID %>">Show</label>
@@ -43,7 +43,6 @@
       <thead>
         <tr>
           <th scope="col">S.No</th>
-          <% if (!IsToday) { %><th scope="col">Date</th><% } %>
           <th scope="col">Time</th>
           <% if (ShowDoctor) { %><th scope="col">Doctor</th><% } %>
           <th scope="col">Patient Name</th>
@@ -58,7 +57,6 @@
           <ItemTemplate>
             <tr>
               <td><%# RowOffset + Container.ItemIndex + 1 %></td>
-              <asp:PlaceHolder runat="server" Visible="<%# !IsToday %>"><td><%#: FmtDate(Item.SlotStart) %></td></asp:PlaceHolder>
               <td><%#: FmtTime(Item.SlotStart) %></td>
               <asp:PlaceHolder runat="server" Visible="<%# ShowDoctor %>"><td><%#: Item.DoctorName %><div class="text-xs text-muted"><%#: Item.DoctorRoom %></div></td></asp:PlaceHolder>
               <td><%#: Item.PatientName %></td>
@@ -79,7 +77,7 @@
           </ItemTemplate>
         </asp:Repeater>
         <asp:PlaceHolder ID="EmptyRow" runat="server">
-          <tr class="empty-row"><td colspan="9"><%: StatusFilter.SelectedValue == "" ? "No " + KindFilter.SelectedItem.Text.ToLower() + " " + PeriodFilter.SelectedItem.Text.ToLower() + "." : "No " + KindFilter.SelectedItem.Text.ToLower() + " with this status " + PeriodFilter.SelectedItem.Text.ToLower() + "." %></td></tr>
+          <tr class="empty-row"><td colspan="9"><%: StatusFilter.SelectedValue == "" ? "No " + KindFilter.SelectedItem.Text.ToLower() + " " + DayText + "." : "No " + KindFilter.SelectedItem.Text.ToLower() + " with this status " + DayText + "." %></td></tr>
         </asp:PlaceHolder>
       </tbody>
     </table>

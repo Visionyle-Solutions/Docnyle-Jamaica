@@ -23,6 +23,22 @@
    Extends coverage to all 150 current api.js methods (157 procedures
    + 3 views).
 
+   Version 3.0 (2026-10-15) — aligned with docs/schema.sql v4.0, whose
+   column names follow the C# models in Models/. Every procedure was
+   rewritten for the renamed columns (e.g. cfg.Hospital LegalAddress /
+   ContactNumber / PrimaryEmail, cfg.DrugFormulary DrugId /
+   IsControlledSubstance, cfg.PhraseBank Scope / Section / TriggerKeyword,
+   cln.InvestigationOrder OrderId, cln.LabResult ResultId, bil.Payment
+   TransactionId, sec.AuditLog [Timestamp]) and the v4.0 CHECK values
+   (order ORDERED/SENT/RESULTS_READY, lab result PENDING_REVIEW/REVIEWED,
+   symptom UNSET/YES/NO). Parameters that fed dropped columns were
+   removed; where a procedure's signature changed, a "v4.0:" comment says
+   why. User roles moved to sec.UserRole (@Roles is comma-separated).
+   sec.usp_CreateUserSession / sec.usp_CheckSessionValid use a reserved
+   table (schema.sql section G) and are flagged RESERVED. Verified: all
+   procedures compile on SQL Server against schema v4.0 with no
+   unresolved references.
+
    Naming: {SqlSchema}.usp_{Verb}{Entity}{Qualifier}
    Verbs (14, per architecture doc §2): Get, List, Search, Check,
      Create, Save, Update, Delete, Submit, Confirm, Cancel,
@@ -64,16 +80,17 @@ CREATE OR ALTER PROCEDURE sec.usp_AuthenticateUser
     @PasswordHash   NVARCHAR(200)
 AS BEGIN
     SET NOCOUNT ON;
-    -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='LOGIN' or 'LOGIN_FAIL')
-    SELECT u.UserId, u.HospitalId, u.FullName, u.Email, u.Phone, u.[Role],
+    -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='LOGIN' or 'LOGIN_FAIL').
+    -- v4.0: roles come from sec.UserRole (AppUser.Roles, comma-joined here). The v3.0 insert into
+    -- sec.LoginAttempt was removed — that table is reserved (schema.sql section G); failed logins
+    -- are only audited.
+    SELECT u.UserId, u.HospitalId, u.FullName, u.Email, u.Phone,
+           (SELECT STRING_AGG(r.[Role], ',') FROM sec.UserRole r WHERE r.UserId = u.UserId) AS Roles,
            u.SpecialtyId, u.LicenseNumber, u.LabPartnerId, u.IsActive
     FROM sec.ApplicationUser u
     INNER JOIN cfg.Hospital h ON h.HospitalId = u.HospitalId AND h.IsDeleted = 0
     WHERE u.Email = @Email AND u.PasswordHash = @PasswordHash
       AND u.IsActive = 1 AND u.IsDeleted = 0;
-
-    INSERT INTO sec.LoginAttempt (EmailAttempted, IsSuccess)
-    VALUES (@Email, CASE WHEN @@ROWCOUNT > 0 THEN 1 ELSE 0 END);
 END;
 GO
 
@@ -81,22 +98,34 @@ CREATE OR ALTER PROCEDURE sec.usp_CreateUser
     @HospitalId     UNIQUEIDENTIFIER,
     @FullName       NVARCHAR(200),
     @Email          NVARCHAR(100),
-    @PasswordHash   NVARCHAR(200) = 'demo123',
+    @PasswordHash   NVARCHAR(200),
     @Phone          NVARCHAR(20) = NULL,
-    @Role           NVARCHAR(20),
+    @Roles          NVARCHAR(200),              -- comma-separated, e.g. 'DOCTOR,ADMIN' (rows in sec.UserRole)
     @SpecialtyId    UNIQUEIDENTIFIER = NULL,
     @LicenseNumber  NVARCHAR(50) = NULL,
     @LabPartnerId   UNIQUEIDENTIFIER = NULL,
     @CreatedBy      UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @New TABLE (UserId UNIQUEIDENTIFIER);
+    BEGIN TRAN;
     INSERT INTO sec.ApplicationUser (HospitalId, FullName, Email, PasswordHash, Phone,
-                                     [Role], SpecialtyId, LicenseNumber, LabPartnerId, CreatedBy)
-    OUTPUT inserted.UserId, inserted.HospitalId, inserted.FullName, inserted.Email,
-           inserted.Phone, inserted.[Role], inserted.SpecialtyId, inserted.LicenseNumber,
-           inserted.IsActive, inserted.CreatedAt
+                                     SpecialtyId, LicenseNumber, LabPartnerId, CreatedBy)
+    OUTPUT inserted.UserId INTO @New
     VALUES (@HospitalId, @FullName, @Email, @PasswordHash, @Phone,
-            @Role, @SpecialtyId, @LicenseNumber, @LabPartnerId, @CreatedBy);
+            @SpecialtyId, @LicenseNumber, @LabPartnerId, @CreatedBy);
+
+    INSERT INTO sec.UserRole (UserId, [Role], CreatedBy)
+    SELECT DISTINCT n.UserId, LTRIM(RTRIM(s.value)), @CreatedBy
+    FROM @New n CROSS JOIN STRING_SPLIT(@Roles, ',') s
+    WHERE LTRIM(RTRIM(s.value)) <> '';
+    COMMIT;
+
+    SELECT u.UserId, u.HospitalId, u.FullName, u.Email, u.Phone,
+           (SELECT STRING_AGG(r.[Role], ',') FROM sec.UserRole r WHERE r.UserId = u.UserId) AS Roles,
+           u.SpecialtyId, u.LicenseNumber, u.IsActive, u.CreatedAt
+    FROM sec.ApplicationUser u INNER JOIN @New n ON n.UserId = u.UserId;
 END;
 GO
 
@@ -104,24 +133,35 @@ CREATE OR ALTER PROCEDURE sec.usp_UpdateUser
     @UserId         UNIQUEIDENTIFIER,
     @FullName       NVARCHAR(200) = NULL,
     @Phone          NVARCHAR(20) = NULL,
-    @Role           NVARCHAR(20) = NULL,
+    @Roles          NVARCHAR(200) = NULL,       -- comma-separated; NULL = leave roles unchanged
     @SpecialtyId    UNIQUEIDENTIFIER = NULL,
     @LicenseNumber  NVARCHAR(50) = NULL,
     @ModifiedBy     UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
-    -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='UPDATE') if Role changed
+    SET XACT_ABORT ON;
+    -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='UPDATE') if Roles changed
+    BEGIN TRAN;
     UPDATE sec.ApplicationUser SET
         FullName = ISNULL(@FullName, FullName),
         Phone = ISNULL(@Phone, Phone),
-        [Role] = ISNULL(@Role, [Role]),
         SpecialtyId = ISNULL(@SpecialtyId, SpecialtyId),
         LicenseNumber = ISNULL(@LicenseNumber, LicenseNumber),
         ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
     WHERE UserId = @UserId AND IsDeleted = 0;
 
-    SELECT UserId, HospitalId, FullName, Email, Phone, [Role], SpecialtyId,
-           LicenseNumber, IsActive FROM sec.ApplicationUser WHERE UserId = @UserId;
+    IF @Roles IS NOT NULL BEGIN
+        DELETE FROM sec.UserRole WHERE UserId = @UserId;
+        INSERT INTO sec.UserRole (UserId, [Role], CreatedBy)
+        SELECT DISTINCT @UserId, LTRIM(RTRIM(value)), @ModifiedBy
+        FROM STRING_SPLIT(@Roles, ',') WHERE LTRIM(RTRIM(value)) <> '';
+    END;
+    COMMIT;
+
+    SELECT u.UserId, u.HospitalId, u.FullName, u.Email, u.Phone,
+           (SELECT STRING_AGG(r.[Role], ',') FROM sec.UserRole r WHERE r.UserId = u.UserId) AS Roles,
+           u.SpecialtyId, u.LicenseNumber, u.IsActive
+    FROM sec.ApplicationUser u WHERE u.UserId = @UserId;
 END;
 GO
 
@@ -144,14 +184,18 @@ CREATE OR ALTER PROCEDURE sec.usp_ListUsers
     @HospitalId     UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT UserId, FullName, Email, Phone, [Role], SpecialtyId,
-           LicenseNumber, LabPartnerId, IsActive, CreatedAt
-    FROM sec.ApplicationUser
-    WHERE HospitalId = @HospitalId AND IsDeleted = 0
-    ORDER BY FullName;
+    SELECT u.UserId, u.FullName, u.Email, u.Phone,
+           (SELECT STRING_AGG(r.[Role], ',') FROM sec.UserRole r WHERE r.UserId = u.UserId) AS Roles,
+           u.SpecialtyId, u.LicenseNumber, u.LabPartnerId, u.IsActive, u.CreatedAt
+    FROM sec.ApplicationUser u
+    WHERE u.HospitalId = @HospitalId AND u.IsDeleted = 0
+    ORDER BY u.FullName;
 END;
 GO
 
+-- RESERVED (schema.sql section G): sec.UserSession is not used by the application yet (sessions are
+-- ASP.NET session state). usp_CreateUserSession / usp_CheckSessionValid are kept for when the
+-- feature is built; nothing should call them today.
 CREATE OR ALTER PROCEDURE sec.usp_CreateUserSession
     @UserId         UNIQUEIDENTIFIER,
     @SessionToken   NVARCHAR(100),
@@ -238,9 +282,10 @@ CREATE OR ALTER PROCEDURE cfg.usp_GetHospital
     @HospitalId     UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT HospitalId, Name, [Address], Phone, Email, Country, Currency, Timezone,
-           LicenseNumber, PatientIdLabel, NationalHealthIdLabel, IsNationalHealthIdMandatory,
-           DefaultTempUnit, DefaultRxValidityDays, IsActive
+    SELECT HospitalId, Name, LegalAddress, ContactNumber, PrimaryEmail, Country, Currency, Timezone,
+           LicenseNumber, LogoBase64, PatientIdLabel, NationalHealthIdLabel, NationalHealthIdMandatory,
+           GrowthChartStandard, DefaultTempUnit, DefaultRxValidityDays,
+           RxPrefix, ReceiptPrefix, InvoicePrefix, LabChargePerTest, IsActive
     FROM cfg.Hospital WHERE HospitalId = @HospitalId AND IsDeleted = 0;
 END;
 GO
@@ -370,7 +415,7 @@ CREATE OR ALTER PROCEDURE cfg.usp_ListMedicalHistoryItems
     @HospitalId     UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT MedicalHistoryItemId, HospitalId, ItemName, SortOrder
+    SELECT ItemId, HospitalId, ItemName, IsQuickPick, SortOrder
     FROM cfg.MedicalHistoryItem
     WHERE HospitalId = @HospitalId AND IsActive = 1 AND IsDeleted = 0
     ORDER BY SortOrder;
@@ -382,7 +427,7 @@ CREATE OR ALTER PROCEDURE cfg.usp_ListMedicalHistoryConfig
 AS BEGIN
     SET NOCOUNT ON;
     -- Admin config view — includes inactive items, matches data.js listMedicalHistoryConfig
-    SELECT MedicalHistoryItemId, HospitalId, ItemName, SortOrder, IsActive
+    SELECT ItemId, HospitalId, ItemName, IsQuickPick, SortOrder, IsActive
     FROM cfg.MedicalHistoryItem
     WHERE HospitalId = @HospitalId AND IsDeleted = 0
     ORDER BY SortOrder;
@@ -398,7 +443,7 @@ AS BEGIN
     DECLARE @Sort INT;
     SELECT @Sort = ISNULL(MAX(SortOrder), 0) + 1 FROM cfg.MedicalHistoryItem WHERE HospitalId = @HospitalId;
     INSERT INTO cfg.MedicalHistoryItem (HospitalId, ItemName, SortOrder, CreatedBy)
-    OUTPUT inserted.MedicalHistoryItemId, inserted.ItemName, inserted.SortOrder
+    OUTPUT inserted.ItemId, inserted.ItemName, inserted.SortOrder
     VALUES (@HospitalId, @ItemName, @Sort, @CreatedBy);
 END;
 GO
@@ -420,10 +465,10 @@ CREATE OR ALTER PROCEDURE cfg.usp_ListMedicalEventItems
     @HospitalId     UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT MedicalEventTypeId, HospitalId, EventTypeName
+    SELECT EventId, HospitalId, EventName, SortOrder
     FROM cfg.MedicalEventType
     WHERE HospitalId = @HospitalId AND IsActive = 1 AND IsDeleted = 0
-    ORDER BY EventTypeName;
+    ORDER BY SortOrder, EventName;
 END;
 GO
 
@@ -438,7 +483,10 @@ AS BEGIN
     -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='READ', EntityType='Patient')
     SELECT PatientId, HospitalId, Mrn, FullName, Gender, Dob, Phone, Email,
            [Address], NationalHealthId, InsuranceProvider, InsurancePolicyNo,
-           PhotoBase64, EmergencyContactName, EmergencyContactPhone,
+           EmergencyContactName, EmergencyContactPhone, BloodGroup, RegisteredVia,
+           Prefix, FirstName, MiddleName, LastName, Trn, CountryCode, Mobile, PreferredLanguage,
+           AddrLine1, AddrLine2, City, Region, Country, MaritalStatus, ReferralSource, PreferredDoctorId,
+           SmokingStatus, SmokingPackYears, AlcoholUse, Occupation, PhysicalActivity, Diet,
            IsActive, CreatedAt
     FROM opd.Patient
     WHERE PatientId = @PatientId AND IsDeleted = 0;
@@ -536,8 +584,9 @@ CREATE OR ALTER PROCEDURE opd.usp_ListAllergies
     @PatientId      UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT PatientAllergyId, HospitalId, PatientId, AllergyType, AllergyName,
-           Reaction, Severity, Status, OnsetDate
+    SELECT AllergyId, HospitalId, PatientId, AllergyType, AllergyName,
+           ReactionType, ReactionDescription, Severity, Status, IsTreated, IsFamilyHistory,
+           SinceWhen, Notes
     FROM opd.PatientAllergy
     WHERE PatientId = @PatientId AND IsDeleted = 0
     ORDER BY CreatedAt DESC;
@@ -549,49 +598,59 @@ CREATE OR ALTER PROCEDURE opd.usp_CreateAllergy
     @PatientId      UNIQUEIDENTIFIER,
     @AllergyType    NVARCHAR(20),
     @AllergyName    NVARCHAR(100),
-    @Reaction       NVARCHAR(200) = NULL,
+    @ReactionType   NVARCHAR(30) = NULL,
+    @ReactionDescription NVARCHAR(200) = NULL,
     @Severity       NVARCHAR(10),
-    @OnsetDate      DATE = NULL,
+    @IsTreated      BIT = 0,
+    @IsFamilyHistory BIT = 0,
+    @SinceWhen      DATE = NULL,
+    @Notes          NVARCHAR(500) = NULL,
     @CreatedBy      UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
     INSERT INTO opd.PatientAllergy (HospitalId, PatientId, AllergyType, AllergyName,
-                                     Reaction, Severity, OnsetDate, CreatedBy)
-    OUTPUT inserted.PatientAllergyId, inserted.AllergyName, inserted.Severity, inserted.Status
-    VALUES (@HospitalId, @PatientId, @AllergyType, @AllergyName, @Reaction, @Severity, @OnsetDate, @CreatedBy);
+                                     ReactionType, ReactionDescription, Severity, IsTreated,
+                                     IsFamilyHistory, SinceWhen, Notes, CreatedBy)
+    OUTPUT inserted.AllergyId, inserted.AllergyName, inserted.Severity, inserted.Status
+    VALUES (@HospitalId, @PatientId, @AllergyType, @AllergyName, @ReactionType, @ReactionDescription,
+            @Severity, @IsTreated, @IsFamilyHistory, @SinceWhen, @Notes, @CreatedBy);
 END;
 GO
 
 CREATE OR ALTER PROCEDURE opd.usp_UpdateAllergy
-    @PatientAllergyId UNIQUEIDENTIFIER,
-    @Reaction       NVARCHAR(200) = NULL,
+    @AllergyId      UNIQUEIDENTIFIER,
+    @ReactionType   NVARCHAR(30) = NULL,
+    @ReactionDescription NVARCHAR(200) = NULL,
     @Severity       NVARCHAR(10) = NULL,
     @Status         NVARCHAR(10) = NULL,
+    @IsTreated      BIT = NULL,
+    @SinceWhen      DATE = NULL,
+    @Notes          NVARCHAR(500) = NULL,
     @ModifiedBy     UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
     UPDATE opd.PatientAllergy SET
-        Reaction = ISNULL(@Reaction, Reaction),
+        ReactionType = ISNULL(@ReactionType, ReactionType),
+        ReactionDescription = ISNULL(@ReactionDescription, ReactionDescription),
         Severity = ISNULL(@Severity, Severity),
         Status = ISNULL(@Status, Status),
+        IsTreated = ISNULL(@IsTreated, IsTreated),
+        SinceWhen = ISNULL(@SinceWhen, SinceWhen),
+        Notes = ISNULL(@Notes, Notes),
         ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
-    WHERE PatientAllergyId = @PatientAllergyId AND IsDeleted = 0;
+    WHERE AllergyId = @AllergyId AND IsDeleted = 0;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE opd.usp_DeleteAllergy
-    @PatientAllergyId UNIQUEIDENTIFIER,
+    @AllergyId      UNIQUEIDENTIFIER,
     @ModifiedBy     UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
-    -- Soft delete: sets Status='RESOLVED'-equivalent per data.js ('INACTIVE'); schema CK
-    -- constraint CK_opd_PA_Status only allows ACTIVE|RESOLVED, so RESOLVED is used here.
-    -- TODO: schema.sql CK_opd_PA_Status does not include an 'INACTIVE' value used by
-    -- data.js deleteAllergy — mapped to 'RESOLVED' as the closest equivalent; align enum
-    -- if the true intent is a distinct "withdrawn" state.
+    -- Soft delete: Status = 'INACTIVE' (allowed by CK_opd_PA_Status since schema v4.0)
     UPDATE opd.PatientAllergy
-    SET Status = 'RESOLVED', ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
-    WHERE PatientAllergyId = @PatientAllergyId;
+    SET Status = 'INACTIVE', ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+    WHERE AllergyId = @AllergyId;
 END;
 GO
 
@@ -601,11 +660,11 @@ CREATE OR ALTER PROCEDURE opd.usp_ListPatientMedicalHistory
     @PatientId      UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT PatientMedicalHistoryId, HospitalId, PatientId, ConditionName,
-           SinceMonth, SinceYear, Notes, CreatedAt, CreatedBy
+    SELECT PatientMedHistoryId, HospitalId, PatientId, ItemId, ConditionName,
+           OnsetMonth, OnsetYear, Status, Notes, RecordedAt, RecordedByUserId
     FROM opd.PatientMedicalHistory
     WHERE PatientId = @PatientId AND IsDeleted = 0
-    ORDER BY CreatedAt DESC;
+    ORDER BY RecordedAt DESC;
 END;
 GO
 
@@ -616,50 +675,57 @@ CREATE OR ALTER PROCEDURE opd.usp_GetPatientMedicalHistory
     @PatientId      UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT PatientMedicalHistoryId, HospitalId, PatientId, ConditionName,
-           SinceMonth, SinceYear, Notes, CreatedAt, CreatedBy
+    SELECT PatientMedHistoryId, HospitalId, PatientId, ItemId, ConditionName,
+           OnsetMonth, OnsetYear, Status, Notes, RecordedAt, RecordedByUserId
     FROM opd.PatientMedicalHistory
     WHERE PatientId = @PatientId AND IsDeleted = 0
-    ORDER BY CreatedAt DESC;
+    ORDER BY RecordedAt DESC;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE opd.usp_CreatePatientMedicalHistory
     @HospitalId     UNIQUEIDENTIFIER,
     @PatientId      UNIQUEIDENTIFIER,
+    @ItemId         UNIQUEIDENTIFIER = NULL,   -- cfg.MedicalHistoryItem; NULL = free text
     @ConditionName  NVARCHAR(100),
-    @SinceMonth     INT = NULL,
-    @SinceYear      INT = NULL,
+    @OnsetMonth     INT = NULL,
+    @OnsetYear      INT = NULL,
+    @Status         NVARCHAR(12) = 'ACTIVE',
     @Notes          NVARCHAR(500) = NULL,
-    @CreatedBy      UNIQUEIDENTIFIER = NULL
+    @RecordedByUserId UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
-    INSERT INTO opd.PatientMedicalHistory (HospitalId, PatientId, ConditionName, SinceMonth, SinceYear, Notes, CreatedBy)
-    OUTPUT inserted.PatientMedicalHistoryId, inserted.ConditionName, inserted.CreatedAt
-    VALUES (@HospitalId, @PatientId, @ConditionName, @SinceMonth, @SinceYear, @Notes, @CreatedBy);
+    INSERT INTO opd.PatientMedicalHistory (HospitalId, PatientId, ItemId, ConditionName, OnsetMonth, OnsetYear,
+                                           Status, Notes, RecordedByUserId)
+    OUTPUT inserted.PatientMedHistoryId, inserted.ConditionName, inserted.RecordedAt
+    VALUES (@HospitalId, @PatientId, @ItemId, @ConditionName, @OnsetMonth, @OnsetYear,
+            @Status, @Notes, @RecordedByUserId);
 END;
 GO
 
 CREATE OR ALTER PROCEDURE opd.usp_SavePatientMedicalHistory
     @HospitalId     UNIQUEIDENTIFIER,
     @PatientId      UNIQUEIDENTIFIER,
+    @ItemId         UNIQUEIDENTIFIER = NULL,   -- cfg.MedicalHistoryItem; NULL = free text
     @ConditionName  NVARCHAR(100),
-    @SinceMonth     INT = NULL,
-    @SinceYear      INT = NULL,
+    @OnsetMonth     INT = NULL,
+    @OnsetYear      INT = NULL,
+    @Status         NVARCHAR(12) = 'ACTIVE',
     @Notes          NVARCHAR(500) = NULL,
-    @CreatedBy      UNIQUEIDENTIFIER = NULL
+    @RecordedByUserId UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
     -- Upsert by (PatientId, ConditionName) — matches data.js checklist auto-save behavior
     MERGE opd.PatientMedicalHistory AS tgt
     USING (SELECT @PatientId AS PatientId, @ConditionName AS ConditionName) AS src
         ON tgt.PatientId = src.PatientId AND tgt.ConditionName = src.ConditionName AND tgt.IsDeleted = 0
-    WHEN MATCHED THEN UPDATE SET SinceMonth = @SinceMonth, SinceYear = @SinceYear, Notes = @Notes
+    WHEN MATCHED THEN UPDATE SET OnsetMonth = @OnsetMonth, OnsetYear = @OnsetYear,
+                                 Status = @Status, Notes = @Notes
     WHEN NOT MATCHED THEN
-        INSERT (HospitalId, PatientId, ConditionName, SinceMonth, SinceYear, Notes, CreatedBy)
-        VALUES (@HospitalId, @PatientId, @ConditionName, @SinceMonth, @SinceYear, @Notes, @CreatedBy);
+        INSERT (HospitalId, PatientId, ItemId, ConditionName, OnsetMonth, OnsetYear, Status, Notes, RecordedByUserId)
+        VALUES (@HospitalId, @PatientId, @ItemId, @ConditionName, @OnsetMonth, @OnsetYear, @Status, @Notes, @RecordedByUserId);
 
-    SELECT PatientMedicalHistoryId, ConditionName, SinceMonth, SinceYear, Notes
+    SELECT PatientMedHistoryId, ItemId, ConditionName, OnsetMonth, OnsetYear, Status, Notes
     FROM opd.PatientMedicalHistory WHERE PatientId = @PatientId AND ConditionName = @ConditionName AND IsDeleted = 0;
 END;
 GO
@@ -679,14 +745,16 @@ GO
 CREATE OR ALTER PROCEDURE opd.usp_UpdatePatientMedicalHistory
     @PatientId      UNIQUEIDENTIFIER,
     @ConditionName  NVARCHAR(100),
-    @SinceMonth     INT = NULL,
-    @SinceYear      INT = NULL,
+    @OnsetMonth     INT = NULL,
+    @OnsetYear      INT = NULL,
+    @Status         NVARCHAR(12) = NULL,
     @Notes          NVARCHAR(500) = NULL
 AS BEGIN
     SET NOCOUNT ON;
     UPDATE opd.PatientMedicalHistory SET
-        SinceMonth = ISNULL(@SinceMonth, SinceMonth),
-        SinceYear = ISNULL(@SinceYear, SinceYear),
+        OnsetMonth = ISNULL(@OnsetMonth, OnsetMonth),
+        OnsetYear = ISNULL(@OnsetYear, OnsetYear),
+        Status = ISNULL(@Status, Status),
         Notes = ISNULL(@Notes, Notes)
     WHERE PatientId = @PatientId AND ConditionName = @ConditionName AND IsDeleted = 0;
 END;
@@ -698,25 +766,29 @@ CREATE OR ALTER PROCEDURE opd.usp_ListPatientMedicalEvents
     @PatientId      UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT PatientMedicalEventId, HospitalId, PatientId, EventType, EventDate, Notes, CreatedAt
+    SELECT PatientMedEventId, HospitalId, PatientId, EventId, EventName, EventMonth, EventYear,
+           Notes, RecordedAt, RecordedByUserId
     FROM opd.PatientMedicalEvent
     WHERE PatientId = @PatientId AND IsDeleted = 0
-    ORDER BY CreatedAt DESC;
+    ORDER BY RecordedAt DESC;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE opd.usp_CreatePatientMedicalEvent
     @HospitalId     UNIQUEIDENTIFIER,
     @PatientId      UNIQUEIDENTIFIER,
-    @EventType      NVARCHAR(50),
-    @EventDate      DATE = NULL,
+    @EventId        UNIQUEIDENTIFIER = NULL,   -- cfg.MedicalEventType; NULL = free text
+    @EventName      NVARCHAR(100),
+    @EventMonth     INT = NULL,
+    @EventYear      INT = NULL,
     @Notes          NVARCHAR(500) = NULL,
-    @CreatedBy      UNIQUEIDENTIFIER = NULL
+    @RecordedByUserId UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
-    INSERT INTO opd.PatientMedicalEvent (HospitalId, PatientId, EventType, EventDate, Notes, CreatedBy)
-    OUTPUT inserted.PatientMedicalEventId, inserted.EventType, inserted.CreatedAt
-    VALUES (@HospitalId, @PatientId, @EventType, @EventDate, @Notes, @CreatedBy);
+    INSERT INTO opd.PatientMedicalEvent (HospitalId, PatientId, EventId, EventName, EventMonth, EventYear,
+                                         Notes, RecordedByUserId)
+    OUTPUT inserted.PatientMedEventId, inserted.EventName, inserted.RecordedAt
+    VALUES (@HospitalId, @PatientId, @EventId, @EventName, @EventMonth, @EventYear, @Notes, @RecordedByUserId);
 END;
 GO
 
@@ -726,25 +798,25 @@ CREATE OR ALTER PROCEDURE opd.usp_ListPatientFamilyHistory
     @PatientId      UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT PatientFamilyHistoryId, HospitalId, PatientId, Relation, [Condition], Notes, CreatedAt
+    SELECT FamilyHistoryId, HospitalId, PatientId, RelationshipType, ConditionName, Notes, RecordedAt
     FROM opd.PatientFamilyHistory
     WHERE PatientId = @PatientId AND IsDeleted = 0
-    ORDER BY CreatedAt DESC;
+    ORDER BY RecordedAt DESC;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE opd.usp_CreatePatientFamilyHistory
     @HospitalId     UNIQUEIDENTIFIER,
     @PatientId      UNIQUEIDENTIFIER,
-    @Relation       NVARCHAR(30),
-    @Condition      NVARCHAR(100),
+    @RelationshipType NVARCHAR(30),
+    @ConditionName  NVARCHAR(100),
     @Notes          NVARCHAR(300) = NULL,
     @CreatedBy      UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
-    INSERT INTO opd.PatientFamilyHistory (HospitalId, PatientId, Relation, [Condition], Notes, CreatedBy)
-    OUTPUT inserted.PatientFamilyHistoryId, inserted.Relation, inserted.[Condition]
-    VALUES (@HospitalId, @PatientId, @Relation, @Condition, @Notes, @CreatedBy);
+    INSERT INTO opd.PatientFamilyHistory (HospitalId, PatientId, RelationshipType, ConditionName, Notes, CreatedBy)
+    OUTPUT inserted.FamilyHistoryId, inserted.RelationshipType, inserted.ConditionName
+    VALUES (@HospitalId, @PatientId, @RelationshipType, @ConditionName, @Notes, @CreatedBy);
 END;
 GO
 
@@ -760,11 +832,12 @@ AS BEGIN
            CAST(c.VisitDate AS DATE) AS VisitDate,
            u.FullName AS DoctorName,
            STUFF((
-               SELECT ', ' + cs.SymptomName
+               SELECT ', ' + ISNULL(sc.DisplayLabel, cs.SymptomCode)
                FROM cln.ConsultationSymptom cs
+               LEFT JOIN cfg.SymptomCatalog sc ON sc.HospitalId = cs.HospitalId AND sc.SymptomCode = cs.SymptomCode
                WHERE cs.ConsultationId = c.ConsultationId AND cs.[State] = 'YES'
                FOR XML PATH('')), 1, 2, '') AS ChiefComplaint,
-           (SELECT TOP (1) dx.ICD10Code + ' ' + dx.[Description]
+           (SELECT TOP (1) dx.Icd10Code + ' ' + dx.Icd10Description
               FROM cln.ConsultationDiagnosis dx
               WHERE dx.ConsultationId = c.ConsultationId AND dx.IsPrimary = 1 AND dx.IsDeleted = 0
               ORDER BY dx.SequenceOrder) AS PrimaryDiagnosis
@@ -792,7 +865,7 @@ AS BEGIN
     SELECT ConsultationId, VisitDate FROM cln.Consultation WHERE ConsultationId = @ConsultationId;
 
     SELECT PrescriptionId, MedicineName, Strength, DrugForm, DeliveryRoute, Category,
-           TakeInQty, TimesPerDay, DurationValue, DurationUnit, Instructions, IsPrn
+           TakeInQty, TimesPerDay, DurationValue, DurationUnit, Instructions, Prn
     FROM cln.Prescription
     WHERE ConsultationId = @ConsultationId AND Status = 'ACTIVE' AND IsDeleted = 0;
 END;
@@ -979,7 +1052,8 @@ CREATE OR ALTER PROCEDURE cfg.usp_SaveHospitalSettings
 AS BEGIN
     SET NOCOUNT ON;
     MERGE cfg.HospitalSetting AS t
-    USING (SELECT [key] AS SettingKey, [value] AS [Value] FROM OPENJSON(@ValuesJson) WHERE [key] <> 'MRN_SEQ') AS s
+    USING (SELECT [key] COLLATE DATABASE_DEFAULT AS SettingKey, [value] COLLATE DATABASE_DEFAULT AS [Value]
+           FROM OPENJSON(@ValuesJson) WHERE [key] <> 'MRN_SEQ') AS s
        ON t.HospitalId = @HospitalId AND t.SettingKey = s.SettingKey
     WHEN MATCHED THEN UPDATE SET [Value] = s.[Value], ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
     WHEN NOT MATCHED THEN INSERT (HospitalId, SettingKey, [Value], ModifiedAt, ModifiedBy)
@@ -1009,10 +1083,11 @@ CREATE OR ALTER PROCEDURE opd.usp_SaveDoctorSettings
 AS BEGIN
     SET NOCOUNT ON;
     DELETE d FROM opd.DoctorSetting d
-    JOIN OPENJSON(@ValuesJson) j ON j.[key] = d.SettingKey
+    JOIN OPENJSON(@ValuesJson) j ON j.[key] COLLATE DATABASE_DEFAULT = d.SettingKey
     WHERE d.HospitalId = @HospitalId AND d.DoctorId = @DoctorId AND NULLIF(j.[value], '') IS NULL;
     MERGE opd.DoctorSetting AS t
-    USING (SELECT [key] AS SettingKey, [value] AS [Value] FROM OPENJSON(@ValuesJson) WHERE NULLIF([value], '') IS NOT NULL) AS s
+    USING (SELECT [key] COLLATE DATABASE_DEFAULT AS SettingKey, [value] COLLATE DATABASE_DEFAULT AS [Value]
+           FROM OPENJSON(@ValuesJson) WHERE NULLIF([value], '') IS NOT NULL) AS s
        ON t.HospitalId = @HospitalId AND t.DoctorId = @DoctorId AND t.SettingKey = s.SettingKey
     WHEN MATCHED THEN UPDATE SET [Value] = s.[Value], ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
     WHEN NOT MATCHED THEN INSERT (HospitalId, DoctorId, SettingKey, [Value], ModifiedAt, ModifiedBy)
@@ -1105,12 +1180,12 @@ AS BEGIN
            (SELECT STRING_AGG(sp.SpecialtyName, ', ') FROM sec.DoctorSpecialty ds JOIN cfg.Specialty sp ON sp.SpecialtyId = ds.SpecialtyId
              WHERE ds.DoctorId = u.UserId) AS SpecialtyNames
     FROM sec.ApplicationUser u
-    WHERE u.HospitalId = @HospitalId AND u.[Role] = 'DOCTOR' AND u.IsActive = 1 AND u.IsDeleted = 0
+    WHERE u.HospitalId = @HospitalId AND EXISTS (SELECT 1 FROM sec.UserRole r WHERE r.UserId = u.UserId AND r.[Role] = 'DOCTOR') AND u.IsActive = 1 AND u.IsDeleted = 0
     ORDER BY u.FullName;   -- PasswordHash is never returned
 END;
 GO
 
--- sec.usp_SaveDoctorProfile: INSERT/UPDATE sec.ApplicationUser (Role = 'DOCTOR') + replace
+-- sec.usp_SaveDoctorProfile: INSERT/UPDATE sec.ApplicationUser (+ a sec.UserRole 'DOCTOR' row) + replace
 -- sec.DoctorSpecialty rows; FullName = DisplayNameOverride or the DOCTOR_NAME_TEMPLATE
 -- rendering (done in the API layer, same rules as data.js _renderDoctorName). A new doctor
 -- also gets ₹0 NEW / FOLLOWUP rows in bil.DoctorFeeSchedule.
@@ -1223,12 +1298,12 @@ END;
 GO
 
 CREATE OR ALTER PROCEDURE opd.usp_SubmitIntakeResponse
-    @HospitalId UNIQUEIDENTIFIER, @AppointmentId UNIQUEIDENTIFIER, @PatientId UNIQUEIDENTIFIER, @AnswersJson NVARCHAR(MAX)
+    @HospitalId UNIQUEIDENTIFIER, @AppointmentId UNIQUEIDENTIFIER, @PatientId UNIQUEIDENTIFIER, @Answers NVARCHAR(MAX)   -- JSON List<IntakeAnswer>
 AS BEGIN
     SET NOCOUNT ON;
     MERGE opd.IntakeResponse AS t USING (SELECT @AppointmentId AS AppointmentId) AS s ON t.AppointmentId = s.AppointmentId
-    WHEN MATCHED THEN UPDATE SET AnswersJson = @AnswersJson, SubmittedAt = SYSUTCDATETIME()
-    WHEN NOT MATCHED THEN INSERT (HospitalId, AppointmentId, PatientId, AnswersJson) VALUES (@HospitalId, @AppointmentId, @PatientId, @AnswersJson);
+    WHEN MATCHED THEN UPDATE SET Answers = @Answers, SubmittedAt = SYSUTCDATETIME()
+    WHEN NOT MATCHED THEN INSERT (HospitalId, AppointmentId, PatientId, Answers) VALUES (@HospitalId, @AppointmentId, @PatientId, @Answers);
     SELECT * FROM opd.IntakeResponse WHERE AppointmentId = @AppointmentId;
 END;
 GO
@@ -1236,15 +1311,16 @@ GO
 CREATE OR ALTER PROCEDURE opd.usp_RecordConsent
     @HospitalId UNIQUEIDENTIFIER, @ConsentFormId UNIQUEIDENTIFIER, @PatientId UNIQUEIDENTIFIER,
     @AppointmentId UNIQUEIDENTIFIER = NULL, @ConsultationId UNIQUEIDENTIFIER = NULL,
-    @SignedByName NVARCHAR(200), @Method NVARCHAR(10) = 'IN_CLINIC', @RecordedBy UNIQUEIDENTIFIER = NULL
+    @SignedByName NVARCHAR(200), @Method NVARCHAR(10) = 'IN_CLINIC'
 AS BEGIN
     SET NOCOUNT ON;
+    -- v4.0: RecordedBy column dropped (ConsentRecord model has no such property).
     -- append-only: snapshot the current form text so later edits never change this record
     INSERT INTO opd.ConsentRecord (HospitalId, ConsentFormId, PatientId, AppointmentId, ConsultationId, SignedByName, Method,
-                                   FormVersion, TitleSnapshot, BodySnapshot, RecordedBy)
+                                   FormVersion, TitleSnapshot, BodySnapshot)
     OUTPUT inserted.*
     SELECT @HospitalId, f.ConsentFormId, @PatientId, @AppointmentId, @ConsultationId, @SignedByName, @Method,
-           f.Version, f.Title, f.BodyText, @RecordedBy
+           f.Version, f.Title, f.BodyText
     FROM cfg.ConsentForm f WHERE f.ConsentFormId = @ConsentFormId;
 END;
 GO
@@ -1299,18 +1375,18 @@ CREATE OR ALTER PROCEDURE opd.usp_CreateAppointment
     @HospitalId     UNIQUEIDENTIFIER,
     @PatientId      UNIQUEIDENTIFIER,
     @DoctorId       UNIQUEIDENTIFIER,
-    @AppointmentDate DATE,
-    @SlotStart      NVARCHAR(10),
-    @SlotEnd        NVARCHAR(10) = NULL,
-    @Type           NVARCHAR(10) = 'NEW',
+    @SlotStart      DATETIME2(0),
+    @SlotEnd        DATETIME2(0),
+    @Type           NVARCHAR(20) = 'NEW',      -- cfg.AppointmentType.Code
     @Notes          NVARCHAR(300) = NULL,
     @CreatedBy      UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
-    INSERT INTO opd.Appointment (HospitalId, PatientId, DoctorId, AppointmentDate,
+    -- v4.0: SlotStart / SlotEnd are full date-times; AppointmentDate is a computed column.
+    INSERT INTO opd.Appointment (HospitalId, PatientId, DoctorId,
                                   SlotStart, SlotEnd, [Type], Notes, CreatedBy)
-    OUTPUT inserted.AppointmentId, inserted.AppointmentDate, inserted.SlotStart, inserted.Status
-    VALUES (@HospitalId, @PatientId, @DoctorId, @AppointmentDate,
+    OUTPUT inserted.AppointmentId, inserted.AppointmentDate, inserted.SlotStart, inserted.SlotEnd, inserted.Status
+    VALUES (@HospitalId, @PatientId, @DoctorId,
             @SlotStart, @SlotEnd, @Type, @Notes, @CreatedBy);
 END;
 GO
@@ -1387,18 +1463,19 @@ AS BEGIN
 
     IF @ConsultationId IS NOT NULL BEGIN
         SELECT ConsultationId, HospitalId, PatientId, DoctorId, AppointmentId,
-               VisitDate, ConsultationType, Status, ChiefComplaint,
-               SubjectiveText, ObjectiveText, AssessmentText, PlanText,
-               FollowUpDate, FollowUpNotes, IsLocked
+               VisitDate, Status, IsLocked,
+               SubjectiveText, ObjectiveText, PlanText,
+               SubjectivePersonal, ObjectivePersonal, PlanPersonal,
+               FollowupDate, FollowupNotes, SkippedSteps
         FROM cln.Consultation WHERE ConsultationId = @ConsultationId;
     END ELSE BEGIN
         INSERT INTO cln.Consultation (HospitalId, PatientId, DoctorId, AppointmentId,
                                        VisitDate, CreatedBy)
         OUTPUT inserted.ConsultationId, inserted.HospitalId, inserted.PatientId,
-               inserted.DoctorId, inserted.VisitDate, inserted.ConsultationType,
+               inserted.DoctorId, inserted.AppointmentId, inserted.VisitDate,
                inserted.Status, inserted.IsLocked
         VALUES (@HospitalId, @PatientId, @DoctorId, @AppointmentId,
-                CAST(SYSUTCDATETIME() AS DATE), @DoctorId);
+                SYSUTCDATETIME(), @DoctorId);
     END;
 END;
 GO
@@ -1408,29 +1485,37 @@ CREATE OR ALTER PROCEDURE cln.usp_GetConsultationById
 AS BEGIN
     SET NOCOUNT ON;
     -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='READ', EntityType='Consultation')
-    SELECT ConsultationId, HospitalId, PatientId, DoctorId, AppointmentId, VisitDate,
-           ConsultationType, Status, ChiefComplaint, SubjectiveText, ObjectiveText,
-           AssessmentText, PlanText, FollowUpDate, FollowUpNotes, IsLocked
+    SELECT ConsultationId, HospitalId, PatientId, DoctorId, AppointmentId,
+           VisitDate, Status, IsLocked,
+           SubjectiveText, ObjectiveText, PlanText,
+           SubjectivePersonal, ObjectivePersonal, PlanPersonal,
+           FollowupDate, FollowupNotes, SkippedSteps
     FROM cln.Consultation WHERE ConsultationId = @ConsultationId AND IsDeleted = 0;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cln.usp_SaveSoapNotes
     @ConsultationId UNIQUEIDENTIFIER,
-    @ChiefComplaint NVARCHAR(500) = NULL,
     @SubjectiveText NVARCHAR(MAX) = NULL,
     @ObjectiveText  NVARCHAR(MAX) = NULL,
-    @AssessmentText NVARCHAR(MAX) = NULL,
     @PlanText       NVARCHAR(MAX) = NULL,
+    @SubjectivePersonal NVARCHAR(MAX) = NULL,
+    @ObjectivePersonal  NVARCHAR(MAX) = NULL,
+    @PlanPersonal       NVARCHAR(MAX) = NULL,
+    @SkippedSteps   NVARCHAR(1000) = NULL,     -- JSON array of section keys
     @ModifiedBy     UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
+    -- v4.0: ChiefComplaint / AssessmentText columns dropped — the chief complaint is the
+    -- YES symptoms (cln.ConsultationSymptom) and the assessment is cln.ConsultationDiagnosis.
     UPDATE cln.Consultation SET
-        ChiefComplaint = ISNULL(@ChiefComplaint, ChiefComplaint),
         SubjectiveText = ISNULL(@SubjectiveText, SubjectiveText),
         ObjectiveText = ISNULL(@ObjectiveText, ObjectiveText),
-        AssessmentText = ISNULL(@AssessmentText, AssessmentText),
         PlanText = ISNULL(@PlanText, PlanText),
+        SubjectivePersonal = ISNULL(@SubjectivePersonal, SubjectivePersonal),
+        ObjectivePersonal = ISNULL(@ObjectivePersonal, ObjectivePersonal),
+        PlanPersonal = ISNULL(@PlanPersonal, PlanPersonal),
+        SkippedSteps = ISNULL(@SkippedSteps, SkippedSteps),
         ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
     WHERE ConsultationId = @ConsultationId AND IsLocked = 0;
 END;
@@ -1438,13 +1523,13 @@ GO
 
 CREATE OR ALTER PROCEDURE cln.usp_SaveFollowup
     @ConsultationId UNIQUEIDENTIFIER,
-    @FollowUpDate   DATE = NULL,
-    @FollowUpNotes  NVARCHAR(500) = NULL,
+    @FollowupDate   DATE = NULL,
+    @FollowupNotes  NVARCHAR(500) = NULL,
     @ModifiedBy     UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
     UPDATE cln.Consultation
-    SET FollowUpDate = @FollowUpDate, FollowUpNotes = @FollowUpNotes,
+    SET FollowupDate = @FollowupDate, FollowupNotes = @FollowupNotes,
         ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
     WHERE ConsultationId = @ConsultationId;
 END;
@@ -1455,15 +1540,16 @@ CREATE OR ALTER PROCEDURE cln.usp_ListConsultationsForDate
     @VisitDate      DATE
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT ConsultationId, PatientId, DoctorId, VisitDate, ConsultationType, Status
+    SELECT ConsultationId, PatientId, DoctorId, AppointmentId, VisitDate, Status
     FROM cln.Consultation
-    WHERE HospitalId = @HospitalId AND VisitDate = @VisitDate AND IsDeleted = 0;
+    WHERE HospitalId = @HospitalId AND CAST(VisitDate AS DATE) = @VisitDate AND IsDeleted = 0;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cln.usp_ConfirmSignOff
     @ConsultationId UNIQUEIDENTIFIER,
-    @DoctorId       UNIQUEIDENTIFIER
+    @DoctorId       UNIQUEIDENTIFIER,
+    @SignatureHash  NVARCHAR(128)              -- computed by the API layer over the signed content
 AS BEGIN
     SET NOCOUNT ON;
     -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='SIGNOFF', EntityType='Consultation')
@@ -1471,10 +1557,10 @@ AS BEGIN
     SET Status = 'LOCKED', IsLocked = 1, ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @DoctorId
     WHERE ConsultationId = @ConsultationId AND IsLocked = 0;
 
-    INSERT INTO cln.ConsultationAttestation (HospitalId, ConsultationId,
-        IsSubjectiveChecked, IsObjectiveChecked, IsAssessmentChecked, IsPlanChecked, SignedBy)
+    -- v4.0: the attestation is DoctorId + SignatureHash (the per-section Is*Checked flags were dropped)
+    INSERT INTO cln.ConsultationAttestation (HospitalId, ConsultationId, DoctorId, SignatureHash)
     OUTPUT inserted.AttestationId, inserted.SignedAt
-    SELECT HospitalId, ConsultationId, 1, 1, 1, 1, @DoctorId
+    SELECT HospitalId, ConsultationId, @DoctorId, @SignatureHash
     FROM cln.Consultation WHERE ConsultationId = @ConsultationId;
 
     -- Signing off completes the visit: linked appointment IN_CONSULT → COMPLETED
@@ -1484,7 +1570,7 @@ AS BEGIN
     FROM opd.Appointment a
     INNER JOIN cln.Consultation c
         ON c.AppointmentId = a.AppointmentId
-        OR (c.AppointmentId IS NULL AND a.PatientId = c.PatientId AND a.DoctorId = c.DoctorId AND a.AppointmentDate = c.VisitDate)
+        OR (c.AppointmentId IS NULL AND a.PatientId = c.PatientId AND a.DoctorId = c.DoctorId AND a.AppointmentDate = CAST(c.VisitDate AS DATE))
     WHERE c.ConsultationId = @ConsultationId AND a.Status = 'IN_CONSULT' AND a.IsDeleted = 0;
 END;
 GO
@@ -1497,10 +1583,14 @@ CREATE OR ALTER PROCEDURE cln.usp_GetConsultationVitals
     @ConsultationId UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT ConsultationVitalId, ConsultationId, TempValue, BpSystolic, BpDiastolic,
+    SELECT VitalId, ConsultationId, TempValue, BpSystolic, BpDiastolic,
            PulseBpm, SpO2, RespRate, HeightCm, WeightKg, Bmi, PainScale,
-           WaistCircCm, HeadCircCm
+           WaistCircCm, HeadCircCm, RecordedAt, RecordedBy
     FROM cln.ConsultationVital WHERE ConsultationId = @ConsultationId;
+
+    -- ConsultationVitals.CustomValues (custom vitals, keyed by VitalCode)
+    SELECT VitalCode, VitalValue
+    FROM cln.ConsultationCustomVital WHERE ConsultationId = @ConsultationId;
 END;
 GO
 
@@ -1508,16 +1598,18 @@ CREATE OR ALTER PROCEDURE cln.usp_SaveVitals
     @HospitalId     UNIQUEIDENTIFIER,
     @ConsultationId UNIQUEIDENTIFIER,
     @TempValue      DECIMAL(5,1) = NULL,
-    @BpSystolic     INT = NULL,
-    @BpDiastolic    INT = NULL,
-    @PulseBpm       INT = NULL,
-    @SpO2           INT = NULL,
-    @RespRate       INT = NULL,
+    @BpSystolic     DECIMAL(5,1) = NULL,
+    @BpDiastolic    DECIMAL(5,1) = NULL,
+    @PulseBpm       DECIMAL(5,1) = NULL,
+    @SpO2           DECIMAL(5,1) = NULL,
+    @RespRate       DECIMAL(5,1) = NULL,
     @HeightCm       DECIMAL(5,1) = NULL,
-    @WeightKg       DECIMAL(5,1) = NULL,
-    @PainScale      INT = NULL,
+    @WeightKg       DECIMAL(6,2) = NULL,
+    @PainScale      DECIMAL(4,1) = NULL,
     @WaistCircCm    DECIMAL(5,1) = NULL,
-    @HeadCircCm     DECIMAL(5,1) = NULL
+    @HeadCircCm     DECIMAL(5,1) = NULL,
+    @CustomValuesJson NVARCHAR(MAX) = NULL,   -- { "VITAL_CODE": 12.5, … } → cln.ConsultationCustomVital
+    @RecordedBy     UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
     -- BMI is computed at read/write time (kg / m^2), never stored redundantly per
@@ -1535,71 +1627,82 @@ AS BEGIN
         HeightCm = ISNULL(@HeightCm, HeightCm), WeightKg = ISNULL(@WeightKg, WeightKg),
         Bmi = ISNULL(@Bmi, Bmi), PainScale = ISNULL(@PainScale, PainScale),
         WaistCircCm = ISNULL(@WaistCircCm, WaistCircCm), HeadCircCm = ISNULL(@HeadCircCm, HeadCircCm),
-        ModifiedAt = SYSUTCDATETIME()
+        RecordedAt = SYSUTCDATETIME(), RecordedBy = ISNULL(@RecordedBy, RecordedBy)
     WHEN NOT MATCHED THEN
         INSERT (HospitalId, ConsultationId, TempValue, BpSystolic, BpDiastolic, PulseBpm,
-                SpO2, RespRate, HeightCm, WeightKg, Bmi, PainScale, WaistCircCm, HeadCircCm)
+                SpO2, RespRate, HeightCm, WeightKg, Bmi, PainScale, WaistCircCm, HeadCircCm, RecordedBy)
         VALUES (@HospitalId, @ConsultationId, @TempValue, @BpSystolic, @BpDiastolic, @PulseBpm,
-                @SpO2, @RespRate, @HeightCm, @WeightKg, @Bmi, @PainScale, @WaistCircCm, @HeadCircCm);
+                @SpO2, @RespRate, @HeightCm, @WeightKg, @Bmi, @PainScale, @WaistCircCm, @HeadCircCm, @RecordedBy);
 
-    SELECT * FROM cln.ConsultationVital WHERE ConsultationId = @ConsultationId;
+    IF @CustomValuesJson IS NOT NULL
+        MERGE cln.ConsultationCustomVital AS tgt
+        USING (SELECT [key] COLLATE DATABASE_DEFAULT AS VitalCode, TRY_CAST([value] AS DECIMAL(10,2)) AS VitalValue
+               FROM OPENJSON(@CustomValuesJson)) AS src
+            ON tgt.ConsultationId = @ConsultationId AND tgt.VitalCode = src.VitalCode
+        WHEN MATCHED THEN UPDATE SET VitalValue = src.VitalValue, ModifiedAt = SYSUTCDATETIME()
+        WHEN NOT MATCHED THEN INSERT (HospitalId, ConsultationId, VitalCode, VitalValue)
+            VALUES (@HospitalId, @ConsultationId, src.VitalCode, src.VitalValue);
+
+    EXEC cln.usp_GetConsultationVitals @ConsultationId = @ConsultationId;
 END;
 GO
 
 -- ============================================================
 -- 8. SYMPTOMS (cfg.SymptomCatalog, cln.ConsultationSymptom)
 -- ============================================================
--- TODO: cfg.SymptomCatalog in schema.sql has no HospitalId column (it is modeled
--- as shared reference data), while data.js's symptomCatalog array is keyed per
--- hospital (HospitalId on every row) and has a SymptomCode distinct from
--- DisplayLabel. The procedures below assume the schema is authoritative (global
--- catalog, Category IN ('QUICK_PICK','OTHER')) and the @HospitalId parameter is
--- accepted for interface parity but unused in the WHERE clause — flag for a
--- schema/data.js reconciliation before Phase 4 cutover.
+-- v4.0: cfg.SymptomCatalog is per hospital (HospitalId, SymptomCode, DisplayLabel,
+-- IsQuickPick); cln.ConsultationSymptom stores the SymptomCode. The v3.0 global catalog
+-- (SymptomName + Category QUICK_PICK/OTHER) is gone.
 
 CREATE OR ALTER PROCEDURE cfg.usp_ListSymptomCatalog
-    @HospitalId     UNIQUEIDENTIFIER = NULL
+    @HospitalId     UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT SymptomCatalogId, SymptomName, Category
-    FROM cfg.SymptomCatalog WHERE IsActive = 1 AND IsDeleted = 0
-    ORDER BY SymptomName;
+    SELECT SymptomCatalogId, HospitalId, SymptomCode, DisplayLabel, IsQuickPick
+    FROM cfg.SymptomCatalog
+    WHERE HospitalId = @HospitalId AND IsActive = 1 AND IsDeleted = 0
+    ORDER BY DisplayLabel;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cfg.usp_ListSymptomQuickPicks
-    @HospitalId     UNIQUEIDENTIFIER = NULL
+    @HospitalId     UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT SymptomCatalogId, SymptomName, Category
-    FROM cfg.SymptomCatalog WHERE Category = 'QUICK_PICK' AND IsActive = 1 AND IsDeleted = 0
-    ORDER BY SymptomName;
+    SELECT SymptomCatalogId, HospitalId, SymptomCode, DisplayLabel, IsQuickPick
+    FROM cfg.SymptomCatalog
+    WHERE HospitalId = @HospitalId AND IsActive = 1 AND IsDeleted = 0 AND IsQuickPick = 1
+    ORDER BY DisplayLabel;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cfg.usp_ListSymptomOthers
-    @HospitalId     UNIQUEIDENTIFIER = NULL
+    @HospitalId     UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT SymptomCatalogId, SymptomName, Category
-    FROM cfg.SymptomCatalog WHERE Category = 'OTHER' AND IsActive = 1 AND IsDeleted = 0
-    ORDER BY SymptomName;
+    SELECT SymptomCatalogId, HospitalId, SymptomCode, DisplayLabel, IsQuickPick
+    FROM cfg.SymptomCatalog
+    WHERE HospitalId = @HospitalId AND IsActive = 1 AND IsDeleted = 0 AND IsQuickPick = 0
+    ORDER BY DisplayLabel;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cfg.usp_CreateCustomSymptom
-    @HospitalId     UNIQUEIDENTIFIER = NULL,
-    @SymptomName    NVARCHAR(100)
+    @HospitalId     UNIQUEIDENTIFIER,
+    @DisplayLabel   NVARCHAR(100)
 AS BEGIN
     SET NOCOUNT ON;
-    IF EXISTS (SELECT 1 FROM cfg.SymptomCatalog WHERE SymptomName = @SymptomName AND IsDeleted = 0) BEGIN
-        SELECT SymptomCatalogId, SymptomName, Category FROM cfg.SymptomCatalog
-        WHERE SymptomName = @SymptomName AND IsDeleted = 0;
+    -- Code = upper-cased label (spaces → '_'); an existing code/label is returned instead of a duplicate.
+    DECLARE @Code NVARCHAR(40) = LEFT(UPPER(REPLACE(LTRIM(RTRIM(@DisplayLabel)), ' ', '_')), 40);
+    IF EXISTS (SELECT 1 FROM cfg.SymptomCatalog
+               WHERE HospitalId = @HospitalId AND (SymptomCode = @Code OR DisplayLabel = @DisplayLabel) AND IsDeleted = 0) BEGIN
+        SELECT SymptomCatalogId, HospitalId, SymptomCode, DisplayLabel, IsQuickPick FROM cfg.SymptomCatalog
+        WHERE HospitalId = @HospitalId AND (SymptomCode = @Code OR DisplayLabel = @DisplayLabel) AND IsDeleted = 0;
         RETURN;
     END;
-    INSERT INTO cfg.SymptomCatalog (SymptomName, Category)
-    OUTPUT inserted.SymptomCatalogId, inserted.SymptomName, inserted.Category
-    VALUES (@SymptomName, 'OTHER');
+    INSERT INTO cfg.SymptomCatalog (HospitalId, SymptomCode, DisplayLabel, IsQuickPick)
+    OUTPUT inserted.SymptomCatalogId, inserted.HospitalId, inserted.SymptomCode, inserted.DisplayLabel, inserted.IsQuickPick
+    VALUES (@HospitalId, @Code, @DisplayLabel, 0);
 END;
 GO
 
@@ -1607,26 +1710,28 @@ CREATE OR ALTER PROCEDURE cln.usp_ListConsultationSymptoms
     @ConsultationId UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT ConsultationSymptomId, ConsultationId, SymptomName, [State]
-    FROM cln.ConsultationSymptom WHERE ConsultationId = @ConsultationId;
+    SELECT cs.SymptomId, cs.ConsultationId, cs.SymptomCode, sc.DisplayLabel, cs.[State]
+    FROM cln.ConsultationSymptom cs
+    LEFT JOIN cfg.SymptomCatalog sc ON sc.HospitalId = cs.HospitalId AND sc.SymptomCode = cs.SymptomCode
+    WHERE cs.ConsultationId = @ConsultationId;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cln.usp_UpdateSymptomState
     @HospitalId     UNIQUEIDENTIFIER,
     @ConsultationId UNIQUEIDENTIFIER,
-    @SymptomName    NVARCHAR(100),
-    @State          NVARCHAR(10)
+    @SymptomCode    NVARCHAR(40),
+    @State          NVARCHAR(10)               -- UNSET | YES | NO
 AS BEGIN
     SET NOCOUNT ON;
-    -- Upsert (insert on first toggle, update thereafter) — matches data.js tri-state cycle
+    -- Upsert (insert on first toggle, update thereafter) — tri-state cycle UNSET → YES → NO → UNSET
     MERGE cln.ConsultationSymptom AS tgt
-    USING (SELECT @ConsultationId AS ConsultationId, @SymptomName AS SymptomName) AS src
-        ON tgt.ConsultationId = src.ConsultationId AND tgt.SymptomName = src.SymptomName
+    USING (SELECT @ConsultationId AS ConsultationId, @SymptomCode AS SymptomCode) AS src
+        ON tgt.ConsultationId = src.ConsultationId AND tgt.SymptomCode = src.SymptomCode
     WHEN MATCHED THEN UPDATE SET [State] = @State
     WHEN NOT MATCHED THEN
-        INSERT (HospitalId, ConsultationId, SymptomName, [State])
-        VALUES (@HospitalId, @ConsultationId, @SymptomName, @State);
+        INSERT (HospitalId, ConsultationId, SymptomCode, [State])
+        VALUES (@HospitalId, @ConsultationId, @SymptomCode, @State);
 END;
 GO
 
@@ -1636,62 +1741,72 @@ GO
 
 CREATE OR ALTER PROCEDURE cfg.usp_ListPhrases
     @HospitalId     UNIQUEIDENTIFIER,
-    @Section        NVARCHAR(20),
+    @Section        NVARCHAR(5),               -- S | O | P (rows with Section 'ANY' always match)
     @SpecialtyId    UNIQUEIDENTIFIER = NULL,
     @DoctorId       UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
-    -- Category is the schema equivalent of data.js Section; scope priority DOCTOR
-    -- (personal) > SPECIALTY > GLOBAL is expressed via IsGlobal + UserId.
-    SELECT PhraseBankId, HospitalId, UserId, Category, TriggerCode, PhraseText
+    -- Scope precedence DOCTOR > SPECIALTY > GLOBAL.
+    SELECT PhraseId, HospitalId, Scope, SpecialtyId, DoctorId, ConditionId, Section,
+           TriggerKeyword, PhraseText, SortOrder
     FROM cfg.PhraseBank
-    WHERE HospitalId = @HospitalId AND Category = @Section AND IsActive = 1 AND IsDeleted = 0
-      AND (IsGlobal = 1 OR UserId = @DoctorId)
-    ORDER BY CASE WHEN UserId = @DoctorId THEN 0 WHEN IsGlobal = 0 THEN 1 ELSE 2 END, PhraseText;
+    WHERE HospitalId = @HospitalId AND Section IN (@Section, 'ANY') AND IsActive = 1 AND IsDeleted = 0
+      AND (Scope = 'GLOBAL'
+           OR (Scope = 'SPECIALTY' AND SpecialtyId = @SpecialtyId)
+           OR (Scope = 'DOCTOR' AND DoctorId = @DoctorId))
+    ORDER BY CASE Scope WHEN 'DOCTOR' THEN 0 WHEN 'SPECIALTY' THEN 1 ELSE 2 END, SortOrder, PhraseText;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cfg.usp_SearchPhrases
     @Term           NVARCHAR(100),
     @HospitalId     UNIQUEIDENTIFIER,
-    @Section        NVARCHAR(20),
+    @Section        NVARCHAR(5),
     @SpecialtyId    UNIQUEIDENTIFIER = NULL,
     @DoctorId       UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT TOP (5) PhraseBankId, HospitalId, UserId, Category, TriggerCode, PhraseText
+    SELECT TOP (5) PhraseId, HospitalId, Scope, SpecialtyId, DoctorId, ConditionId, Section,
+           TriggerKeyword, PhraseText
     FROM cfg.PhraseBank
-    WHERE HospitalId = @HospitalId AND Category = @Section AND IsActive = 1 AND IsDeleted = 0
-      AND (IsGlobal = 1 OR UserId = @DoctorId)
-      AND (TriggerCode LIKE '%' + @Term + '%' OR PhraseText LIKE '%' + @Term + '%')
-    ORDER BY CASE WHEN UserId = @DoctorId THEN 0 WHEN IsGlobal = 0 THEN 1 ELSE 2 END;
+    WHERE HospitalId = @HospitalId AND Section IN (@Section, 'ANY') AND IsActive = 1 AND IsDeleted = 0
+      AND (Scope = 'GLOBAL'
+           OR (Scope = 'SPECIALTY' AND SpecialtyId = @SpecialtyId)
+           OR (Scope = 'DOCTOR' AND DoctorId = @DoctorId))
+      AND (TriggerKeyword LIKE '%' + @Term + '%' OR PhraseText LIKE '%' + @Term + '%')
+    ORDER BY CASE Scope WHEN 'DOCTOR' THEN 0 WHEN 'SPECIALTY' THEN 1 ELSE 2 END, SortOrder;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cfg.usp_CreatePhrase
     @HospitalId     UNIQUEIDENTIFIER,
-    @UserId         UNIQUEIDENTIFIER,
-    @Category       NVARCHAR(20),
-    @TriggerCode    NVARCHAR(30) = NULL,
+    @Scope          NVARCHAR(10) = 'DOCTOR',   -- GLOBAL | SPECIALTY | DOCTOR
+    @SpecialtyId    UNIQUEIDENTIFIER = NULL,   -- required for SPECIALTY scope
+    @DoctorId       UNIQUEIDENTIFIER = NULL,   -- required for DOCTOR scope
+    @ConditionId    UNIQUEIDENTIFIER = NULL,   -- NULL = any condition
+    @Section        NVARCHAR(5) = 'ANY',
+    @TriggerKeyword NVARCHAR(30) = NULL,
     @PhraseText     NVARCHAR(500),
-    @IsGlobal       BIT = 0
+    @CreatedBy      UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
-    INSERT INTO cfg.PhraseBank (HospitalId, UserId, Category, TriggerCode, PhraseText, IsGlobal, CreatedBy)
-    OUTPUT inserted.PhraseBankId, inserted.PhraseText
-    VALUES (@HospitalId, @UserId, @Category, @TriggerCode, @PhraseText, @IsGlobal, @UserId);
+    INSERT INTO cfg.PhraseBank (HospitalId, Scope, SpecialtyId, DoctorId, ConditionId, Section,
+                                TriggerKeyword, PhraseText, CreatedBy)
+    OUTPUT inserted.PhraseId, inserted.Scope, inserted.Section, inserted.TriggerKeyword, inserted.PhraseText
+    VALUES (@HospitalId, @Scope, @SpecialtyId, @DoctorId, @ConditionId, @Section,
+            @TriggerKeyword, @PhraseText, @CreatedBy);
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cfg.usp_DeletePhrase
-    @PhraseBankId   UNIQUEIDENTIFIER,
+    @PhraseId       UNIQUEIDENTIFIER,
     @ModifiedBy     UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
     -- data.js performs a hard splice(); schema has IsDeleted, so soft delete is
     -- used (preferred per architecture §4.8) rather than a physical DELETE.
     UPDATE cfg.PhraseBank SET IsDeleted = 1, ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
-    WHERE PhraseBankId = @PhraseBankId;
+    WHERE PhraseId = @PhraseId;
 END;
 GO
 
@@ -1703,11 +1818,11 @@ CREATE OR ALTER PROCEDURE cfg.usp_SearchIcd10Catalog
     @Term           NVARCHAR(100)
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT ICD10CatalogId, Code, [Description], Synonyms
+    SELECT Icd10CatalogId, Icd10Code, [Description], SynonymTerms
     FROM cfg.ICD10Catalog
     WHERE IsActive = 1 AND IsDeleted = 0
-      AND (Code LIKE @Term + '%' OR [Description] LIKE '%' + @Term + '%' OR Synonyms LIKE '%' + @Term + '%')
-    ORDER BY Code;
+      AND (Icd10Code LIKE @Term + '%' OR [Description] LIKE '%' + @Term + '%' OR SynonymTerms LIKE '%' + @Term + '%')
+    ORDER BY Icd10Code;
 END;
 GO
 
@@ -1715,8 +1830,8 @@ CREATE OR ALTER PROCEDURE cln.usp_ListConsultationDiagnoses
     @ConsultationId UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT ConsultationDiagnosisId, ConsultationId, ICD10Code, [Description],
-           IsPrimary, Laterality, Chronicity, SequenceOrder
+    SELECT DiagnosisId, ConsultationId, Icd10Code, Icd10Description, ClinicalNotes,
+           IsPrimary, Laterality, AcuteChronic, SequenceOrder
     FROM cln.ConsultationDiagnosis
     WHERE ConsultationId = @ConsultationId AND IsDeleted = 0
     ORDER BY SequenceOrder;
@@ -1726,10 +1841,11 @@ GO
 CREATE OR ALTER PROCEDURE cln.usp_CreateDiagnosis
     @HospitalId     UNIQUEIDENTIFIER,
     @ConsultationId UNIQUEIDENTIFIER,
-    @ICD10Code      NVARCHAR(10),
-    @Description    NVARCHAR(300),
-    @Laterality     NVARCHAR(10) = NULL,
-    @Chronicity     NVARCHAR(10) = NULL
+    @Icd10Code      NVARCHAR(10),
+    @Icd10Description NVARCHAR(300),
+    @ClinicalNotes  NVARCHAR(500) = NULL,
+    @Laterality     NVARCHAR(20) = NULL,
+    @AcuteChronic   NVARCHAR(20) = NULL
 AS BEGIN
     SET NOCOUNT ON;
     -- First diagnosis on a consultation defaults to IsPrimary=1, matching data.js
@@ -1737,91 +1853,89 @@ AS BEGIN
     SELECT @ExistingCount = COUNT(*) FROM cln.ConsultationDiagnosis
     WHERE ConsultationId = @ConsultationId AND IsDeleted = 0;
 
-    INSERT INTO cln.ConsultationDiagnosis (HospitalId, ConsultationId, ICD10Code, [Description],
-                                            IsPrimary, Laterality, Chronicity, SequenceOrder)
-    OUTPUT inserted.ConsultationDiagnosisId, inserted.ICD10Code, inserted.IsPrimary
-    VALUES (@HospitalId, @ConsultationId, @ICD10Code, @Description,
-            CASE WHEN @ExistingCount = 0 THEN 1 ELSE 0 END, @Laterality, @Chronicity, @ExistingCount);
+    INSERT INTO cln.ConsultationDiagnosis (HospitalId, ConsultationId, Icd10Code, Icd10Description, ClinicalNotes,
+                                            IsPrimary, Laterality, AcuteChronic, SequenceOrder)
+    OUTPUT inserted.DiagnosisId, inserted.Icd10Code, inserted.IsPrimary
+    VALUES (@HospitalId, @ConsultationId, @Icd10Code, @Icd10Description, @ClinicalNotes,
+            CASE WHEN @ExistingCount = 0 THEN 1 ELSE 0 END, @Laterality, @AcuteChronic, @ExistingCount);
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cln.usp_DeleteDiagnosis
-    @ConsultationDiagnosisId UNIQUEIDENTIFIER
+    @DiagnosisId    UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    UPDATE cln.ConsultationDiagnosis SET IsDeleted = 1 WHERE ConsultationDiagnosisId = @ConsultationDiagnosisId;
+    UPDATE cln.ConsultationDiagnosis SET IsDeleted = 1 WHERE DiagnosisId = @DiagnosisId;
 END;
 GO
 
 -- ============================================================
 -- 11. FORMULARY / PRESCRIPTIONS (cfg.DrugFormulary, cln.Prescription)
 -- ============================================================
--- TODO: data.js's drugFormularyCatalog carries TargetSpecialties, IsGeneralMedicine,
--- IsControlledSubstance (bool), GenericClass, DefaultDurationDays — schema.sql's
--- cfg.DrugFormulary has IsControlled but not the others (has DefaultDuration INT
--- instead of DefaultDurationDays, no GenericClass/TargetSpecialties/IsGeneralMedicine
--- columns). Procedures below use only columns that exist in schema.sql; the
--- specialty-targeting and generic-class reconciliation-engine fields are omitted
--- pending a schema extension.
+-- v4.0: cfg.DrugFormulary is per hospital and matches the Drug model (DrugId, DefaultRoute,
+-- DefaultDurationDays, GenericClass, IsControlledSubstance). Strength lives on the
+-- prescription line only (cln.Prescription.Strength), not on the formulary row.
 
 CREATE OR ALTER PROCEDURE cfg.usp_SearchFormulary
     @Term           NVARCHAR(100),
     @HospitalId     UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT DrugFormularyId, BrandName, GenericName, TherapeuticClass, Composition,
-           Strength, DrugForm, DeliveryRoute, DefaultDosage, DefaultFrequency,
-           DefaultDuration, DefaultInstructions, IsControlled
+    SELECT DrugId, HospitalId, BrandName, GenericName, Composition, TherapeuticClass, GenericClass,
+           DrugForm, DefaultRoute, DefaultDosage, DefaultFrequency, DefaultDurationDays,
+           DefaultInstructions, IsControlledSubstance
     FROM cfg.DrugFormulary
-    WHERE IsActive = 1 AND IsDeleted = 0
+    WHERE HospitalId = @HospitalId AND IsActive = 1 AND IsDeleted = 0
       AND (BrandName LIKE '%' + @Term + '%' OR GenericName LIKE '%' + @Term + '%')
     ORDER BY BrandName;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cfg.usp_GetDrugByName
+    @HospitalId     UNIQUEIDENTIFIER,
     @BrandName      NVARCHAR(200)
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT TOP (1) DrugFormularyId, BrandName, GenericName, TherapeuticClass, Composition,
-           Strength, DrugForm, DeliveryRoute, DefaultDosage, DefaultFrequency,
-           DefaultDuration, DefaultInstructions, IsControlled
+    SELECT TOP (1) DrugId, HospitalId, BrandName, GenericName, Composition, TherapeuticClass, GenericClass,
+           DrugForm, DefaultRoute, DefaultDosage, DefaultFrequency, DefaultDurationDays,
+           DefaultInstructions, IsControlledSubstance
     FROM cfg.DrugFormulary
-    WHERE IsActive = 1 AND IsDeleted = 0 AND BrandName = @BrandName;
+    WHERE HospitalId = @HospitalId AND IsActive = 1 AND IsDeleted = 0 AND BrandName = @BrandName;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cfg.usp_CreateDrug
+    @HospitalId             UNIQUEIDENTIFIER,
     @BrandName              NVARCHAR(200),
     @GenericName            NVARCHAR(200) = NULL,
-    @TherapeuticClass       NVARCHAR(300) = NULL,
     @Composition            NVARCHAR(500) = NULL,
-    @Strength               NVARCHAR(50) = NULL,
+    @TherapeuticClass       NVARCHAR(300) = NULL,
+    @GenericClass           NVARCHAR(200) = NULL,
     @DrugForm               NVARCHAR(30) = NULL,
-    @DeliveryRoute          NVARCHAR(30) = NULL,
+    @DefaultRoute           NVARCHAR(30) = NULL,
     @DefaultDosage          NVARCHAR(20) = NULL,
     @DefaultFrequency       NVARCHAR(20) = NULL,
-    @DefaultDuration        INT = NULL,
+    @DefaultDurationDays    INT = NULL,
     @DefaultInstructions    NVARCHAR(300) = NULL,
-    @IsControlled           BIT = 0,
+    @IsControlledSubstance  BIT = 0,
     @CreatedBy              UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
-    INSERT INTO cfg.DrugFormulary (BrandName, GenericName, TherapeuticClass, Composition, Strength,
-           DrugForm, DeliveryRoute, DefaultDosage, DefaultFrequency, DefaultDuration,
-           DefaultInstructions, IsControlled, CreatedBy)
-    OUTPUT inserted.DrugFormularyId, inserted.BrandName, inserted.GenericName, inserted.TherapeuticClass,
-           inserted.Composition, inserted.Strength, inserted.DrugForm, inserted.DeliveryRoute,
-           inserted.DefaultDosage, inserted.DefaultFrequency, inserted.DefaultDuration,
-           inserted.DefaultInstructions, inserted.IsControlled, inserted.IsActive
-    VALUES (@BrandName, @GenericName, @TherapeuticClass, @Composition, @Strength, @DrugForm,
-           @DeliveryRoute, @DefaultDosage, @DefaultFrequency, @DefaultDuration,
-           @DefaultInstructions, @IsControlled, @CreatedBy);
+    INSERT INTO cfg.DrugFormulary (HospitalId, BrandName, GenericName, Composition, TherapeuticClass, GenericClass,
+           DrugForm, DefaultRoute, DefaultDosage, DefaultFrequency, DefaultDurationDays,
+           DefaultInstructions, IsControlledSubstance, CreatedBy)
+    OUTPUT inserted.DrugId, inserted.HospitalId, inserted.BrandName, inserted.GenericName, inserted.Composition,
+           inserted.TherapeuticClass, inserted.GenericClass, inserted.DrugForm, inserted.DefaultRoute,
+           inserted.DefaultDosage, inserted.DefaultFrequency, inserted.DefaultDurationDays,
+           inserted.DefaultInstructions, inserted.IsControlledSubstance, inserted.IsActive
+    VALUES (@HospitalId, @BrandName, @GenericName, @Composition, @TherapeuticClass, @GenericClass,
+            @DrugForm, @DefaultRoute, @DefaultDosage, @DefaultFrequency, @DefaultDurationDays,
+            @DefaultInstructions, @IsControlledSubstance, @CreatedBy);
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cfg.usp_UpdateDrugStatus
-    @DrugFormularyId    UNIQUEIDENTIFIER,
+    @DrugId             UNIQUEIDENTIFIER,
     @ModifiedBy          UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
@@ -1829,10 +1943,10 @@ AS BEGIN
     UPDATE cfg.DrugFormulary
     SET IsActive = CASE WHEN IsActive = 1 THEN 0 ELSE 1 END,
         ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
-    WHERE DrugFormularyId = @DrugFormularyId;
+    WHERE DrugId = @DrugId;
 
-    SELECT DrugFormularyId, BrandName, IsActive
-    FROM cfg.DrugFormulary WHERE DrugFormularyId = @DrugFormularyId;
+    SELECT DrugId, BrandName, IsActive
+    FROM cfg.DrugFormulary WHERE DrugId = @DrugId;
 END;
 GO
 
@@ -1842,7 +1956,8 @@ AS BEGIN
     SET NOCOUNT ON;
     SELECT PrescriptionId, ConsultationId, PatientId, MedicineName, Strength, DrugForm,
            DeliveryRoute, Category, TakeInQty, TimesPerDay, DurationValue, DurationUnit,
-           Instructions, IsPrn, IsTimingBf, IsTimingAn, IsTimingNi, IsTimingEm, Status
+           Instructions, DynamicInstruction, Prn, TimingBf, TimingAn, TimingNi, TimingEm,
+           ValidityDays, ValidUntil, TotalDispenseQty, Status
     FROM cln.Prescription
     WHERE ConsultationId = @ConsultationId AND Status = 'ACTIVE' AND IsDeleted = 0;
 END;
@@ -1852,7 +1967,7 @@ CREATE OR ALTER PROCEDURE cln.usp_ListActiveMedicationsForPatient
     @PatientId      UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT PrescriptionId, ConsultationId, MedicineName, Strength, DrugForm,
+    SELECT PrescriptionId, ConsultationId, Source, SourceDetail, MedicineName, Strength, DrugForm,
            TakeInQty, TimesPerDay, DurationValue, DurationUnit, Instructions, Status
     FROM cln.Prescription
     WHERE PatientId = @PatientId AND Status = 'ACTIVE' AND IsDeleted = 0
@@ -1862,36 +1977,45 @@ GO
 
 CREATE OR ALTER PROCEDURE cln.usp_CreatePrescription
     @HospitalId     UNIQUEIDENTIFIER,
-    @ConsultationId UNIQUEIDENTIFIER,
+    @ConsultationId UNIQUEIDENTIFIER = NULL,   -- NULL only for an outside medicine (@Source = 'OUTSIDE')
     @PatientId      UNIQUEIDENTIFIER,
+    @Source         NVARCHAR(10) = NULL,
+    @SourceDetail   NVARCHAR(120) = NULL,
     @MedicineName   NVARCHAR(200),
     @Strength       NVARCHAR(50) = NULL,
+    @GenericClass   NVARCHAR(200) = NULL,
+    @TherapeuticClass NVARCHAR(300) = NULL,
     @DrugForm       NVARCHAR(30) = NULL,
     @DeliveryRoute  NVARCHAR(30) = NULL,
     @Category       NVARCHAR(20) = NULL,
-    @TakeInQty      DECIMAL(5,1) = 1,
+    @TakeInQty      DECIMAL(6,2) = 1,
     @TimesPerDay    INT = 1,
-    @DurationValue  INT = NULL,
+    @DurationValue  INT = 0,
     @DurationUnit   NVARCHAR(10) = NULL,
     @Instructions   NVARCHAR(500) = NULL,
-    @IsPrn          BIT = 0,
-    @IsTimingBf     BIT = 0,
-    @IsTimingAn     BIT = 0,
-    @IsTimingNi     BIT = 0,
-    @IsTimingEm     BIT = 0,
+    @Prn            BIT = 0,
+    @TimingBf       BIT = 0,
+    @TimingAn       BIT = 0,
+    @TimingNi       BIT = 0,
+    @TimingEm       BIT = 0,
+    @ValidityDays   INT = 30,
+    @RepeatedFromConsultationId UNIQUEIDENTIFIER = NULL,
     @CreatedBy      UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
     -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='CREATE', EntityType='Prescription')
-    INSERT INTO cln.Prescription (HospitalId, ConsultationId, PatientId, MedicineName,
-        Strength, DrugForm, DeliveryRoute, Category, TakeInQty, TimesPerDay,
-        DurationValue, DurationUnit, Instructions, IsPrn,
-        IsTimingBf, IsTimingAn, IsTimingNi, IsTimingEm, CreatedBy)
+    INSERT INTO cln.Prescription (HospitalId, ConsultationId, PatientId, Source, SourceDetail, MedicineName,
+        Strength, GenericClass, TherapeuticClass, DrugForm, DeliveryRoute, Category, TakeInQty, TimesPerDay,
+        DurationValue, DurationUnit, Instructions, Prn,
+        TimingBf, TimingAn, TimingNi, TimingEm, ValidityDays, ValidUntil,
+        RepeatedFromConsultationId, CreatedBy)
     OUTPUT inserted.PrescriptionId, inserted.MedicineName, inserted.Status, inserted.CreatedAt
-    VALUES (@HospitalId, @ConsultationId, @PatientId, @MedicineName,
-        @Strength, @DrugForm, @DeliveryRoute, @Category, @TakeInQty, @TimesPerDay,
-        @DurationValue, @DurationUnit, @Instructions, @IsPrn,
-        @IsTimingBf, @IsTimingAn, @IsTimingNi, @IsTimingEm, @CreatedBy);
+    VALUES (@HospitalId, @ConsultationId, @PatientId, @Source, @SourceDetail, @MedicineName,
+        @Strength, @GenericClass, @TherapeuticClass, @DrugForm, @DeliveryRoute, @Category, @TakeInQty, @TimesPerDay,
+        ISNULL(@DurationValue, 0), @DurationUnit, @Instructions, @Prn,
+        @TimingBf, @TimingAn, @TimingNi, @TimingEm, @ValidityDays,
+        DATEADD(DAY, @ValidityDays, CAST(SYSUTCDATETIME() AS DATE)),
+        @RepeatedFromConsultationId, @CreatedBy);
 END;
 GO
 
@@ -1938,69 +2062,85 @@ GO
 -- 12. LAB / INVESTIGATIONS (cfg.LabTestCatalog, cln.DoctorLabFavorite,
 --     cln.InvestigationOrder, cln.LabResult)
 -- ============================================================
--- TODO: data.js's labTestCatalog carries Category and SpecialtyIds (JSON array)
--- used to filter by specialty; schema.sql's cfg.LabTestCatalog has TestType and
--- DefaultSampleType only, no Category/SpecialtyIds columns. The @SpecialtyId
--- parameter below is accepted for interface parity but not filtered on —
--- flag for a schema extension (e.g. a cln.LabTestCatalog_Specialty junction
--- table per architecture §5.2 "junction tables" convention) before Phase 4.
+-- v4.0: cfg.LabTestCatalog is per hospital (TestId, TestType, Category); the specialties a
+-- test is suggested for are in cfg.LabTestSpecialty. @SpecialtyId filters through that table
+-- (NULL = no filter). Order status ORDERED → SENT → RESULTS_READY; result status
+-- PENDING_REVIEW → REVIEWED.
 
 CREATE OR ALTER PROCEDURE cln.usp_ListDoctorLabFavorites
     @DoctorId       UNIQUEIDENTIFIER,
     @SpecialtyId    UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT t.LabTestCatalogId, t.TestName, t.TestType, t.DefaultSampleType
+    SELECT f.FavoriteId, t.TestId, t.TestName, t.TestType, t.Category
     FROM cln.DoctorLabFavorite f
-    INNER JOIN cfg.LabTestCatalog t ON t.LabTestCatalogId = f.LabTestCatalogId
-    WHERE f.DoctorId = @DoctorId AND t.IsActive = 1 AND t.IsDeleted = 0;
+    INNER JOIN cfg.LabTestCatalog t ON t.TestId = f.TestId
+    WHERE f.DoctorId = @DoctorId AND t.IsActive = 1 AND t.IsDeleted = 0
+      AND (@SpecialtyId IS NULL
+           OR EXISTS (SELECT 1 FROM cfg.LabTestSpecialty ls WHERE ls.TestId = t.TestId AND ls.SpecialtyId = @SpecialtyId));
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cfg.usp_SearchLabTests
+    @HospitalId     UNIQUEIDENTIFIER,
     @Term           NVARCHAR(100),
     @SpecialtyId    UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT LabTestCatalogId, TestName, TestType, DefaultSampleType
-    FROM cfg.LabTestCatalog
-    WHERE IsActive = 1 AND IsDeleted = 0 AND TestName LIKE '%' + @Term + '%'
-    ORDER BY TestName;
+    SELECT t.TestId, t.TestName, t.TestType, t.Category
+    FROM cfg.LabTestCatalog t
+    WHERE t.HospitalId = @HospitalId AND t.IsActive = 1 AND t.IsDeleted = 0 AND t.TestName LIKE '%' + @Term + '%'
+      AND (@SpecialtyId IS NULL
+           OR EXISTS (SELECT 1 FROM cfg.LabTestSpecialty ls WHERE ls.TestId = t.TestId AND ls.SpecialtyId = @SpecialtyId))
+    ORDER BY t.TestName;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cfg.usp_CreateLabTest
+    @HospitalId     UNIQUEIDENTIFIER,
     @TestName       NVARCHAR(100),
     @TestType       NVARCHAR(20) = 'LAB',
-    @DefaultSampleType NVARCHAR(50) = NULL
+    @Category       NVARCHAR(50) = NULL,
+    @SpecialtyIds   NVARCHAR(MAX) = NULL       -- comma-separated SpecialtyIds → cfg.LabTestSpecialty
 AS BEGIN
     SET NOCOUNT ON;
-    INSERT INTO cfg.LabTestCatalog (TestName, TestType, DefaultSampleType)
-    OUTPUT inserted.LabTestCatalogId, inserted.TestName
-    VALUES (@TestName, @TestType, @DefaultSampleType);
+    SET XACT_ABORT ON;
+    DECLARE @New TABLE (TestId UNIQUEIDENTIFIER, TestName NVARCHAR(100));
+    BEGIN TRAN;
+    INSERT INTO cfg.LabTestCatalog (HospitalId, TestName, TestType, Category)
+    OUTPUT inserted.TestId, inserted.TestName INTO @New
+    VALUES (@HospitalId, @TestName, @TestType, @Category);
+
+    INSERT INTO cfg.LabTestSpecialty (TestId, SpecialtyId)
+    SELECT DISTINCT n.TestId, TRY_CAST(LTRIM(RTRIM(x.value)) AS UNIQUEIDENTIFIER)
+    FROM @New n CROSS JOIN STRING_SPLIT(@SpecialtyIds, ',') x
+    WHERE TRY_CAST(LTRIM(RTRIM(x.value)) AS UNIQUEIDENTIFIER) IS NOT NULL;
+    COMMIT;
+
+    SELECT TestId, TestName FROM @New;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cln.usp_CreateLabFavorite
     @DoctorId       UNIQUEIDENTIFIER,
-    @LabTestCatalogId UNIQUEIDENTIFIER
+    @TestId         UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    IF NOT EXISTS (SELECT 1 FROM cln.DoctorLabFavorite WHERE DoctorId = @DoctorId AND LabTestCatalogId = @LabTestCatalogId)
-        INSERT INTO cln.DoctorLabFavorite (DoctorId, LabTestCatalogId) VALUES (@DoctorId, @LabTestCatalogId);
+    IF NOT EXISTS (SELECT 1 FROM cln.DoctorLabFavorite WHERE DoctorId = @DoctorId AND TestId = @TestId)
+        INSERT INTO cln.DoctorLabFavorite (DoctorId, TestId) VALUES (@DoctorId, @TestId);
 
-    SELECT DoctorLabFavoriteId, DoctorId, LabTestCatalogId
-    FROM cln.DoctorLabFavorite WHERE DoctorId = @DoctorId AND LabTestCatalogId = @LabTestCatalogId;
+    SELECT FavoriteId, DoctorId, TestId
+    FROM cln.DoctorLabFavorite WHERE DoctorId = @DoctorId AND TestId = @TestId;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cln.usp_DeleteLabFavorite
     @DoctorId       UNIQUEIDENTIFIER,
-    @LabTestCatalogId UNIQUEIDENTIFIER
+    @TestId         UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
     -- No IsActive/IsDeleted on this junction table — hard delete matches data.js splice()
-    DELETE FROM cln.DoctorLabFavorite WHERE DoctorId = @DoctorId AND LabTestCatalogId = @LabTestCatalogId;
+    DELETE FROM cln.DoctorLabFavorite WHERE DoctorId = @DoctorId AND TestId = @TestId;
 END;
 GO
 
@@ -2008,19 +2148,18 @@ CREATE OR ALTER PROCEDURE cln.usp_CreateInvestigationOrder
     @HospitalId     UNIQUEIDENTIFIER,
     @ConsultationId UNIQUEIDENTIFIER,
     @PatientId      UNIQUEIDENTIFIER,
+    @TestId         UNIQUEIDENTIFIER = NULL,   -- cfg.LabTestCatalog; NULL for a free-text test
     @TestName       NVARCHAR(100),
     @TestType       NVARCHAR(20) = 'LAB',
-    @Priority       NVARCHAR(10) = 'ROUTINE',
-    @ClinicalNotes  NVARCHAR(300) = NULL,
-    @IsFasting      BIT = 0,
     @CreatedBy      UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
+    -- v4.0: Priority / ClinicalNotes / IsFasting columns dropped (not on the InvestigationOrder model).
     INSERT INTO cln.InvestigationOrder (HospitalId, ConsultationId, PatientId,
-                                        TestName, TestType, Priority, ClinicalNotes, IsFasting, CreatedBy)
-    OUTPUT inserted.InvestigationOrderId, inserted.TestName, inserted.Status
+                                        TestId, TestName, TestType, CreatedBy)
+    OUTPUT inserted.OrderId, inserted.TestName, inserted.Status, inserted.OrderedAt
     VALUES (@HospitalId, @ConsultationId, @PatientId,
-            @TestName, @TestType, @Priority, @ClinicalNotes, @IsFasting, @CreatedBy);
+            @TestId, @TestName, @TestType, @CreatedBy);
 END;
 GO
 
@@ -2028,8 +2167,8 @@ CREATE OR ALTER PROCEDURE cln.usp_ListInvestigationOrders
     @ConsultationId UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT InvestigationOrderId, ConsultationId, PatientId, TestName, TestType,
-           Priority, ClinicalNotes, IsFasting, Status, CreatedAt
+    SELECT OrderId, ConsultationId, PatientId, TestId, TestName, TestType,
+           Status, OrderedAt, LabPartnerId
     FROM cln.InvestigationOrder
     WHERE ConsultationId = @ConsultationId AND IsDeleted = 0;
 END;
@@ -2039,46 +2178,58 @@ CREATE OR ALTER PROCEDURE cln.usp_ListPendingLabOrders
     @HospitalId     UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT o.InvestigationOrderId, o.PatientId, p.FullName AS PatientName, p.Mrn AS PatientMrn,
-           o.TestName, o.TestType, o.Priority, o.ClinicalNotes, o.IsFasting, o.Status, o.CreatedAt
+    -- Orders still awaiting a result: ORDERED (not yet claimed) or SENT (claimed by a lab partner)
+    SELECT o.OrderId, o.PatientId, p.FullName AS PatientName, p.Mrn AS PatientMrn,
+           o.TestId, o.TestName, o.TestType, o.Status, o.OrderedAt, o.LabPartnerId
     FROM cln.InvestigationOrder o
     INNER JOIN opd.Patient p ON p.PatientId = o.PatientId
-    WHERE o.HospitalId = @HospitalId AND o.Status = 'ORDERED' AND o.IsDeleted = 0
-    ORDER BY o.CreatedAt DESC;
+    WHERE o.HospitalId = @HospitalId AND o.Status IN ('ORDERED','SENT') AND o.IsDeleted = 0
+    ORDER BY o.OrderedAt DESC;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cln.usp_UpdateOrderStatus
-    @InvestigationOrderId UNIQUEIDENTIFIER,
-    @Status         NVARCHAR(15)
+    @OrderId        UNIQUEIDENTIFIER,
+    @Status         NVARCHAR(15),              -- ORDERED | SENT | RESULTS_READY
+    @LabPartnerId   UNIQUEIDENTIFIER = NULL    -- set when a lab partner claims the order (→ SENT)
 AS BEGIN
     SET NOCOUNT ON;
-    UPDATE cln.InvestigationOrder SET Status = @Status WHERE InvestigationOrderId = @InvestigationOrderId;
+    UPDATE cln.InvestigationOrder
+    SET Status = @Status, LabPartnerId = ISNULL(@LabPartnerId, LabPartnerId)
+    WHERE OrderId = @OrderId;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cln.usp_SubmitLabResult
-    @InvestigationOrderId UNIQUEIDENTIFIER,
+    @OrderId        UNIQUEIDENTIFIER,
     @HospitalId     UNIQUEIDENTIFIER,
     @LabPartnerId   UNIQUEIDENTIFIER = NULL,
     @ResultSummary  NVARCHAR(500) = NULL,
     @ResultValue    NVARCHAR(100) = NULL,
     @ReferenceRange NVARCHAR(100) = NULL,
     @Interpretation NVARCHAR(10) = NULL,
-    @TechnicianName NVARCHAR(100) = NULL
+    @Technician     NVARCHAR(100) = NULL,
+    @Notes          NVARCHAR(500) = NULL,
+    @UploadedByUserId UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
+    SET XACT_ABORT ON;
     -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='SUBMIT', EntityType='LabResult')
-    INSERT INTO cln.LabResult (HospitalId, InvestigationOrderId, LabPartnerId,
-                                ResultSummary, ResultValue, ReferenceRange,
-                                Interpretation, TechnicianName, Status)
-    OUTPUT inserted.LabResultId, inserted.Status
-    VALUES (@HospitalId, @InvestigationOrderId, @LabPartnerId,
-            @ResultSummary, @ResultValue, @ReferenceRange,
-            @Interpretation, @TechnicianName, 'UPLOADED');
+    -- Patient / consultation / test name are copied from the order (the LabResult model carries them).
+    BEGIN TRAN;
+    INSERT INTO cln.LabResult (OrderId, HospitalId, PatientId, ConsultationId, TestName,
+                                ResultSummary, ResultValue, ReferenceRange, Interpretation,
+                                Technician, Notes, UploadedByUserId, LabPartnerId)
+    OUTPUT inserted.ResultId, inserted.Status, inserted.UploadedAt
+    SELECT o.OrderId, @HospitalId, o.PatientId, o.ConsultationId, o.TestName,
+           @ResultSummary, @ResultValue, @ReferenceRange, @Interpretation,
+           @Technician, @Notes, @UploadedByUserId, ISNULL(@LabPartnerId, o.LabPartnerId)
+    FROM cln.InvestigationOrder o
+    WHERE o.OrderId = @OrderId AND o.HospitalId = @HospitalId;
 
-    UPDATE cln.InvestigationOrder SET Status = 'COMPLETED'
-    WHERE InvestigationOrderId = @InvestigationOrderId;
+    UPDATE cln.InvestigationOrder SET Status = 'RESULTS_READY'
+    WHERE OrderId = @OrderId;
+    COMMIT;
 END;
 GO
 
@@ -2086,12 +2237,12 @@ CREATE OR ALTER PROCEDURE cln.usp_ListLabResultsForPatient
     @PatientId      UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT r.LabResultId, r.InvestigationOrderId, o.TestName, r.ResultSummary, r.ResultValue,
-           r.ReferenceRange, r.Interpretation, r.Status, r.CreatedAt
+    SELECT r.ResultId, r.OrderId, r.ConsultationId, r.TestName, r.ResultSummary, r.ResultValue,
+           r.ReferenceRange, r.Interpretation, r.Technician, r.Notes, r.Status, r.UploadedAt,
+           r.ReviewedAt, r.ReviewNotes
     FROM cln.LabResult r
-    INNER JOIN cln.InvestigationOrder o ON o.InvestigationOrderId = r.InvestigationOrderId
-    WHERE o.PatientId = @PatientId AND r.IsDeleted = 0
-    ORDER BY r.CreatedAt DESC;
+    WHERE r.PatientId = @PatientId AND r.IsDeleted = 0
+    ORDER BY r.UploadedAt DESC;
 END;
 GO
 
@@ -2099,26 +2250,25 @@ CREATE OR ALTER PROCEDURE cln.usp_ListPendingReviewResults
     @HospitalId     UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT r.LabResultId, o.PatientId, p.FullName AS PatientName, p.Mrn AS PatientMrn,
-           o.TestName, r.ResultSummary, r.ResultValue, r.Interpretation, r.Status, r.CreatedAt
+    SELECT r.ResultId, r.OrderId, r.PatientId, p.FullName AS PatientName, p.Mrn AS PatientMrn,
+           r.TestName, r.ResultSummary, r.ResultValue, r.Interpretation, r.Status, r.UploadedAt
     FROM cln.LabResult r
-    INNER JOIN cln.InvestigationOrder o ON o.InvestigationOrderId = r.InvestigationOrderId
-    INNER JOIN opd.Patient p ON p.PatientId = o.PatientId
-    WHERE r.HospitalId = @HospitalId AND r.Status = 'UPLOADED' AND r.IsDeleted = 0
-    ORDER BY r.CreatedAt DESC;
+    INNER JOIN opd.Patient p ON p.PatientId = r.PatientId
+    WHERE r.HospitalId = @HospitalId AND r.Status = 'PENDING_REVIEW' AND r.IsDeleted = 0
+    ORDER BY r.UploadedAt DESC;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cln.usp_UpdateLabResultStatus
-    @LabResultId    UNIQUEIDENTIFIER,
-    @ReviewedBy     UNIQUEIDENTIFIER = NULL,
+    @ResultId       UNIQUEIDENTIFIER,
     @ReviewNotes    NVARCHAR(300) = NULL
 AS BEGIN
     SET NOCOUNT ON;
-    -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='APPROVE', EntityType='LabResult')
+    -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='APPROVE', EntityType='LabResult').
+    -- v4.0: ReviewedBy column dropped (not on the LabResult model) — the reviewer is in the audit entry.
     UPDATE cln.LabResult
-    SET Status = 'REVIEWED', ReviewedBy = @ReviewedBy, ReviewedAt = SYSUTCDATETIME(), ReviewNotes = @ReviewNotes
-    WHERE LabResultId = @LabResultId;
+    SET Status = 'REVIEWED', ReviewedAt = SYSUTCDATETIME(), ReviewNotes = @ReviewNotes
+    WHERE ResultId = @ResultId;
 END;
 GO
 
@@ -2130,18 +2280,19 @@ CREATE OR ALTER PROCEDURE cln.usp_CreateReferral
     @HospitalId     UNIQUEIDENTIFIER,
     @ConsultationId UNIQUEIDENTIFIER,
     @PatientId      UNIQUEIDENTIFIER,
-    @ReferToSpecialty NVARCHAR(100),
-    @ReferToDoctorName NVARCHAR(200) = NULL,
-    @Urgency        NVARCHAR(10) = 'ROUTINE',
+    @Specialty      NVARCHAR(100),
+    @DoctorName     NVARCHAR(200) = NULL,
+    @Urgency        NVARCHAR(20) = 'ROUTINE',
     @Reason         NVARCHAR(500) = NULL,
     @CreatedBy      UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
-    INSERT INTO cln.Referral (HospitalId, ConsultationId, PatientId, ReferToSpecialty,
-                               ReferToDoctorName, Urgency, Reason, CreatedBy)
-    OUTPUT inserted.ReferralId, inserted.ReferToSpecialty, inserted.Status
-    VALUES (@HospitalId, @ConsultationId, @PatientId, @ReferToSpecialty,
-            @ReferToDoctorName, @Urgency, @Reason, @CreatedBy);
+    -- v4.0: ReferToSpecialty → Specialty, ReferToDoctorName → DoctorName; Status column dropped.
+    INSERT INTO cln.Referral (HospitalId, ConsultationId, PatientId, Specialty,
+                               DoctorName, Urgency, Reason, CreatedBy)
+    OUTPUT inserted.ReferralId, inserted.Specialty, inserted.Urgency
+    VALUES (@HospitalId, @ConsultationId, @PatientId, @Specialty,
+            @DoctorName, @Urgency, @Reason, @CreatedBy);
 END;
 GO
 
@@ -2149,8 +2300,8 @@ CREATE OR ALTER PROCEDURE cln.usp_ListReferrals
     @ConsultationId UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT ReferralId, ConsultationId, PatientId, ReferToSpecialty, ReferToDoctorName,
-           Urgency, Reason, Status, CreatedAt
+    SELECT ReferralId, ConsultationId, PatientId, Specialty, DoctorName,
+           Urgency, Reason, CreatedAt
     FROM cln.Referral WHERE ConsultationId = @ConsultationId AND IsDeleted = 0;
 END;
 GO
@@ -2165,16 +2316,15 @@ CREATE OR ALTER PROCEDURE cln.usp_SaveSketch
     @PatientId      UNIQUEIDENTIFIER,
     @DoctorId       UNIQUEIDENTIFIER,
     @Title          NVARCHAR(100) = NULL,
-    @SketchDataUrl  NVARCHAR(MAX),
-    @StrokesJson    NVARCHAR(MAX) = NULL
+    @ImageData      NVARCHAR(MAX)              -- JPEG data URL (v4.0: StrokesJson dropped)
 AS BEGIN
     SET NOCOUNT ON;
     -- data.js always inserts a new row (never updates) despite the "save" verb;
     -- mirrored here as an INSERT-only procedure.
     INSERT INTO cln.ConsultationSketch (HospitalId, ConsultationId, PatientId, DoctorId,
-                                         Title, SketchDataUrl, StrokesJson)
+                                         Title, ImageData)
     OUTPUT inserted.SketchId, inserted.CreatedAt
-    VALUES (@HospitalId, @ConsultationId, @PatientId, @DoctorId, @Title, @SketchDataUrl, @StrokesJson);
+    VALUES (@HospitalId, @ConsultationId, @PatientId, @DoctorId, @Title, @ImageData);
 END;
 GO
 
@@ -2182,7 +2332,7 @@ CREATE OR ALTER PROCEDURE cln.usp_ListSketches
     @ConsultationId UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT SketchId, ConsultationId, PatientId, DoctorId, Title, SketchDataUrl, StrokesJson, CreatedAt
+    SELECT SketchId, ConsultationId, PatientId, DoctorId, Title, ImageData, CreatedAt
     FROM cln.ConsultationSketch WHERE ConsultationId = @ConsultationId
     ORDER BY CreatedAt DESC;
 END;
@@ -2192,7 +2342,7 @@ CREATE OR ALTER PROCEDURE cln.usp_ListPatientSketches
     @PatientId      UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT SketchId, ConsultationId, PatientId, DoctorId, Title, SketchDataUrl, StrokesJson, CreatedAt
+    SELECT SketchId, ConsultationId, PatientId, DoctorId, Title, ImageData, CreatedAt
     FROM cln.ConsultationSketch WHERE PatientId = @PatientId
     ORDER BY CreatedAt DESC;
 END;
@@ -2208,10 +2358,10 @@ CREATE OR ALTER PROCEDURE cln.usp_GetConfidentialNote
 AS BEGIN
     SET NOCOUNT ON;
     -- Author-only: WHERE clause enforces the note is only ever returned to its
-    -- own author (CreatedBy = @DoctorId), matching data.js's DoctorId match.
-    SELECT ConfidentialNoteId, ConsultationId, NoteText, CreatedBy, CreatedAt, ModifiedAt
+    -- own author (DoctorId = @DoctorId), matching data.js's DoctorId match.
+    SELECT ConfidentialNoteId, ConsultationId, DoctorId, NoteText, CreatedAt, UpdatedAt
     FROM cln.ConfidentialNote
-    WHERE ConsultationId = @ConsultationId AND CreatedBy = @DoctorId;
+    WHERE ConsultationId = @ConsultationId AND DoctorId = @DoctorId;
 END;
 GO
 
@@ -2224,28 +2374,29 @@ AS BEGIN
     SET NOCOUNT ON;
     MERGE cln.ConfidentialNote AS tgt
     USING (SELECT @ConsultationId AS ConsultationId) AS src
-        ON tgt.ConsultationId = src.ConsultationId AND tgt.CreatedBy = @DoctorId
-    WHEN MATCHED THEN UPDATE SET NoteText = @NoteText, ModifiedAt = SYSUTCDATETIME()
+        ON tgt.ConsultationId = src.ConsultationId AND tgt.DoctorId = @DoctorId
+    WHEN MATCHED THEN UPDATE SET NoteText = @NoteText, UpdatedAt = SYSUTCDATETIME()
     WHEN NOT MATCHED THEN
-        INSERT (HospitalId, ConsultationId, NoteText, CreatedBy)
-        VALUES (@HospitalId, @ConsultationId, @NoteText, @DoctorId);
+        INSERT (HospitalId, ConsultationId, DoctorId, NoteText)
+        VALUES (@HospitalId, @ConsultationId, @DoctorId, @NoteText);
 
-    SELECT ConfidentialNoteId, NoteText, ModifiedAt
-    FROM cln.ConfidentialNote WHERE ConsultationId = @ConsultationId AND CreatedBy = @DoctorId;
+    SELECT ConfidentialNoteId, NoteText, UpdatedAt
+    FROM cln.ConfidentialNote WHERE ConsultationId = @ConsultationId AND DoctorId = @DoctorId;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cln.usp_CreateAddendum
     @HospitalId     UNIQUEIDENTIFIER,
     @ConsultationId UNIQUEIDENTIFIER,
-    @AddendumText   NVARCHAR(MAX),
-    @AddedBy        UNIQUEIDENTIFIER
+    @DoctorId       UNIQUEIDENTIFIER,
+    @Category       NVARCHAR(30) = NULL,
+    @AddendumText   NVARCHAR(MAX)
 AS BEGIN
     SET NOCOUNT ON;
     -- Append-only, matching schema comment on cln.ConsultationAddendum — never updated.
-    INSERT INTO cln.ConsultationAddendum (HospitalId, ConsultationId, AddendumText, AddedBy)
+    INSERT INTO cln.ConsultationAddendum (HospitalId, ConsultationId, DoctorId, Category, AddendumText)
     OUTPUT inserted.AddendumId, inserted.CreatedAt
-    VALUES (@HospitalId, @ConsultationId, @AddendumText, @AddedBy);
+    VALUES (@HospitalId, @ConsultationId, @DoctorId, @Category, @AddendumText);
 END;
 GO
 
@@ -2253,7 +2404,7 @@ CREATE OR ALTER PROCEDURE cln.usp_ListAddendums
     @ConsultationId UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT AddendumId, ConsultationId, AddendumText, AddedBy, CreatedAt
+    SELECT AddendumId, ConsultationId, DoctorId, Category, AddendumText, CreatedAt
     FROM cln.ConsultationAddendum WHERE ConsultationId = @ConsultationId
     ORDER BY CreatedAt;
 END;
@@ -2300,10 +2451,12 @@ CREATE OR ALTER PROCEDURE bil.usp_ListServiceCharges
     @HospitalId     UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT ServiceChargeId, ServiceCode, ServiceName, Category, DefaultAmount, TaxPercent, Currency
-    FROM bil.ServiceChargeMaster
-    WHERE HospitalId = @HospitalId AND IsActive = 1 AND IsDeleted = 0
-    ORDER BY ServiceName;
+    SELECT sc.ServiceChargeId, sc.ServiceCode, sc.ServiceName, sc.Category, sc.DefaultAmount, sc.TaxPercent,
+           h.Currency   -- v4.0: priced in the hospital's currency
+    FROM bil.ServiceChargeMaster sc
+    INNER JOIN cfg.Hospital h ON h.HospitalId = sc.HospitalId
+    WHERE sc.HospitalId = @HospitalId AND sc.IsActive = 1 AND sc.IsDeleted = 0
+    ORDER BY sc.ServiceName;
 END;
 GO
 
@@ -2311,8 +2464,10 @@ CREATE OR ALTER PROCEDURE bil.usp_GetServiceCharge
     @ServiceChargeId UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT ServiceChargeId, ServiceCode, ServiceName, Category, DefaultAmount, TaxPercent, Currency
-    FROM bil.ServiceChargeMaster WHERE ServiceChargeId = @ServiceChargeId AND IsDeleted = 0;
+    SELECT sc.ServiceChargeId, sc.ServiceCode, sc.ServiceName, sc.Category, sc.DefaultAmount, sc.TaxPercent,
+           h.Currency   -- v4.0: priced in the hospital's currency
+    FROM bil.ServiceChargeMaster sc
+    INNER JOIN cfg.Hospital h ON h.HospitalId = sc.HospitalId WHERE sc.ServiceChargeId = @ServiceChargeId AND sc.IsDeleted = 0;
 END;
 GO
 
@@ -2321,11 +2476,13 @@ CREATE OR ALTER PROCEDURE bil.usp_SearchServiceCharges
     @HospitalId     UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT ServiceChargeId, ServiceCode, ServiceName, Category, DefaultAmount, TaxPercent, Currency
-    FROM bil.ServiceChargeMaster
-    WHERE HospitalId = @HospitalId AND IsActive = 1 AND IsDeleted = 0
-      AND (ServiceName LIKE '%' + @Term + '%' OR ServiceCode LIKE '%' + @Term + '%')
-    ORDER BY ServiceName;
+    SELECT sc.ServiceChargeId, sc.ServiceCode, sc.ServiceName, sc.Category, sc.DefaultAmount, sc.TaxPercent,
+           h.Currency   -- v4.0: priced in the hospital's currency
+    FROM bil.ServiceChargeMaster sc
+    INNER JOIN cfg.Hospital h ON h.HospitalId = sc.HospitalId
+    WHERE sc.HospitalId = @HospitalId AND sc.IsActive = 1 AND sc.IsDeleted = 0
+      AND (sc.ServiceName LIKE '%' + @Term + '%' OR sc.ServiceCode LIKE '%' + @Term + '%')
+    ORDER BY sc.ServiceName;
 END;
 GO
 
@@ -2336,14 +2493,13 @@ CREATE OR ALTER PROCEDURE bil.usp_CreateServiceCharge
     @Category       NVARCHAR(20),
     @DefaultAmount  DECIMAL(10,2),
     @TaxPercent     DECIMAL(5,2) = 0,
-    @Currency       NVARCHAR(5) = 'USD',
     @CreatedBy      UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
     INSERT INTO bil.ServiceChargeMaster (HospitalId, ServiceCode, ServiceName, Category,
-                                          DefaultAmount, TaxPercent, Currency, CreatedBy)
+                                          DefaultAmount, TaxPercent, CreatedBy)
     OUTPUT inserted.ServiceChargeId, inserted.ServiceName, inserted.DefaultAmount
-    VALUES (@HospitalId, @ServiceCode, @ServiceName, @Category, @DefaultAmount, @TaxPercent, @Currency, @CreatedBy);
+    VALUES (@HospitalId, @ServiceCode, @ServiceName, @Category, @DefaultAmount, @TaxPercent, @CreatedBy);
 END;
 GO
 
@@ -2355,6 +2511,8 @@ CREATE OR ALTER PROCEDURE bil.usp_CreateInvoice
     @PatientId      UNIQUEIDENTIFIER,
     @DoctorId       UNIQUEIDENTIFIER = NULL,
     @ConsultationType NVARCHAR(10) = NULL,
+    @IsFreeFollowup BIT = 0,
+    @ChargeNote     NVARCHAR(300) = NULL,
     @Currency       NVARCHAR(5) = 'USD',
     @CreatedBy      UNIQUEIDENTIFIER = NULL
 AS BEGIN
@@ -2364,10 +2522,10 @@ AS BEGIN
     FROM bil.Invoice WHERE HospitalId = @HospitalId;
 
     INSERT INTO bil.Invoice (HospitalId, InvoiceNumber, ConsultationId, PatientId,
-                              DoctorId, ConsultationType, Currency, TotalAmount, CreatedBy)
+                              DoctorId, ConsultationType, IsFreeFollowup, ChargeNote, Currency, TotalAmount, CreatedBy)
     OUTPUT inserted.InvoiceId, inserted.InvoiceNumber, inserted.Status, inserted.CreatedAt
     VALUES (@HospitalId, @InvoiceNumber, @ConsultationId, @PatientId,
-            @DoctorId, @ConsultationType, @Currency, 0, @CreatedBy);
+            @DoctorId, @ConsultationType, @IsFreeFollowup, @ChargeNote, @Currency, 0, @CreatedBy);
 END;
 GO
 
@@ -2387,7 +2545,8 @@ CREATE OR ALTER PROCEDURE bil.usp_ListInvoices
 AS BEGIN
     SET NOCOUNT ON;
     SELECT InvoiceId, InvoiceNumber, ConsultationId, PatientId, DoctorId, ConsultationType,
-           Currency, SubTotal, DiscountAmount, TaxAmount, TotalAmount, PaidAmount, Status, CreatedAt
+           IsFreeFollowup, ChargeNote, Currency, SubTotal, DiscountAmount, TaxAmount, TotalAmount,
+           PaidAmount, CoveredAmount, PatientLiability, PatientPaidAmount, Status, CreatedAt
     FROM bil.Invoice
     WHERE HospitalId = @HospitalId AND IsDeleted = 0
     ORDER BY CreatedAt DESC;
@@ -2399,7 +2558,8 @@ CREATE OR ALTER PROCEDURE bil.usp_GetInvoice
 AS BEGIN
     SET NOCOUNT ON;
     SELECT InvoiceId, InvoiceNumber, ConsultationId, PatientId, DoctorId, ConsultationType,
-           Currency, SubTotal, DiscountAmount, TaxAmount, TotalAmount, PaidAmount, Status, CreatedAt
+           IsFreeFollowup, ChargeNote, Currency, SubTotal, DiscountAmount, TaxAmount, TotalAmount,
+           PaidAmount, CoveredAmount, PatientLiability, PatientPaidAmount, Status, CreatedAt
     FROM bil.Invoice WHERE InvoiceId = @InvoiceId AND IsDeleted = 0;
 END;
 GO
@@ -2507,127 +2667,9 @@ AS BEGIN
 END;
 GO
 
-CREATE OR ALTER PROCEDURE bil.usp_RecalculateInvoiceTotals
-    @InvoiceId      UNIQUEIDENTIFIER
-AS BEGIN
-    SET NOCOUNT ON;
-    UPDATE bil.Invoice SET
-        SubTotal = (SELECT ISNULL(SUM(Qty * UnitAmount), 0) FROM bil.InvoiceLineItem WHERE InvoiceId = @InvoiceId),
-        DiscountAmount = (SELECT ISNULL(SUM(DiscountAmount), 0) FROM bil.InvoiceLineItem WHERE InvoiceId = @InvoiceId),
-        TaxAmount = (SELECT ISNULL(SUM(TaxAmount), 0) FROM bil.InvoiceLineItem WHERE InvoiceId = @InvoiceId),
-        TotalAmount = (SELECT ISNULL(SUM(LineTotal), 0) FROM bil.InvoiceLineItem WHERE InvoiceId = @InvoiceId),
-        ModifiedAt = SYSUTCDATETIME()
-    WHERE InvoiceId = @InvoiceId;
-
-    -- percent coverages follow the new total; fixed amounts are re-capped; status re-derived
-    EXEC bil.usp_RecalculateInvoiceSplit @InvoiceId = @InvoiceId;
-
-    SELECT InvoiceId, SubTotal, DiscountAmount, TaxAmount, TotalAmount,
-           CoveredAmount, PatientLiability, PatientPaidAmount, PaidAmount, Status
-    FROM bil.Invoice WHERE InvoiceId = @InvoiceId;
-END;
-GO
-
--- ---- Payments & receipts ----
-
-CREATE OR ALTER PROCEDURE bil.usp_CreatePayment
-    @HospitalId     UNIQUEIDENTIFIER,
-    @InvoiceId      UNIQUEIDENTIFIER,
-    @ComponentType  NVARCHAR(15) = 'PATIENT',      -- PATIENT | INSURANCE (payer settlement)
-    @CoverageLineId UNIQUEIDENTIFIER = NULL,       -- required for INSURANCE: the claim being settled
-    @PaymentMethod  NVARCHAR(30),
-    @Amount         DECIMAL(10,2),
-    @Reference      NVARCHAR(100) = NULL,
-    @ReceivedBy     UNIQUEIDENTIFIER = NULL
-AS BEGIN
-    SET NOCOUNT ON;
-    IF @ComponentType = 'INSURANCE' AND NOT EXISTS (
-        SELECT 1 FROM bil.InvoiceCoverageLine WHERE CoverageLineId = @CoverageLineId AND InvoiceId = @InvoiceId)
-        THROW 50120, 'An insurance settlement must reference a coverage line on this invoice.', 1;
-
-    INSERT INTO bil.Payment (HospitalId, InvoiceId, TransactionNumber, ComponentType, CoverageLineId,
-                              PaymentMethod, Amount, Reference, ReceivedBy)
-    OUTPUT inserted.PaymentId, inserted.TransactionNumber, inserted.Amount, inserted.PaidAt
-    SELECT @HospitalId, @InvoiceId,
-           'TXN-' + RIGHT('000000' + CAST(ISNULL(MAX(PaymentPkId), 0) + 1 AS NVARCHAR), 6),
-           @ComponentType, CASE WHEN @ComponentType = 'INSURANCE' THEN @CoverageLineId END,
-           @PaymentMethod, @Amount, @Reference, @ReceivedBy
-    FROM bil.Payment WHERE HospitalId = @HospitalId;
-
-    EXEC bil.usp_RecalculateInvoiceSplit @InvoiceId = @InvoiceId;
-END;
-GO
-
-CREATE OR ALTER PROCEDURE bil.usp_ListPaymentsForInvoice
-    @InvoiceId      UNIQUEIDENTIFIER
-AS BEGIN
-    SET NOCOUNT ON;
-    SELECT PaymentId, InvoiceId, TransactionNumber, ComponentType, PaymentMethod,
-           Amount, Reference, PaidAt, IsVoided, VoidReason
-    FROM bil.Payment WHERE InvoiceId = @InvoiceId ORDER BY PaidAt DESC;
-END;
-GO
-
-CREATE OR ALTER PROCEDURE bil.usp_ListPayments
-    @HospitalId     UNIQUEIDENTIFIER
-AS BEGIN
-    SET NOCOUNT ON;
-    SELECT PaymentId, InvoiceId, TransactionNumber, ComponentType, PaymentMethod,
-           Amount, Reference, PaidAt, IsVoided
-    FROM bil.Payment WHERE HospitalId = @HospitalId ORDER BY PaidAt DESC;
-END;
-GO
-
-CREATE OR ALTER PROCEDURE bil.usp_UpdatePaymentVoid
-    @TransactionId  UNIQUEIDENTIFIER,
-    @VoidReason     NVARCHAR(300),
-    @VoidedBy       UNIQUEIDENTIFIER
-AS BEGIN
-    SET NOCOUNT ON;
-    DECLARE @InvoiceId UNIQUEIDENTIFIER;
-    SELECT @InvoiceId = InvoiceId FROM bil.Payment WHERE PaymentId = @TransactionId;
-
-    UPDATE bil.Payment SET IsVoided = 1, VoidedAt = SYSUTCDATETIME(),
-                           VoidedBy = @VoidedBy, VoidReason = @VoidReason
-    WHERE PaymentId = @TransactionId AND IsVoided = 0;
-
-    IF @InvoiceId IS NOT NULL
-        EXEC bil.usp_RecalculateInvoiceSplit @InvoiceId = @InvoiceId;
-END;
-GO
-
-CREATE OR ALTER PROCEDURE bil.usp_CreateReceipt
-    @HospitalId     UNIQUEIDENTIFIER,
-    @InvoiceId      UNIQUEIDENTIFIER,
-    @PaymentId      UNIQUEIDENTIFIER = NULL,
-    @PatientId      UNIQUEIDENTIFIER = NULL,
-    @TotalAmount    DECIMAL(10,2),
-    @Currency       NVARCHAR(5) = 'USD'
-AS BEGIN
-    SET NOCOUNT ON;
-    -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='PRINT', EntityType='Receipt') on print
-    DECLARE @ReceiptNumber NVARCHAR(30);
-    SELECT @ReceiptNumber = 'RCP-' + RIGHT('000000' + CAST(ISNULL(MAX(ReceiptPkId), 0) + 1 AS NVARCHAR), 6)
-    FROM bil.Receipt WHERE HospitalId = @HospitalId;
-
-    INSERT INTO bil.Receipt (HospitalId, ReceiptNumber, PaymentId, InvoiceId, PatientId, TotalAmount, Currency)
-    OUTPUT inserted.ReceiptId, inserted.ReceiptNumber, inserted.GeneratedAt
-    VALUES (@HospitalId, @ReceiptNumber, @PaymentId, @InvoiceId, @PatientId, @TotalAmount, @Currency);
-END;
-GO
-
-CREATE OR ALTER PROCEDURE bil.usp_GetReceiptForInvoice
-    @InvoiceId      UNIQUEIDENTIFIER
-AS BEGIN
-    SET NOCOUNT ON;
-    SELECT ReceiptId, ReceiptNumber, InvoiceId, PatientId, TotalAmount, Currency, GeneratedAt
-    FROM bil.Receipt WHERE InvoiceId = @InvoiceId AND IsDeleted = 0;
-END;
-GO
-
--- ---- Coverage & N-way bill split (ported from MediSlot billing) ----
--- Charge (Invoice.TotalAmount) = Σ verified coverage liabilities + Patient share.
--- Self-Pay (no coverage), Private only, Govt scheme only, and Private + Govt together.
+-- Defined here, ahead of their callers (usp_RecalculateInvoiceTotals, usp_CreatePayment,
+-- usp_UpdatePaymentVoid and the coverage-line procedures below), so the script runs without
+-- "depends on the missing object" warnings.
 
 -- Re-derives coverage liabilities (priority order, capped to the charge), the patient share,
 -- paid amounts and status. Called after any change to line items, coverage lines or payments.
@@ -2680,6 +2722,152 @@ AS BEGIN
 END;
 GO
 
+-- Result set 1: totals (charge, insurance, govt scheme, patient share / paid / due, payer outstanding).
+-- Result set 2: coverage lines.
+CREATE OR ALTER PROCEDURE bil.usp_GetInvoiceBillingSplit
+    @InvoiceId      UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT i.InvoiceId, i.Currency, i.Status, i.TotalAmount AS GrossAmount,
+           ISNULL((SELECT SUM(Liability) FROM bil.InvoiceCoverageLine WHERE InvoiceId = i.InvoiceId AND CoverageType = 'PRIVATE_INSURANCE'), 0) AS InsuranceLiability,
+           ISNULL((SELECT SUM(Liability) FROM bil.InvoiceCoverageLine WHERE InvoiceId = i.InvoiceId AND CoverageType = 'GOVT_SCHEME'), 0) AS GovtLiability,
+           i.CoveredAmount, i.PatientLiability, i.PatientPaidAmount AS PatientPaid,
+           CASE WHEN i.PatientLiability > i.PatientPaidAmount THEN i.PatientLiability - i.PatientPaidAmount ELSE 0 END AS PatientDue,
+           CASE WHEN i.PatientPaidAmount > i.PatientLiability THEN i.PatientPaidAmount - i.PatientLiability ELSE 0 END AS PatientOverpaid,
+           ISNULL((SELECT SUM(CASE WHEN Liability > SettledAmount THEN Liability - SettledAmount ELSE 0 END)
+                   FROM bil.InvoiceCoverageLine WHERE InvoiceId = i.InvoiceId), 0) AS PayerOutstanding
+    FROM bil.Invoice i WHERE i.InvoiceId = @InvoiceId;
+
+    SELECT l.CoverageLineId, l.InvoiceId, l.CoverageId, l.PayerId, py.Name AS PayerName, l.CoverageType, l.Priority,
+           l.AuthorizationNumber, l.ApprovedType, l.ApprovedValue, l.IsManualAmount, l.Liability, l.SettledAmount, l.Status
+    FROM bil.InvoiceCoverageLine l INNER JOIN cfg.Payer py ON py.PayerId = l.PayerId
+    WHERE l.InvoiceId = @InvoiceId ORDER BY l.Priority;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE bil.usp_RecalculateInvoiceTotals
+    @InvoiceId      UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    UPDATE bil.Invoice SET
+        SubTotal = (SELECT ISNULL(SUM(Qty * UnitAmount), 0) FROM bil.InvoiceLineItem WHERE InvoiceId = @InvoiceId),
+        DiscountAmount = (SELECT ISNULL(SUM(DiscountAmount), 0) FROM bil.InvoiceLineItem WHERE InvoiceId = @InvoiceId),
+        TaxAmount = (SELECT ISNULL(SUM(TaxAmount), 0) FROM bil.InvoiceLineItem WHERE InvoiceId = @InvoiceId),
+        TotalAmount = (SELECT ISNULL(SUM(LineTotal), 0) FROM bil.InvoiceLineItem WHERE InvoiceId = @InvoiceId),
+        ModifiedAt = SYSUTCDATETIME()
+    WHERE InvoiceId = @InvoiceId;
+
+    -- percent coverages follow the new total; fixed amounts are re-capped; status re-derived
+    EXEC bil.usp_RecalculateInvoiceSplit @InvoiceId = @InvoiceId;
+
+    SELECT InvoiceId, SubTotal, DiscountAmount, TaxAmount, TotalAmount,
+           CoveredAmount, PatientLiability, PatientPaidAmount, PaidAmount, Status
+    FROM bil.Invoice WHERE InvoiceId = @InvoiceId;
+END;
+GO
+
+-- ---- Payments & receipts ----
+
+CREATE OR ALTER PROCEDURE bil.usp_CreatePayment
+    @HospitalId     UNIQUEIDENTIFIER,
+    @InvoiceId      UNIQUEIDENTIFIER,
+    @ComponentType  NVARCHAR(15) = 'PATIENT',      -- PATIENT | INSURANCE (payer settlement)
+    @CoverageLineId UNIQUEIDENTIFIER = NULL,       -- required for INSURANCE: the claim being settled
+    @PaymentMethod  NVARCHAR(30),
+    @Amount         DECIMAL(10,2),
+    @Reference      NVARCHAR(100) = NULL,
+    @ReceivedBy     UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    IF @ComponentType = 'INSURANCE' AND NOT EXISTS (
+        SELECT 1 FROM bil.InvoiceCoverageLine WHERE CoverageLineId = @CoverageLineId AND InvoiceId = @InvoiceId)
+        THROW 50120, 'An insurance settlement must reference a coverage line on this invoice.', 1;
+
+    INSERT INTO bil.Payment (HospitalId, InvoiceId, TransactionNumber, ComponentType, CoverageLineId,
+                              PaymentMethod, Amount, Reference, ReceivedBy)
+    OUTPUT inserted.TransactionId, inserted.TransactionNumber, inserted.Amount, inserted.PaidAt
+    SELECT @HospitalId, @InvoiceId,
+           'TXN-' + RIGHT('000000' + CAST(ISNULL(MAX(PaymentPkId), 0) + 1 AS NVARCHAR), 6),
+           @ComponentType, CASE WHEN @ComponentType = 'INSURANCE' THEN @CoverageLineId END,
+           @PaymentMethod, @Amount, @Reference, @ReceivedBy
+    FROM bil.Payment WHERE HospitalId = @HospitalId;
+
+    EXEC bil.usp_RecalculateInvoiceSplit @InvoiceId = @InvoiceId;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE bil.usp_ListPaymentsForInvoice
+    @InvoiceId      UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT TransactionId, InvoiceId, TransactionNumber, ComponentType, PaymentMethod,
+           Amount, Reference, PaidAt, IsVoided, VoidReason
+    FROM bil.Payment WHERE InvoiceId = @InvoiceId ORDER BY PaidAt DESC;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE bil.usp_ListPayments
+    @HospitalId     UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT TransactionId, InvoiceId, TransactionNumber, ComponentType, PaymentMethod,
+           Amount, Reference, PaidAt, IsVoided
+    FROM bil.Payment WHERE HospitalId = @HospitalId ORDER BY PaidAt DESC;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE bil.usp_UpdatePaymentVoid
+    @TransactionId  UNIQUEIDENTIFIER,
+    @VoidReason     NVARCHAR(300),
+    @VoidedBy       UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    DECLARE @InvoiceId UNIQUEIDENTIFIER;
+    SELECT @InvoiceId = InvoiceId FROM bil.Payment WHERE TransactionId = @TransactionId;
+
+    UPDATE bil.Payment SET IsVoided = 1, VoidedAt = SYSUTCDATETIME(),
+                           VoidedBy = @VoidedBy, VoidReason = @VoidReason
+    WHERE TransactionId = @TransactionId AND IsVoided = 0;
+
+    IF @InvoiceId IS NOT NULL
+        EXEC bil.usp_RecalculateInvoiceSplit @InvoiceId = @InvoiceId;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE bil.usp_CreateReceipt
+    @HospitalId     UNIQUEIDENTIFIER,
+    @InvoiceId      UNIQUEIDENTIFIER,
+    @PatientId      UNIQUEIDENTIFIER = NULL,
+    @TotalAmount    DECIMAL(10,2),
+    @Currency       NVARCHAR(5) = 'USD'
+AS BEGIN
+    SET NOCOUNT ON;
+    -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='PRINT', EntityType='Receipt') on print
+    -- v4.0: Receipt.PaymentId dropped — a receipt belongs to the invoice (Receipt model).
+    DECLARE @ReceiptNumber NVARCHAR(30);
+    SELECT @ReceiptNumber = 'RCP-' + RIGHT('000000' + CAST(ISNULL(MAX(ReceiptPkId), 0) + 1 AS NVARCHAR), 6)
+    FROM bil.Receipt WHERE HospitalId = @HospitalId;
+
+    INSERT INTO bil.Receipt (HospitalId, ReceiptNumber, InvoiceId, PatientId, TotalAmount, Currency)
+    OUTPUT inserted.ReceiptId, inserted.ReceiptNumber, inserted.GeneratedAt
+    VALUES (@HospitalId, @ReceiptNumber, @InvoiceId, @PatientId, @TotalAmount, @Currency);
+END;
+GO
+
+CREATE OR ALTER PROCEDURE bil.usp_GetReceiptForInvoice
+    @InvoiceId      UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT ReceiptId, ReceiptNumber, InvoiceId, PatientId, TotalAmount, Currency, GeneratedAt
+    FROM bil.Receipt WHERE InvoiceId = @InvoiceId AND IsDeleted = 0;
+END;
+GO
+
+-- ---- Coverage & N-way bill split (ported from MediSlot billing) ----
+-- Charge (Invoice.TotalAmount) = Σ verified coverage liabilities + Patient share.
+-- Self-Pay (no coverage), Private only, Govt scheme only, and Private + Govt together.
+
+
 CREATE OR ALTER PROCEDURE cfg.usp_ListPayers
     @Country        NVARCHAR(5),
     @Category       NVARCHAR(15) = NULL      -- PRIVATE | GOVT_SCHEME | NULL = both
@@ -2699,7 +2887,7 @@ AS BEGIN
     SET NOCOUNT ON;
     SELECT c.CoverageId, c.HospitalId, c.PatientId, c.CoverageType, c.PayerId, py.Name AS PayerName, py.Category AS PayerCategory,
            c.PlanName, c.MemberId, c.PolicyNumber, c.GroupNumber, c.PolicyHolderName, c.Relationship, c.ClaimMode,
-           c.GovtCardNumber, c.CardImageUrl, c.EffectiveDate, c.ExpiryDate, c.Status, c.Priority, c.IsActive,
+           c.GovtCardNumber, c.EffectiveDate, c.ExpiryDate, c.Status, c.Priority, c.IsActive,
            v.Status AS LastVerificationStatus, v.VerifiedAt AS LastVerifiedAt
     FROM opd.PatientCoverage c
     INNER JOIN cfg.Payer py ON py.PayerId = c.PayerId
@@ -2724,7 +2912,6 @@ CREATE OR ALTER PROCEDURE opd.usp_SavePatientCoverage
     @Relationship     NVARCHAR(20) = NULL,
     @ClaimMode        NVARCHAR(15) = NULL,
     @GovtCardNumber   NVARCHAR(50) = NULL,
-    @CardImageUrl     NVARCHAR(500) = NULL,
     @EffectiveDate    DATE = NULL,
     @ExpiryDate       DATE = NULL,
     @Status           NVARCHAR(10) = 'ACTIVE',
@@ -2735,18 +2922,18 @@ AS BEGIN
         UPDATE opd.PatientCoverage SET PayerId = @PayerId, CoverageType = @CoverageType, PlanName = @PlanName,
             MemberId = @MemberId, PolicyNumber = @PolicyNumber, GroupNumber = @GroupNumber,
             PolicyHolderName = @PolicyHolderName, Relationship = @Relationship, ClaimMode = @ClaimMode,
-            GovtCardNumber = @GovtCardNumber, CardImageUrl = ISNULL(@CardImageUrl, CardImageUrl),
+            GovtCardNumber = @GovtCardNumber,
             EffectiveDate = @EffectiveDate, ExpiryDate = @ExpiryDate, Status = @Status,
             ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @UserId
         OUTPUT inserted.CoverageId, inserted.Priority
         WHERE CoverageId = @CoverageId AND IsDeleted = 0;
     ELSE
         INSERT INTO opd.PatientCoverage (HospitalId, PatientId, PayerId, CoverageType, PlanName, MemberId, PolicyNumber,
-            GroupNumber, PolicyHolderName, Relationship, ClaimMode, GovtCardNumber, CardImageUrl,
+            GroupNumber, PolicyHolderName, Relationship, ClaimMode, GovtCardNumber,
             EffectiveDate, ExpiryDate, Status, Priority, CreatedBy)
         OUTPUT inserted.CoverageId, inserted.Priority
         SELECT @HospitalId, @PatientId, @PayerId, @CoverageType, @PlanName, @MemberId, @PolicyNumber,
-            @GroupNumber, @PolicyHolderName, @Relationship, @ClaimMode, @GovtCardNumber, @CardImageUrl,
+            @GroupNumber, @PolicyHolderName, @Relationship, @ClaimMode, @GovtCardNumber,
             @EffectiveDate, @ExpiryDate, @Status,
             (SELECT COUNT(*) + 1 FROM opd.PatientCoverage WHERE PatientId = @PatientId AND IsDeleted = 0), @UserId;
 END;
@@ -2844,28 +3031,6 @@ AS BEGIN
 END;
 GO
 
--- Result set 1: totals (charge, insurance, govt scheme, patient share / paid / due, payer outstanding).
--- Result set 2: coverage lines.
-CREATE OR ALTER PROCEDURE bil.usp_GetInvoiceBillingSplit
-    @InvoiceId      UNIQUEIDENTIFIER
-AS BEGIN
-    SET NOCOUNT ON;
-    SELECT i.InvoiceId, i.Currency, i.Status, i.TotalAmount AS GrossAmount,
-           ISNULL((SELECT SUM(Liability) FROM bil.InvoiceCoverageLine WHERE InvoiceId = i.InvoiceId AND CoverageType = 'PRIVATE_INSURANCE'), 0) AS InsuranceLiability,
-           ISNULL((SELECT SUM(Liability) FROM bil.InvoiceCoverageLine WHERE InvoiceId = i.InvoiceId AND CoverageType = 'GOVT_SCHEME'), 0) AS GovtLiability,
-           i.CoveredAmount, i.PatientLiability, i.PatientPaidAmount AS PatientPaid,
-           CASE WHEN i.PatientLiability > i.PatientPaidAmount THEN i.PatientLiability - i.PatientPaidAmount ELSE 0 END AS PatientDue,
-           CASE WHEN i.PatientPaidAmount > i.PatientLiability THEN i.PatientPaidAmount - i.PatientLiability ELSE 0 END AS PatientOverpaid,
-           ISNULL((SELECT SUM(CASE WHEN Liability > SettledAmount THEN Liability - SettledAmount ELSE 0 END)
-                   FROM bil.InvoiceCoverageLine WHERE InvoiceId = i.InvoiceId), 0) AS PayerOutstanding
-    FROM bil.Invoice i WHERE i.InvoiceId = @InvoiceId;
-
-    SELECT l.CoverageLineId, l.InvoiceId, l.CoverageId, l.PayerId, py.Name AS PayerName, l.CoverageType, l.Priority,
-           l.AuthorizationNumber, l.ApprovedType, l.ApprovedValue, l.IsManualAmount, l.Liability, l.SettledAmount, l.Status
-    FROM bil.InvoiceCoverageLine l INNER JOIN cfg.Payer py ON py.PayerId = l.PayerId
-    WHERE l.InvoiceId = @InvoiceId ORDER BY l.Priority;
-END;
-GO
 
 -- ============================================================
 -- 17. REPORTS
@@ -2877,11 +3042,11 @@ CREATE OR ALTER PROCEDURE cln.usp_ListConsultationVolumeReport
     @ToDate         DATE
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT VisitDate AS [Date], COUNT(*) AS ConsultationCount
+    SELECT CAST(VisitDate AS DATE) AS [Date], COUNT(*) AS ConsultationCount
     FROM cln.Consultation
-    WHERE HospitalId = @HospitalId AND VisitDate BETWEEN @FromDate AND @ToDate AND IsDeleted = 0
-    GROUP BY VisitDate
-    ORDER BY VisitDate;
+    WHERE HospitalId = @HospitalId AND CAST(VisitDate AS DATE) BETWEEN @FromDate AND @ToDate AND IsDeleted = 0
+    GROUP BY CAST(VisitDate AS DATE)
+    ORDER BY CAST(VisitDate AS DATE);
 END;
 GO
 
@@ -2891,12 +3056,12 @@ CREATE OR ALTER PROCEDURE cln.usp_ListDiagnosisFrequencyReport
     @ToDate         DATE
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT dx.ICD10Code, dx.[Description], COUNT(*) AS DiagnosisCount
+    SELECT dx.Icd10Code, dx.Icd10Description, COUNT(*) AS DiagnosisCount
     FROM cln.ConsultationDiagnosis dx
     INNER JOIN cln.Consultation c ON c.ConsultationId = dx.ConsultationId
-    WHERE c.HospitalId = @HospitalId AND c.VisitDate BETWEEN @FromDate AND @ToDate
+    WHERE c.HospitalId = @HospitalId AND CAST(c.VisitDate AS DATE) BETWEEN @FromDate AND @ToDate
       AND dx.IsDeleted = 0 AND c.IsDeleted = 0
-    GROUP BY dx.ICD10Code, dx.[Description]
+    GROUP BY dx.Icd10Code, dx.Icd10Description
     ORDER BY DiagnosisCount DESC;
 END;
 GO
@@ -2910,7 +3075,7 @@ AS BEGIN
     SELECT p.MedicineName, COUNT(*) AS PrescriptionCount
     FROM cln.Prescription p
     INNER JOIN cln.Consultation c ON c.ConsultationId = p.ConsultationId
-    WHERE c.HospitalId = @HospitalId AND c.VisitDate BETWEEN @FromDate AND @ToDate
+    WHERE c.HospitalId = @HospitalId AND CAST(c.VisitDate AS DATE) BETWEEN @FromDate AND @ToDate
       AND p.IsDeleted = 0 AND c.IsDeleted = 0
     GROUP BY p.MedicineName
     ORDER BY PrescriptionCount DESC;
@@ -2972,8 +3137,7 @@ CREATE OR ALTER PROCEDURE cfg.usp_ListCompliances
     @Country        NVARCHAR(5)
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT ComplianceId, ComplianceName, Country, IsMandatory, DisplayLabel, PrintLabel,
-           ValidationRegex, SortOrder
+    SELECT ComplianceId, ComplianceName, Country, IsMandatory, DisplayLabel, PrintLabel, SortOrder
     FROM cfg.Compliance
     WHERE IsActive = 1 AND IsDeleted = 0 AND (Country = @Country OR Country = 'ALL')
     ORDER BY SortOrder;
@@ -2986,7 +3150,7 @@ AS BEGIN
     SET NOCOUNT ON;
     SELECT hc.HospitalComplianceId, hc.HospitalId, hc.ComplianceId, c.ComplianceName,
            c.DisplayLabel, c.PrintLabel, c.IsMandatory,
-           hc.RegistrationNumber, hc.IssuedOn, hc.ExpiresOn
+           hc.RegistrationNumber, hc.IssuedDate, hc.ExpiryDate
     FROM cfg.HospitalCompliance hc
     INNER JOIN cfg.Compliance c ON c.ComplianceId = hc.ComplianceId
     WHERE hc.HospitalId = @HospitalId AND hc.IsActive = 1 AND hc.IsDeleted = 0;
@@ -2997,8 +3161,8 @@ CREATE OR ALTER PROCEDURE cfg.usp_SaveHospitalCompliance
     @HospitalId     UNIQUEIDENTIFIER,
     @ComplianceId   UNIQUEIDENTIFIER,
     @RegistrationNumber NVARCHAR(100),
-    @IssuedOn       DATE = NULL,
-    @ExpiresOn      DATE = NULL,
+    @IssuedDate     DATE = NULL,
+    @ExpiryDate     DATE = NULL,
     @ModifiedBy     UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
@@ -3007,13 +3171,13 @@ AS BEGIN
     USING (SELECT @HospitalId AS HospitalId, @ComplianceId AS ComplianceId) AS src
         ON tgt.HospitalId = src.HospitalId AND tgt.ComplianceId = src.ComplianceId
     WHEN MATCHED THEN UPDATE SET
-        RegistrationNumber = @RegistrationNumber, IssuedOn = @IssuedOn, ExpiresOn = @ExpiresOn,
+        RegistrationNumber = @RegistrationNumber, IssuedDate = @IssuedDate, ExpiryDate = @ExpiryDate,
         ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
     WHEN NOT MATCHED THEN
-        INSERT (HospitalId, ComplianceId, RegistrationNumber, IssuedOn, ExpiresOn, CreatedBy)
-        VALUES (@HospitalId, @ComplianceId, @RegistrationNumber, @IssuedOn, @ExpiresOn, @ModifiedBy);
+        INSERT (HospitalId, ComplianceId, RegistrationNumber, IssuedDate, ExpiryDate, CreatedBy)
+        VALUES (@HospitalId, @ComplianceId, @RegistrationNumber, @IssuedDate, @ExpiryDate, @ModifiedBy);
 
-    SELECT HospitalComplianceId, RegistrationNumber, IssuedOn, ExpiresOn
+    SELECT HospitalComplianceId, RegistrationNumber, IssuedDate, ExpiryDate
     FROM cfg.HospitalCompliance WHERE HospitalId = @HospitalId AND ComplianceId = @ComplianceId;
 END;
 GO
@@ -3026,14 +3190,14 @@ CREATE OR ALTER PROCEDURE cfg.usp_ListMessageTemplates
     @HospitalId     UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT MessageTemplateId, HospitalId, Name, TriggerEvent, Channel, TemplateText, IsEnabled
+    SELECT TemplateId, HospitalId, Name, [Trigger], Channel, [Text], IsEnabled
     FROM cfg.MessageTemplate
     WHERE HospitalId = @HospitalId AND IsActive = 1 AND IsDeleted = 0;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cfg.usp_UpdateMessageTemplateStatus
-    @MessageTemplateId UNIQUEIDENTIFIER,
+    @TemplateId     UNIQUEIDENTIFIER,
     @ModifiedBy     UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
@@ -3041,16 +3205,16 @@ AS BEGIN
     UPDATE cfg.MessageTemplate
     SET IsEnabled = CASE WHEN IsEnabled = 1 THEN 0 ELSE 1 END,
         ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
-    WHERE MessageTemplateId = @MessageTemplateId;
+    WHERE TemplateId = @TemplateId;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE cfg.usp_UpdateMessageTemplate
-    @MessageTemplateId UNIQUEIDENTIFIER,
+    @TemplateId     UNIQUEIDENTIFIER,
     @Name           NVARCHAR(100) = NULL,
-    @TriggerEvent   NVARCHAR(30) = NULL,
+    @Trigger        NVARCHAR(30) = NULL,
     @Channel        NVARCHAR(10) = NULL,
-    @TemplateText   NVARCHAR(1000) = NULL,
+    @Text           NVARCHAR(1000) = NULL,
     @IsEnabled      BIT = NULL,
     @ModifiedBy     UNIQUEIDENTIFIER = NULL
 AS BEGIN
@@ -3060,15 +3224,15 @@ AS BEGIN
     -- usp_UpdateMessageTemplateStatus above, which only ever toggles IsEnabled.
     UPDATE cfg.MessageTemplate
     SET Name = COALESCE(@Name, Name),
-        TriggerEvent = COALESCE(@TriggerEvent, TriggerEvent),
+        [Trigger] = COALESCE(@Trigger, [Trigger]),
         Channel = COALESCE(@Channel, Channel),
-        TemplateText = COALESCE(@TemplateText, TemplateText),
+        [Text] = COALESCE(@Text, [Text]),
         IsEnabled = COALESCE(@IsEnabled, IsEnabled),
         ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
-    WHERE MessageTemplateId = @MessageTemplateId;
+    WHERE TemplateId = @TemplateId;
 
-    SELECT MessageTemplateId, HospitalId, Name, TriggerEvent, Channel, TemplateText, IsEnabled
-    FROM cfg.MessageTemplate WHERE MessageTemplateId = @MessageTemplateId;
+    SELECT TemplateId, HospitalId, Name, [Trigger], Channel, [Text], IsEnabled
+    FROM cfg.MessageTemplate WHERE TemplateId = @TemplateId;
 END;
 GO
 
@@ -3076,11 +3240,14 @@ CREATE OR ALTER PROCEDURE msg.usp_GetNotificationConfig
     @HospitalId     UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    -- ApiKey (ENCRYPTION: RANDOMIZED) is deliberately excluded from the read path;
-    -- expose only IsEnabled/Provider to the settings UI.
-    SELECT Channel, Provider, ConfigJson, IsEnabled
+    -- ApiKey (ENCRYPTION: RANDOMIZED) is deliberately excluded from the read path.
+    -- v4.0: ConfigJson replaced by typed columns (WHATSAPP: PhoneNumberId / BusinessAccountId;
+    -- EMAIL: Smtp* / From*); IsEnabled → Enabled; no IsDeleted on this table.
+    SELECT Channel, Provider, PhoneNumberId, BusinessAccountId,
+           SmtpHost, SmtpPort, FromEmail, FromName, Enabled,
+           CAST(CASE WHEN ApiKey IS NULL THEN 0 ELSE 1 END AS BIT) AS HasApiKey
     FROM msg.NotificationConfig
-    WHERE HospitalId = @HospitalId AND IsDeleted = 0;
+    WHERE HospitalId = @HospitalId;
 END;
 GO
 
@@ -3088,9 +3255,14 @@ CREATE OR ALTER PROCEDURE msg.usp_SaveNotificationConfig
     @HospitalId     UNIQUEIDENTIFIER,
     @Channel        NVARCHAR(10),
     @Provider       NVARCHAR(20) = NULL,
-    @ApiKey         NVARCHAR(500) = NULL,
-    @ConfigJson     NVARCHAR(MAX) = NULL,
-    @IsEnabled      BIT = 0,
+    @ApiKey         NVARCHAR(500) = NULL,      -- NULL = keep the stored key
+    @PhoneNumberId  NVARCHAR(50) = NULL,
+    @BusinessAccountId NVARCHAR(50) = NULL,
+    @SmtpHost       NVARCHAR(200) = NULL,
+    @SmtpPort       INT = NULL,
+    @FromEmail      NVARCHAR(100) = NULL,
+    @FromName       NVARCHAR(100) = NULL,
+    @Enabled        BIT = 0,
     @ModifiedBy     UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
@@ -3100,11 +3272,15 @@ AS BEGIN
         ON tgt.HospitalId = src.HospitalId AND tgt.Channel = src.Channel
     WHEN MATCHED THEN UPDATE SET
         Provider = ISNULL(@Provider, Provider), ApiKey = ISNULL(@ApiKey, ApiKey),
-        ConfigJson = ISNULL(@ConfigJson, ConfigJson), IsEnabled = @IsEnabled,
+        PhoneNumberId = @PhoneNumberId, BusinessAccountId = @BusinessAccountId,
+        SmtpHost = @SmtpHost, SmtpPort = @SmtpPort, FromEmail = @FromEmail, FromName = @FromName,
+        Enabled = @Enabled,
         ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
     WHEN NOT MATCHED THEN
-        INSERT (HospitalId, Channel, Provider, ApiKey, ConfigJson, IsEnabled)
-        VALUES (@HospitalId, @Channel, @Provider, @ApiKey, @ConfigJson, @IsEnabled);
+        INSERT (HospitalId, Channel, Provider, ApiKey, PhoneNumberId, BusinessAccountId,
+                SmtpHost, SmtpPort, FromEmail, FromName, Enabled, ModifiedAt, ModifiedBy)
+        VALUES (@HospitalId, @Channel, @Provider, @ApiKey, @PhoneNumberId, @BusinessAccountId,
+                @SmtpHost, @SmtpPort, @FromEmail, @FromName, @Enabled, SYSUTCDATETIME(), @ModifiedBy);
 END;
 GO
 
@@ -3121,12 +3297,12 @@ AS BEGIN
     -- Status defaults to QUEUED if the channel is enabled in msg.NotificationConfig,
     -- else SIMULATED (Phase-1 sandbox behavior preserved for demo hospitals).
     DECLARE @IsEnabled BIT;
-    SELECT @IsEnabled = IsEnabled FROM msg.NotificationConfig
+    SELECT @IsEnabled = Enabled FROM msg.NotificationConfig
     WHERE HospitalId = @HospitalId AND Channel = @Channel;
 
     INSERT INTO msg.MessageQueue (HospitalId, PatientId, Channel, TemplateName,
                                    PatientName, PatientPhone, MessageText, Status)
-    OUTPUT inserted.MessageQueueId, inserted.Status, inserted.QueuedAt
+    OUTPUT inserted.MessageId, inserted.Status, inserted.QueuedAt
     VALUES (@HospitalId, @PatientId, @Channel, @TemplateName, @PatientName, @PatientPhone,
             @MessageText, CASE WHEN ISNULL(@IsEnabled, 0) = 1 THEN 'QUEUED' ELSE 'SIMULATED' END);
 END;
@@ -3146,7 +3322,7 @@ CREATE OR ALTER PROCEDURE msg.usp_ListMessageLog
     @HospitalId     UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT MessageQueueId, PatientId, Channel, TemplateName, Status, QueuedAt, SentAt, ErrorMessage
+    SELECT MessageId, PatientId, PatientName, Channel, TemplateName, Status, QueuedAt, SentAt
     FROM msg.MessageQueue WHERE HospitalId = @HospitalId
     ORDER BY QueuedAt DESC;
 END;
@@ -3170,24 +3346,23 @@ GO
 
 CREATE OR ALTER PROCEDURE sec.usp_RecordAuditEntry
     @HospitalId     UNIQUEIDENTIFIER,
-    @UserId         UNIQUEIDENTIFIER,
+    @UserId         UNIQUEIDENTIFIER = NULL,   -- NULL for a failed login of an unknown user
     @Action         NVARCHAR(20),
     @EntityType     NVARCHAR(50),
     @EntityId       NVARCHAR(50) = NULL,
     @Details        NVARCHAR(500) = NULL,
-    @SessionToken   NVARCHAR(100) = NULL,
-    @Browser        NVARCHAR(100) = NULL,
     @IpAddress      NVARCHAR(45) = NULL,
     @UserAgent      NVARCHAR(200) = NULL
 AS BEGIN
     SET NOCOUNT ON;
     -- Append-only (sec.AuditLog has no IsActive/IsDeleted/ModifiedAt per architecture §9)
     -- Details must never contain PII — see architecture doc §8 rule 6 / §9 "What NOT to log"
+    -- v4.0: SessionToken / Browser columns dropped (AuditLogEntry model); CreatedAt → [Timestamp].
     INSERT INTO sec.AuditLog (HospitalId, UserId, [Action], EntityType, EntityId,
-                              Details, SessionToken, Browser, IpAddress, UserAgent)
-    OUTPUT inserted.AuditLogId, inserted.CreatedAt
+                              Details, IpAddress, UserAgent)
+    OUTPUT inserted.AuditLogId, inserted.[Timestamp]
     VALUES (@HospitalId, @UserId, @Action, @EntityType, @EntityId,
-            @Details, @SessionToken, @Browser, @IpAddress, @UserAgent);
+            @Details, @IpAddress, @UserAgent);
 END;
 GO
 
@@ -3195,9 +3370,9 @@ CREATE OR ALTER PROCEDURE sec.usp_ListAuditLogs
     @HospitalId     UNIQUEIDENTIFIER
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT AuditLogId, UserId, [Action], EntityType, EntityId, Details, CreatedAt
+    SELECT AuditLogId, UserId, [Action], EntityType, EntityId, Details, IpAddress, [Timestamp]
     FROM sec.AuditLog WHERE HospitalId = @HospitalId
-    ORDER BY CreatedAt DESC;
+    ORDER BY [Timestamp] DESC;
 END;
 GO
 
@@ -3211,15 +3386,15 @@ CREATE OR ALTER PROCEDURE sec.usp_ListAuditLogsFiltered
     @Top            INT = 200
 AS BEGIN
     SET NOCOUNT ON;
-    SELECT TOP (@Top) AuditLogId, UserId, [Action], EntityType, EntityId, Details, CreatedAt
+    SELECT TOP (@Top) AuditLogId, UserId, [Action], EntityType, EntityId, Details, IpAddress, [Timestamp]
     FROM sec.AuditLog
     WHERE HospitalId = @HospitalId
       AND (@Action IS NULL OR [Action] = @Action)
       AND (@EntityType IS NULL OR EntityType = @EntityType)
       AND (@UserId IS NULL OR UserId = @UserId)
-      AND (@FromDate IS NULL OR CAST(CreatedAt AS DATE) >= @FromDate)
-      AND (@ToDate IS NULL OR CAST(CreatedAt AS DATE) <= @ToDate)
-    ORDER BY CreatedAt DESC;
+      AND (@FromDate IS NULL OR CAST([Timestamp] AS DATE) >= @FromDate)
+      AND (@ToDate IS NULL OR CAST([Timestamp] AS DATE) <= @ToDate)
+    ORDER BY [Timestamp] DESC;
 END;
 GO
 
@@ -3271,7 +3446,7 @@ CREATE OR ALTER PROCEDURE sec.usp_ListExportData_Consultations
 AS BEGIN
     SET NOCOUNT ON;
     -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='EXPORT', Details='consultations')
-    SELECT ConsultationId, PatientId, DoctorId, VisitDate, ConsultationType, Status
+    SELECT ConsultationId, PatientId, DoctorId, AppointmentId, VisitDate, Status
     FROM cln.Consultation WHERE HospitalId = @HospitalId AND IsDeleted = 0;
 END;
 GO
@@ -3301,7 +3476,7 @@ CREATE OR ALTER PROCEDURE sec.usp_ListExportData_PaymentTransactions
 AS BEGIN
     SET NOCOUNT ON;
     -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='EXPORT', Details='paymentTransactions')
-    SELECT PaymentId, InvoiceId, TransactionNumber, Amount, PaymentMethod, PaidAt, IsVoided
+    SELECT TransactionId, InvoiceId, TransactionNumber, Amount, PaymentMethod, PaidAt, IsVoided
     FROM bil.Payment WHERE HospitalId = @HospitalId AND IsDeleted = 0;
 END;
 GO
@@ -3321,7 +3496,7 @@ CREATE OR ALTER PROCEDURE sec.usp_ListExportData_AuditLogs
 AS BEGIN
     SET NOCOUNT ON;
     -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='EXPORT', Details='auditLogs')
-    SELECT AuditLogId, UserId, [Action], EntityType, EntityId, CreatedAt
+    SELECT AuditLogId, UserId, [Action], EntityType, EntityId, [Timestamp]
     FROM sec.AuditLog WHERE HospitalId = @HospitalId;
 END;
 GO
@@ -3349,3 +3524,11 @@ GO
 -- See docs/API-SPECIFICATION.md for the full method → SP → endpoint map,
 -- and the TODO comments above for schema/data.js field mismatches that
 -- should be reconciled before Phase 4 cutover.
+--
+-- v3.0 (schema v4.0): all procedures renamed to the model-aligned column
+-- names; the v2.x TODOs about SymptomCatalog, DrugFormulary and
+-- LabTestCatalog are resolved by the v4.0 schema (per-hospital catalogs,
+-- cfg.LabTestSpecialty). No procedure covers yet: the tables new in v4.0
+-- (cfg.ConsultationFormConfig, sec.UserNotification,
+-- opd.PatientConsentDocument, cln.ConsultationServiceItem,
+-- cln.ConsultationCustomValue) and cln.LabResultAttachment.

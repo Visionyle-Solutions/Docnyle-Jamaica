@@ -72,10 +72,14 @@ namespace OpdProject.Web
 
         public static string Login { get { return To("login"); } }
         public static string Dashboard { get { return To("dashboard"); } }
-        /// <summary>The Appointment Summary filtered to one dashboard tile or pie slice.</summary>
+        /// <summary>
+        /// The list behind one dashboard tile or pie slice: today's go to the Appointment Summary (a single-day list);
+        /// this week / this month go to the dashboard list page, which covers the whole period.
+        /// </summary>
         public static string DashboardList(string kind, string period, string status)
         {
-            return To("patients") + "?kind=" + E(kind) + "&period=" + E(period) + (string.IsNullOrEmpty(status) ? "" : "&status=" + E(status));
+            var filters = "?kind=" + E(kind) + (string.IsNullOrEmpty(status) ? "" : "&status=" + E(status));
+            return period == "today" ? To("patients") + filters : To("dashboard/list") + filters + "&period=" + E(period);
         }
         public static string TodayPatients { get { return To("patients"); } }
         public static string PatientSearch { get { return To("patients/search"); } }

@@ -213,7 +213,7 @@ namespace OpdProject.templates.consultation
             var drug = CatalogService.GetDrugByName(rx.MedicineName);
             var genericClass = drug != null ? drug.GenericClass : rx.GenericClass;
             return RxReconciler.Reconcile(rx.MedicineName, rx.Strength, genericClass,
-                ConsultationService.ListActiveMedications(Visit.PatientId), ConsultationService.ListPrescriptions(ConsultationId));
+                ConsultationService.ListActiveMedications(Visit.PatientId), ConsultationService.ListPrescriptions(ConsultationId), HospitalId);
         }
 
         protected void ConfirmRxButton_Click(object sender, EventArgs e)

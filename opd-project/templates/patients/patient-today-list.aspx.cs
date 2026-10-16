@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Web.UI.WebControls;
 using OpdProject.Models;
@@ -8,7 +9,7 @@ using OpdProject.Web;
 namespace OpdProject.templates.patients
 {
     /// <summary>
-    /// Appointment summary — today's queue by default, or any dashboard tile's period/kind via ?kind=&period=[&status=]. DOCTOR → own appointments; front desk (receptionist, admin, nurse) → every
+    /// Appointment summary — one day's queue (today by default, ?date=yyyy-MM-dd), or a dashboard tile's kind via ?kind=[&status=]. DOCTOR → own appointments; front desk (receptionist, admin, nurse) → every
     /// doctor's appointments with a doctor filter and a server-side Check-in action.
     /// </summary>
     public partial class patient_today_list : BasePage
@@ -28,9 +29,6 @@ namespace OpdProject.templates.patients
                     DoctorFilter.Items.Add(new ListItem("All Doctors", ""));
                     foreach (var d in UserService.ListActiveDoctors(HospitalId)) DoctorFilter.Items.Add(new ListItem(d.FullName, d.UserId));
                 }
-                PeriodFilter.Items.Add(new ListItem("Today", "today"));
-                PeriodFilter.Items.Add(new ListItem("This Week", "week"));
-                PeriodFilter.Items.Add(new ListItem("This Month", "month"));
                 KindFilter.Items.Add(new ListItem("Appointments", "appointments"));
                 KindFilter.Items.Add(new ListItem("Consultations", "consultations"));
                 KindFilter.Items.Add(new ListItem("Cancelled Consultations", "cancelled"));
@@ -39,10 +37,11 @@ namespace OpdProject.templates.patients
                 foreach (var n in new[] { "10", "25", "50", "100" }) PageSizeFilter.Items.Add(new ListItem(n, n));
                 PageSizeFilter.Items.Add(new ListItem("All", "0"));
 
-                /* dashboard tiles and pie slices link here with ?kind=&period=[&status=]; unknown values fall back to the defaults */
+                /* dashboard tiles and pie slices link here with ?kind=[&status=]; unknown values fall back to the defaults */
                 Select(KindFilter, Request.QueryString["kind"]);
-                Select(PeriodFilter, Request.QueryString["period"]);
                 Select(StatusFilter, Request.QueryString["status"]);
+                /* ?date=yyyy-MM-dd opens another day; missing or invalid = today */
+                DateFilter.Text = ParseDate(Request.QueryString["date"]).ToString("yyyy-MM-dd");
                 BindQueue();
             }
         }
@@ -52,17 +51,23 @@ namespace OpdProject.templates.patients
             if (value != null && list.Items.FindByValue(value) != null) list.SelectedValue = value;
         }
 
-        protected bool IsToday { get { return PeriodFilter.SelectedValue == "today"; } }
+        /// <summary>"today" or "on 2026-10-03" — for the empty-list message.</summary>
+        protected string DayText { get; private set; }
+
+        private static DateTime ParseDate(string value)
+        {
+            DateTime d;
+            return DateTime.TryParseExact((value ?? "").Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d) ? d : DateTime.Today;
+        }
 
         private void BindQueue()
         {
-            DateTime from, to;
-            ReportService.PeriodRange(PeriodFilter.SelectedValue, DateTime.Today, out from, out to);
-            SubtitleText.Text = Server.HtmlEncode((ShowDoctor ? "All Doctors" : CurrentUser.FullName) + " · "
-                + (from == to ? from.ToString("dddd, MMM d") : FmtDate(from) + " – " + FmtDate(to)));
+            var day = ParseDate(DateFilter.Text);
+            DateFilter.Text = day.ToString("yyyy-MM-dd");
+            DayText = day == DateTime.Today ? "today" : "on " + FmtDate(day);
+            SubtitleText.Text = Server.HtmlEncode((ShowDoctor ? "All Doctors" : CurrentUser.FullName) + " · " + day.ToString("dddd", CultureInfo.InvariantCulture) + ", " + FmtDate(day));
 
-            /* same source as the dashboard counts, so the list matches the tile that was clicked */
-            var rows = ReportService.DashboardList(HospitalId, ShowDoctor ? null : UserId, KindFilter.SelectedValue, PeriodFilter.SelectedValue, null, DateTime.Today);
+            var rows = ReportService.AppointmentList(HospitalId, ShowDoctor ? null : UserId, KindFilter.SelectedValue, day, day);
             if (ShowDoctor && DoctorFilter.SelectedValue != "") rows = rows.Where(a => a.DoctorId == DoctorFilter.SelectedValue).ToList();
 
             CountBooked.Text = rows.Count(a => a.Status == "BOOKED").ToString();
@@ -108,7 +113,7 @@ namespace OpdProject.templates.patients
 
         protected void StatusFilter_Changed(object sender, EventArgs e) { Rebind(); }
 
-        protected void PeriodFilter_Changed(object sender, EventArgs e) { Rebind(); }
+        protected void DateFilter_Changed(object sender, EventArgs e) { Rebind(); }
 
         protected void KindFilter_Changed(object sender, EventArgs e) { Rebind(); }
 

@@ -103,7 +103,7 @@ namespace OpdProject.templates.consultation
             var c = ConsultationService.Get(ConsultationId);
             SoapDraft draft = SoapComposer.Compose(ConsultationService.GetVitals(ConsultationId), labels("YES"), labels("NO"),
                 ConsultationService.ListDiagnoses(ConsultationId), ConsultationService.ListPrescriptions(ConsultationId),
-                ConsultationService.ListOrders(ConsultationId), c.FollowupDate, c.FollowupNotes);
+                ConsultationService.ListOrders(ConsultationId), c.FollowupDate, c.FollowupNotes, HospitalId);
             DraftS.Text = draft.Subjective;
             DraftO.Text = draft.Objective;
             DraftA.Text = draft.Assessment;

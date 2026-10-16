@@ -1,14 +1,22 @@
 /* ============================================================
    Consult360 — SQL Server 2019 Schema
-   Version: 3.0 (Dual-key, temporal-ready, billing-complete)
-   
+   Version: 4.0 (in sync with the application models, 2026-10-15)
+
+   Source of truth: the C# models in the Models folder, held today by the in-memory
+   Services/DataStore.cs (one list per table). Column names follow the model
+   property names, so a row maps onto its model without renaming.
+
    Key pattern:
      {Table}PkId   BIGINT IDENTITY(1,1)              — clustered PK, internal
-     {Table}Id     UNIQUEIDENTIFIER NEWSEQUENTIALID()  — external, API-facing
-   
+     {Model}Id     UNIQUEIDENTIFIER NEWSEQUENTIALID()  — external, API-facing (the model's Id property)
+
    State: IsActive (business), IsDeleted (soft delete)
    Audit: CreatedAt, CreatedBy, ModifiedAt, ModifiedBy
-   Schemas: cfg(16), sec(5), opd(7), cln(14), bil(7), msg(2) = 51 tables
+   Tenancy: every hospital-owned row carries HospitalId, even where the model reaches it through a parent
+   List / nested model properties are stored as JSON (ISJSON-checked) or in a child table — noted per column
+
+   Schemas: cfg(22), sec(6), opd(13), cln(18), bil(9), msg(2) = 70 application tables
+            + 5 reserved tables (section G) for planned features the application does not use yet
    ============================================================ */
 
 CREATE SCHEMA cfg AUTHORIZATION dbo;
@@ -25,16 +33,17 @@ CREATE SCHEMA msg AUTHORIZATION dbo;
 GO
 
 -- ============================================================
--- A. cfg — CONFIGURATION & REFERENCE DATA (21 tables)
+-- A. cfg — CONFIGURATION & REFERENCE DATA (22 tables)
 -- ============================================================
 
+-- Model: Hospital. Multi-tenant root; country-specific behaviour is driven by these settings.
 CREATE TABLE cfg.Hospital (
     HospitalPkId            BIGINT IDENTITY(1,1) NOT NULL,
     HospitalId              UNIQUEIDENTIFIER    NOT NULL    CONSTRAINT DF_cfg_Hospital_Id DEFAULT NEWSEQUENTIALID(),
     Name                    NVARCHAR(200)       NOT NULL,
-    [Address]               NVARCHAR(500)       NULL,
-    Phone                   NVARCHAR(20)        NULL,       -- ENCRYPTION: DETERMINISTIC
-    Email                   NVARCHAR(100)       NULL,       -- ENCRYPTION: DETERMINISTIC
+    LegalAddress            NVARCHAR(500)       NULL,
+    ContactNumber           NVARCHAR(20)        NULL,       -- ENCRYPTION: DETERMINISTIC
+    PrimaryEmail            NVARCHAR(100)       NULL,       -- ENCRYPTION: DETERMINISTIC
     Country                 NVARCHAR(5)         NOT NULL    CONSTRAINT DF_cfg_Hospital_Country DEFAULT 'XX',
     Currency                NVARCHAR(5)         NOT NULL    CONSTRAINT DF_cfg_Hospital_Currency DEFAULT 'USD',
     Timezone                NVARCHAR(50)        NULL,
@@ -42,10 +51,16 @@ CREATE TABLE cfg.Hospital (
     LogoBase64              NVARCHAR(MAX)       NULL,
     PatientIdLabel          NVARCHAR(30)        NOT NULL    CONSTRAINT DF_cfg_Hospital_PidLbl DEFAULT 'MRN',
     NationalHealthIdLabel   NVARCHAR(50)        NOT NULL    CONSTRAINT DF_cfg_Hospital_NhidLbl DEFAULT 'National Health ID',
-    IsNationalHealthIdMandatory BIT             NOT NULL    CONSTRAINT DF_cfg_Hospital_NhidMand DEFAULT 0,
+    NationalHealthIdMandatory BIT               NOT NULL    CONSTRAINT DF_cfg_Hospital_NhidMand DEFAULT 0,
+    GrowthChartStandard     NVARCHAR(5)         NOT NULL    CONSTRAINT DF_cfg_Hospital_Growth DEFAULT 'WHO'
+                            CONSTRAINT CK_cfg_Hospital_Growth CHECK (GrowthChartStandard IN ('WHO','CDC')),
     DefaultTempUnit         NVARCHAR(1)         NOT NULL    CONSTRAINT DF_cfg_Hospital_TempUnit DEFAULT 'F'
                             CONSTRAINT CK_cfg_Hospital_TempUnit CHECK (DefaultTempUnit IN ('F','C')),
     DefaultRxValidityDays   INT                 NOT NULL    CONSTRAINT DF_cfg_Hospital_RxVal DEFAULT 30,
+    RxPrefix                NVARCHAR(10)        NULL,       -- document number prefixes
+    ReceiptPrefix           NVARCHAR(10)        NULL,
+    InvoicePrefix           NVARCHAR(10)        NULL,
+    LabChargePerTest        DECIMAL(10,2)       NOT NULL    CONSTRAINT DF_cfg_Hospital_LabCharge DEFAULT 0,
     IsActive                BIT                 NOT NULL    CONSTRAINT DF_cfg_Hospital_Active DEFAULT 1,
     IsDeleted               BIT                 NOT NULL    CONSTRAINT DF_cfg_Hospital_Deleted DEFAULT 0,
     CreatedAt               DATETIME2(3)        NOT NULL    CONSTRAINT DF_cfg_Hospital_CreatedAt DEFAULT SYSUTCDATETIME(),
@@ -56,11 +71,10 @@ CREATE TABLE cfg.Hospital (
     CONSTRAINT UQ_cfg_Hospital_Id UNIQUE NONCLUSTERED (HospitalId)
 );
 
--- Key/value hospital configuration (Schedule Settings + Settings → Hospital & Practice).
+-- Model: HospitalSetting. Key/value hospital configuration (Schedule Settings + Settings → Hospital & Practice).
 -- Keys: APPT_SLOT_MINS*, APPT_BUFFER_MINS, FREE_FOLLOWUP_ALLOWED*, FREE_FOLLOWUP_DAYS*,
 -- DATE_FORMAT, TIME_FORMAT, MRN_PREFIX, MRN_FORMAT, MRN_SEQ (system-managed),
 -- DOCTOR_NAME_TEMPLATE.  (* = can be overridden per doctor in opd.DoctorSetting)
--- data.js: hospitalSettings
 CREATE TABLE cfg.HospitalSetting (
     HospitalSettingPkId BIGINT IDENTITY(1,1) NOT NULL,
     HospitalId      UNIQUEIDENTIFIER    NOT NULL,
@@ -73,15 +87,15 @@ CREATE TABLE cfg.HospitalSetting (
     CONSTRAINT FK_cfg_HSet_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId)
 );
 
--- Configurable appointment types. opd.Appointment.[Type] stores Code.
+-- Model: AppointmentType. opd.Appointment.[Type] stores Code.
 -- DurationMinutes NULL = the doctor's slot length; FeeCategory picks the
 -- bil.DoctorFeeSchedule row; IsChargeable = 0 → no consultation fee.
--- data.js: appointmentTypes
 CREATE TABLE cfg.AppointmentType (
     AppointmentTypePkId BIGINT IDENTITY(1,1) NOT NULL,
     AppointmentTypeId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_AT_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL,
-    Code NVARCHAR(20) NOT NULL, Name NVARCHAR(100) NOT NULL,
+    Code NVARCHAR(20) NOT NULL,
+    Name NVARCHAR(100) NOT NULL,
     DurationMinutes INT NULL CONSTRAINT CK_cfg_AT_Dur CHECK (DurationMinutes IS NULL OR DurationMinutes >= 5),
     Color NVARCHAR(7) NOT NULL CONSTRAINT DF_cfg_AT_Color DEFAULT '#0f766e',
     IsChargeable BIT NOT NULL CONSTRAINT DF_cfg_AT_Charge DEFAULT 1,
@@ -97,7 +111,7 @@ CREATE TABLE cfg.AppointmentType (
     CONSTRAINT FK_cfg_AT_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId)
 );
 
--- Insurers (PRIVATE) and government schemes (GOVT_SCHEME: CGHS / Aarogyasri, NHF, Medicare …), per country.
+-- Model: Payer. Insurers (PRIVATE) and government schemes (GOVT_SCHEME: CGHS / Aarogyasri, NHF, Medicare …), per country.
 -- Used by the coverage / N-way bill split (Charge = Σ coverage liabilities + Patient).
 CREATE TABLE cfg.Payer (
     PayerPkId BIGINT IDENTITY(1,1) NOT NULL,
@@ -114,7 +128,7 @@ CREATE TABLE cfg.Payer (
     INDEX IX_cfg_Payer_Country NONCLUSTERED (Country, Category)
 );
 
--- Pre-visit intake form questions (answered on online booking). data.js: intakeQuestions
+-- Model: IntakeQuestion. Pre-visit intake form questions (answered on online booking).
 CREATE TABLE cfg.IntakeQuestion (
     IntakeQuestionPkId BIGINT IDENTITY(1,1) NOT NULL,
     QuestionId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_IQ_Id DEFAULT NEWSEQUENTIALID(),
@@ -129,12 +143,13 @@ CREATE TABLE cfg.IntakeQuestion (
     CONSTRAINT FK_cfg_IQ_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId)
 );
 
--- Consent text signed at the visit; Version bumps on every edit. data.js: consentForms
+-- Model: ConsentForm. Consent text signed at the visit; Version bumps on every edit.
 CREATE TABLE cfg.ConsentForm (
     ConsentFormPkId BIGINT IDENTITY(1,1) NOT NULL,
     ConsentFormId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_CF_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL,
-    Title NVARCHAR(200) NOT NULL, BodyText NVARCHAR(MAX) NOT NULL,
+    Title NVARCHAR(200) NOT NULL,
+    BodyText NVARCHAR(MAX) NOT NULL,
     Version INT NOT NULL CONSTRAINT DF_cfg_CF_Ver DEFAULT 1,
     IsActive BIT NOT NULL CONSTRAINT DF_cfg_CF_Active DEFAULT 1,
     ModifiedAt DATETIME2(3) NULL, ModifiedBy UNIQUEIDENTIFIER NULL,
@@ -143,7 +158,7 @@ CREATE TABLE cfg.ConsentForm (
     CONSTRAINT FK_cfg_CF_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId)
 );
 
-
+-- Model: Compliance. Registration types a hospital must / may record, per country ('ALL' = every country).
 CREATE TABLE cfg.Compliance (
     CompliancePkId          BIGINT IDENTITY(1,1) NOT NULL,
     ComplianceId            UNIQUEIDENTIFIER    NOT NULL    CONSTRAINT DF_cfg_Comp_Id DEFAULT NEWSEQUENTIALID(),
@@ -152,7 +167,6 @@ CREATE TABLE cfg.Compliance (
     IsMandatory             BIT                 NOT NULL    CONSTRAINT DF_cfg_Comp_Mand DEFAULT 0,
     DisplayLabel            NVARCHAR(100)       NOT NULL,
     PrintLabel              NVARCHAR(30)        NOT NULL,
-    ValidationRegex         NVARCHAR(200)       NULL,
     SortOrder               INT                 NOT NULL    CONSTRAINT DF_cfg_Comp_Sort DEFAULT 0,
     IsActive BIT NOT NULL CONSTRAINT DF_cfg_Comp_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cfg_Comp_Deleted DEFAULT 0,
@@ -162,14 +176,15 @@ CREATE TABLE cfg.Compliance (
     CONSTRAINT UQ_cfg_Comp_Id UNIQUE NONCLUSTERED (ComplianceId)
 );
 
+-- Model: HospitalCompliance. A hospital's registration number for one compliance type.
 CREATE TABLE cfg.HospitalCompliance (
     HospitalCompliancePkId  BIGINT IDENTITY(1,1) NOT NULL,
     HospitalComplianceId    UNIQUEIDENTIFIER    NOT NULL    CONSTRAINT DF_cfg_HC_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId              UNIQUEIDENTIFIER    NOT NULL,
     ComplianceId            UNIQUEIDENTIFIER    NOT NULL,
     RegistrationNumber      NVARCHAR(100)       NOT NULL,
-    IssuedOn                DATE                NULL,
-    ExpiresOn               DATE                NULL,
+    IssuedDate              DATE                NULL,
+    ExpiryDate              DATE                NULL,
     IsActive BIT NOT NULL CONSTRAINT DF_cfg_HC_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cfg_HC_Deleted DEFAULT 0,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cfg_HC_CreatedAt DEFAULT SYSUTCDATETIME(),
@@ -182,6 +197,7 @@ CREATE TABLE cfg.HospitalCompliance (
     INDEX IX_cfg_HC_HospitalId NONCLUSTERED (HospitalId)
 );
 
+-- Model: Specialty.
 CREATE TABLE cfg.Specialty (
     SpecialtyPkId BIGINT IDENTITY(1,1) NOT NULL,
     SpecialtyId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_Spec_Id DEFAULT NEWSEQUENTIALID(),
@@ -197,6 +213,8 @@ CREATE TABLE cfg.Specialty (
     INDEX IX_cfg_Spec_HospitalId NONCLUSTERED (HospitalId)
 );
 
+-- Model: VitalConfig. The hospital's vitals list. Built-in vitals have fixed ranges in
+-- ConsultationService.VitalRanges; custom vitals (IsCustom = 1) carry their own Min/Max.
 CREATE TABLE cfg.VitalDefinition (
     VitalDefinitionPkId BIGINT IDENTITY(1,1) NOT NULL,
     VitalDefinitionId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_VD_Id DEFAULT NEWSEQUENTIALID(),
@@ -204,8 +222,9 @@ CREATE TABLE cfg.VitalDefinition (
     VitalCode NVARCHAR(40) NOT NULL,
     DisplayLabel NVARCHAR(50) NOT NULL,
     AllowedUnits NVARCHAR(20) NULL,
-    MinValue DECIMAL(8,2) NULL, MaxValue DECIMAL(8,2) NULL,
-    IsCustom BIT NOT NULL CONSTRAINT DF_cfg_VD_Custom DEFAULT 0,   -- added by the hospital in Settings → Clinical
+    MinValue DECIMAL(10,2) NULL, MaxValue DECIMAL(10,2) NULL,
+    IsCustom BIT NOT NULL CONSTRAINT DF_cfg_VD_Custom DEFAULT 0,   -- added by the hospital in Consultation Setup → Vitals
+    IsPediatricOnly BIT NOT NULL CONSTRAINT DF_cfg_VD_Peds DEFAULT 0,
     SortOrder INT NOT NULL CONSTRAINT DF_cfg_VD_Sort DEFAULT 0,
     IsEnabled BIT NOT NULL CONSTRAINT DF_cfg_VD_Enabled DEFAULT 1,
     IsActive BIT NOT NULL CONSTRAINT DF_cfg_VD_Active DEFAULT 1,
@@ -214,83 +233,107 @@ CREATE TABLE cfg.VitalDefinition (
     CreatedBy UNIQUEIDENTIFIER NULL, ModifiedAt DATETIME2(3) NULL, ModifiedBy UNIQUEIDENTIFIER NULL,
     CONSTRAINT PK_cfg_VD PRIMARY KEY CLUSTERED (VitalDefinitionPkId),
     CONSTRAINT UQ_cfg_VD_Id UNIQUE NONCLUSTERED (VitalDefinitionId),
+    CONSTRAINT UQ_cfg_VD_Hosp_Code UNIQUE (HospitalId, VitalCode),
     CONSTRAINT FK_cfg_VD_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     INDEX IX_cfg_VD_HospitalId NONCLUSTERED (HospitalId)
 );
 
+-- Model: MedicalHistoryItem. Chronic conditions offered on the Health Record (quick picks first).
 CREATE TABLE cfg.MedicalHistoryItem (
     MedicalHistoryItemPkId BIGINT IDENTITY(1,1) NOT NULL,
-    MedicalHistoryItemId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_MHI_Id DEFAULT NEWSEQUENTIALID(),
-    HospitalId UNIQUEIDENTIFIER NOT NULL, ItemName NVARCHAR(100) NOT NULL,
+    ItemId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_MHI_Id DEFAULT NEWSEQUENTIALID(),
+    HospitalId UNIQUEIDENTIFIER NOT NULL,
+    ItemName NVARCHAR(100) NOT NULL,
+    IsQuickPick BIT NOT NULL CONSTRAINT DF_cfg_MHI_Quick DEFAULT 0,
     SortOrder INT NOT NULL CONSTRAINT DF_cfg_MHI_Sort DEFAULT 0,
     IsActive BIT NOT NULL CONSTRAINT DF_cfg_MHI_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cfg_MHI_Deleted DEFAULT 0,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cfg_MHI_CreatedAt DEFAULT SYSUTCDATETIME(),
     CreatedBy UNIQUEIDENTIFIER NULL, ModifiedAt DATETIME2(3) NULL, ModifiedBy UNIQUEIDENTIFIER NULL,
     CONSTRAINT PK_cfg_MHI PRIMARY KEY CLUSTERED (MedicalHistoryItemPkId),
-    CONSTRAINT UQ_cfg_MHI_Id UNIQUE NONCLUSTERED (MedicalHistoryItemId),
+    CONSTRAINT UQ_cfg_MHI_Id UNIQUE NONCLUSTERED (ItemId),
     CONSTRAINT FK_cfg_MHI_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     INDEX IX_cfg_MHI_HospitalId NONCLUSTERED (HospitalId)
 );
 
+-- Model: MedicalEventItem. Quick-pick medical events (surgeries, hospitalisations …).
 CREATE TABLE cfg.MedicalEventType (
     MedicalEventTypePkId BIGINT IDENTITY(1,1) NOT NULL,
-    MedicalEventTypeId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_MET_Id DEFAULT NEWSEQUENTIALID(),
-    HospitalId UNIQUEIDENTIFIER NOT NULL, EventTypeName NVARCHAR(100) NOT NULL,
+    EventId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_MET_Id DEFAULT NEWSEQUENTIALID(),
+    HospitalId UNIQUEIDENTIFIER NOT NULL,
+    EventName NVARCHAR(100) NOT NULL,
+    SortOrder INT NOT NULL CONSTRAINT DF_cfg_MET_Sort DEFAULT 0,
     IsActive BIT NOT NULL CONSTRAINT DF_cfg_MET_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cfg_MET_Deleted DEFAULT 0,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cfg_MET_CreatedAt DEFAULT SYSUTCDATETIME(),
     CreatedBy UNIQUEIDENTIFIER NULL, ModifiedAt DATETIME2(3) NULL, ModifiedBy UNIQUEIDENTIFIER NULL,
     CONSTRAINT PK_cfg_MET PRIMARY KEY CLUSTERED (MedicalEventTypePkId),
-    CONSTRAINT UQ_cfg_MET_Id UNIQUE NONCLUSTERED (MedicalEventTypeId),
+    CONSTRAINT UQ_cfg_MET_Id UNIQUE NONCLUSTERED (EventId),
     CONSTRAINT FK_cfg_MET_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     INDEX IX_cfg_MET_HospitalId NONCLUSTERED (HospitalId)
 );
 
+-- Model: SymptomCatalogItem. Complaints offered in the consultation; cln.ConsultationSymptom stores SymptomCode.
 CREATE TABLE cfg.SymptomCatalog (
     SymptomCatalogPkId BIGINT IDENTITY(1,1) NOT NULL,
     SymptomCatalogId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_Sym_Id DEFAULT NEWSEQUENTIALID(),
-    SymptomName NVARCHAR(100) NOT NULL,
-    Category NVARCHAR(20) NOT NULL CONSTRAINT CK_cfg_Sym_Cat CHECK (Category IN ('QUICK_PICK','OTHER')),
+    HospitalId UNIQUEIDENTIFIER NOT NULL,
+    SymptomCode NVARCHAR(40) NOT NULL,
+    DisplayLabel NVARCHAR(100) NOT NULL,
+    IsQuickPick BIT NOT NULL CONSTRAINT DF_cfg_Sym_Quick DEFAULT 0,
     IsActive BIT NOT NULL CONSTRAINT DF_cfg_Sym_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cfg_Sym_Deleted DEFAULT 0,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cfg_Sym_CreatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT PK_cfg_Sym PRIMARY KEY CLUSTERED (SymptomCatalogPkId),
-    CONSTRAINT UQ_cfg_Sym_Id UNIQUE NONCLUSTERED (SymptomCatalogId)
+    CONSTRAINT UQ_cfg_Sym_Id UNIQUE NONCLUSTERED (SymptomCatalogId),
+    CONSTRAINT UQ_cfg_Sym_Hosp_Code UNIQUE (HospitalId, SymptomCode),
+    CONSTRAINT FK_cfg_Sym_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId)
 );
 
+-- Model: Icd10Entry. Global (not per hospital).
 CREATE TABLE cfg.ICD10Catalog (
     ICD10CatalogPkId BIGINT IDENTITY(1,1) NOT NULL,
-    ICD10CatalogId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_ICD_Id DEFAULT NEWSEQUENTIALID(),
-    Code NVARCHAR(10) NOT NULL, [Description] NVARCHAR(300) NOT NULL, Synonyms NVARCHAR(500) NULL,
+    Icd10CatalogId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_ICD_Id DEFAULT NEWSEQUENTIALID(),
+    Icd10Code NVARCHAR(10) NOT NULL,
+    [Description] NVARCHAR(300) NOT NULL,
+    SynonymTerms NVARCHAR(500) NULL,
     IsActive BIT NOT NULL CONSTRAINT DF_cfg_ICD_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cfg_ICD_Deleted DEFAULT 0,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cfg_ICD_CreatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT PK_cfg_ICD PRIMARY KEY CLUSTERED (ICD10CatalogPkId),
-    CONSTRAINT UQ_cfg_ICD_Id UNIQUE NONCLUSTERED (ICD10CatalogId),
-    CONSTRAINT UQ_cfg_ICD_Code UNIQUE (Code)
+    CONSTRAINT UQ_cfg_ICD_Id UNIQUE NONCLUSTERED (Icd10CatalogId),
+    CONSTRAINT UQ_cfg_ICD_Code UNIQUE (Icd10Code)
 );
 
+-- Model: Drug. The hospital's formulary.
 CREATE TABLE cfg.DrugFormulary (
     DrugFormularyPkId BIGINT IDENTITY(1,1) NOT NULL,
-    DrugFormularyId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_Drug_Id DEFAULT NEWSEQUENTIALID(),
-    BrandName NVARCHAR(200) NOT NULL, GenericName NVARCHAR(200) NULL,
-    TherapeuticClass NVARCHAR(300) NULL, Composition NVARCHAR(500) NULL,
-    Strength NVARCHAR(50) NULL, DrugForm NVARCHAR(30) NULL, DeliveryRoute NVARCHAR(30) NULL,
-    DefaultDosage NVARCHAR(20) NULL, DefaultFrequency NVARCHAR(20) NULL,
-    DefaultDuration INT NULL, DefaultInstructions NVARCHAR(300) NULL,
-    IsControlled BIT NOT NULL CONSTRAINT DF_cfg_Drug_Ctrl DEFAULT 0,
+    DrugId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_Drug_Id DEFAULT NEWSEQUENTIALID(),
+    HospitalId UNIQUEIDENTIFIER NOT NULL,
+    BrandName NVARCHAR(200) NOT NULL,
+    GenericName NVARCHAR(200) NULL,
+    Composition NVARCHAR(500) NULL,
+    TherapeuticClass NVARCHAR(300) NULL,
+    GenericClass NVARCHAR(200) NULL,
+    DrugForm NVARCHAR(30) NULL,
+    DefaultRoute NVARCHAR(30) NULL,
+    DefaultDosage NVARCHAR(20) NULL,
+    DefaultFrequency NVARCHAR(20) NULL,
+    DefaultDurationDays INT NULL,
+    DefaultInstructions NVARCHAR(300) NULL,
+    IsControlledSubstance BIT NOT NULL CONSTRAINT DF_cfg_Drug_Ctrl DEFAULT 0,
     IsActive BIT NOT NULL CONSTRAINT DF_cfg_Drug_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cfg_Drug_Deleted DEFAULT 0,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cfg_Drug_CreatedAt DEFAULT SYSUTCDATETIME(),
     CreatedBy UNIQUEIDENTIFIER NULL, ModifiedAt DATETIME2(3) NULL, ModifiedBy UNIQUEIDENTIFIER NULL,
     CONSTRAINT PK_cfg_Drug PRIMARY KEY CLUSTERED (DrugFormularyPkId),
-    CONSTRAINT UQ_cfg_Drug_Id UNIQUE NONCLUSTERED (DrugFormularyId),
-    INDEX IX_cfg_Drug_BrandName NONCLUSTERED (BrandName)
+    CONSTRAINT UQ_cfg_Drug_Id UNIQUE NONCLUSTERED (DrugId),
+    CONSTRAINT FK_cfg_Drug_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
+    INDEX IX_cfg_Drug_BrandName NONCLUSTERED (HospitalId, BrandName)
 );
 
--- External lab / imaging centres. sec.ApplicationUser.LabPartnerId links LAB_PARTNER accounts
--- (several staff per partner) to one row here. data.js: labPartners
+-- Model: LabPartner. External lab / imaging centres. sec.ApplicationUser.LabPartnerId links LAB_PARTNER
+-- accounts (several staff per partner) to one row here.
 CREATE TABLE cfg.LabPartner (
     LabPartnerPkId BIGINT IDENTITY(1,1) NOT NULL,
     LabPartnerId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_LP_Id DEFAULT NEWSEQUENTIALID(),
@@ -306,21 +349,33 @@ CREATE TABLE cfg.LabPartner (
     CONSTRAINT UQ_cfg_LP_Hosp_Name UNIQUE (HospitalId, Name)
 );
 
+-- Model: LabTest. Orderable lab / imaging tests. LabTest.SpecialtyIds → cfg.LabTestSpecialty.
 CREATE TABLE cfg.LabTestCatalog (
     LabTestCatalogPkId BIGINT IDENTITY(1,1) NOT NULL,
-    LabTestCatalogId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_LT_Id DEFAULT NEWSEQUENTIALID(),
+    TestId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_LT_Id DEFAULT NEWSEQUENTIALID(),
+    HospitalId UNIQUEIDENTIFIER NOT NULL,
     TestName NVARCHAR(100) NOT NULL,
     TestType NVARCHAR(20) NOT NULL CONSTRAINT CK_cfg_LT_Type CHECK (TestType IN ('LAB','IMAGING','PATHOLOGY')),
-    DefaultSampleType NVARCHAR(50) NULL,
+    Category NVARCHAR(50) NULL,            -- Hematology, Biochemistry, Radiology …
     IsActive BIT NOT NULL CONSTRAINT DF_cfg_LT_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cfg_LT_Deleted DEFAULT 0,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cfg_LT_CreatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT PK_cfg_LT PRIMARY KEY CLUSTERED (LabTestCatalogPkId),
-    CONSTRAINT UQ_cfg_LT_Id UNIQUE NONCLUSTERED (LabTestCatalogId)
+    CONSTRAINT UQ_cfg_LT_Id UNIQUE NONCLUSTERED (TestId),
+    CONSTRAINT FK_cfg_LT_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
+    INDEX IX_cfg_LT_HospitalId NONCLUSTERED (HospitalId)
 );
 
--- Groups phrases ("/" macros) by condition. Matches a consultation when one of its
--- diagnoses' ICD-10 codes starts with a prefix in Icd10Prefixes. data.js: clinicalConditions
+-- Model: LabTest.SpecialtyIds — the specialties a test is suggested for.
+CREATE TABLE cfg.LabTestSpecialty (
+    TestId UNIQUEIDENTIFIER NOT NULL, SpecialtyId UNIQUEIDENTIFIER NOT NULL,
+    CONSTRAINT PK_cfg_LTS PRIMARY KEY CLUSTERED (TestId, SpecialtyId),
+    CONSTRAINT FK_cfg_LTS_TestId FOREIGN KEY (TestId) REFERENCES cfg.LabTestCatalog(TestId),
+    CONSTRAINT FK_cfg_LTS_SpecialtyId FOREIGN KEY (SpecialtyId) REFERENCES cfg.Specialty(SpecialtyId)
+);
+
+-- Model: ClinicalCondition. Groups phrases ("/" macros) by condition. Matches a consultation when one of
+-- its diagnoses' ICD-10 codes starts with a prefix in Icd10Prefixes.
 CREATE TABLE cfg.ClinicalCondition (
     ClinicalConditionPkId BIGINT IDENTITY(1,1) NOT NULL,
     ConditionId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_CC_Id DEFAULT NEWSEQUENTIALID(),
@@ -333,29 +388,39 @@ CREATE TABLE cfg.ClinicalCondition (
     CONSTRAINT FK_cfg_CC_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId)
 );
 
+-- Model: Phrase. SOAP phrase / "/" macro. Precedence DOCTOR > SPECIALTY > GLOBAL.
 CREATE TABLE cfg.PhraseBank (
     PhraseBankPkId BIGINT IDENTITY(1,1) NOT NULL,
-    PhraseBankId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_PB_Id DEFAULT NEWSEQUENTIALID(),
-    HospitalId UNIQUEIDENTIFIER NOT NULL, UserId UNIQUEIDENTIFIER NULL,
-    Category NVARCHAR(20) NOT NULL CONSTRAINT CK_cfg_PB_Cat CHECK (Category IN ('SUBJECTIVE','OBJECTIVE','PLAN','INSTRUCTION','CUSTOM')),
-    TriggerCode NVARCHAR(30) NULL, PhraseText NVARCHAR(500) NOT NULL,
-    IsGlobal BIT NOT NULL CONSTRAINT DF_cfg_PB_Global DEFAULT 0,
-    ConditionId UNIQUEIDENTIFIER NULL,     -- NULL = any condition (data.js: ConditionId)
+    PhraseId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_PB_Id DEFAULT NEWSEQUENTIALID(),
+    HospitalId UNIQUEIDENTIFIER NOT NULL,
+    Scope NVARCHAR(10) NOT NULL CONSTRAINT CK_cfg_PB_Scope CHECK (Scope IN ('GLOBAL','SPECIALTY','DOCTOR')),
+    SpecialtyId UNIQUEIDENTIFIER NULL,     -- SPECIALTY scope
+    DoctorId UNIQUEIDENTIFIER NULL,        -- DOCTOR scope
+    ConditionId UNIQUEIDENTIFIER NULL,     -- NULL = any condition
+    Section NVARCHAR(5) NOT NULL CONSTRAINT CK_cfg_PB_Section CHECK (Section IN ('S','O','P','ANY')) CONSTRAINT DF_cfg_PB_Section DEFAULT 'ANY',
+    TriggerKeyword NVARCHAR(30) NULL,
+    PhraseText NVARCHAR(500) NOT NULL,
+    SortOrder INT NOT NULL CONSTRAINT DF_cfg_PB_Sort DEFAULT 0,
     IsActive BIT NOT NULL CONSTRAINT DF_cfg_PB_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cfg_PB_Deleted DEFAULT 0,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cfg_PB_CreatedAt DEFAULT SYSUTCDATETIME(),
     CreatedBy UNIQUEIDENTIFIER NULL, ModifiedAt DATETIME2(3) NULL, ModifiedBy UNIQUEIDENTIFIER NULL,
     CONSTRAINT PK_cfg_PB PRIMARY KEY CLUSTERED (PhraseBankPkId),
-    CONSTRAINT UQ_cfg_PB_Id UNIQUE NONCLUSTERED (PhraseBankId),
+    CONSTRAINT UQ_cfg_PB_Id UNIQUE NONCLUSTERED (PhraseId),
     CONSTRAINT FK_cfg_PB_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
+    CONSTRAINT FK_cfg_PB_SpecialtyId FOREIGN KEY (SpecialtyId) REFERENCES cfg.Specialty(SpecialtyId),
     CONSTRAINT FK_cfg_PB_ConditionId FOREIGN KEY (ConditionId) REFERENCES cfg.ClinicalCondition(ConditionId),
+    CONSTRAINT CK_cfg_PB_ScopeTarget CHECK ((Scope <> 'SPECIALTY' OR SpecialtyId IS NOT NULL) AND (Scope <> 'DOCTOR' OR DoctorId IS NOT NULL)),
     INDEX IX_cfg_PB_HospitalId NONCLUSTERED (HospitalId)
+    -- FK DoctorId → sec.ApplicationUser(UserId) is added after sec is created (see end of section B)
 );
 
+-- Model: PaymentMethod.
 CREATE TABLE cfg.PaymentMethod (
     PaymentMethodPkId BIGINT IDENTITY(1,1) NOT NULL,
     PaymentMethodId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_PM_Id DEFAULT NEWSEQUENTIALID(),
-    HospitalId UNIQUEIDENTIFIER NOT NULL, MethodName NVARCHAR(30) NOT NULL,
+    HospitalId UNIQUEIDENTIFIER NOT NULL,
+    MethodName NVARCHAR(30) NOT NULL,
     IsActive BIT NOT NULL CONSTRAINT DF_cfg_PM_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cfg_PM_Deleted DEFAULT 0,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cfg_PM_CreatedAt DEFAULT SYSUTCDATETIME(),
@@ -365,64 +430,63 @@ CREATE TABLE cfg.PaymentMethod (
     INDEX IX_cfg_PM_HospitalId NONCLUSTERED (HospitalId)
 );
 
-CREATE TABLE cfg.ContradictionRule (
-    ContradictionRulePkId BIGINT IDENTITY(1,1) NOT NULL,
-    ContradictionRuleId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_CR_Id DEFAULT NEWSEQUENTIALID(),
-    RuleType NVARCHAR(30) NOT NULL, ConditionJson NVARCHAR(MAX) NOT NULL,
-    MessageTemplate NVARCHAR(300) NOT NULL,
-    Severity NVARCHAR(10) NOT NULL CONSTRAINT CK_cfg_CR_Sev CHECK (Severity IN ('WARNING','CRITICAL')),
-    IsActive BIT NOT NULL CONSTRAINT DF_cfg_CR_Active DEFAULT 1,
-    IsDeleted BIT NOT NULL CONSTRAINT DF_cfg_CR_Deleted DEFAULT 0,
-    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cfg_CR_CreatedAt DEFAULT SYSUTCDATETIME(),
-    CONSTRAINT PK_cfg_CR PRIMARY KEY CLUSTERED (ContradictionRulePkId),
-    CONSTRAINT UQ_cfg_CR_Id UNIQUE NONCLUSTERED (ContradictionRuleId)
-);
-
-CREATE TABLE cfg.BranchFlowRule (
-    BranchFlowRulePkId BIGINT IDENTITY(1,1) NOT NULL,
-    BranchFlowRuleId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_BF_Id DEFAULT NEWSEQUENTIALID(),
-    RuleType NVARCHAR(30) NOT NULL, ConditionJson NVARCHAR(MAX) NOT NULL, ActionJson NVARCHAR(MAX) NOT NULL,
-    IsActive BIT NOT NULL CONSTRAINT DF_cfg_BF_Active DEFAULT 1,
-    IsDeleted BIT NOT NULL CONSTRAINT DF_cfg_BF_Deleted DEFAULT 0,
-    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cfg_BF_CreatedAt DEFAULT SYSUTCDATETIME(),
-    CONSTRAINT PK_cfg_BF PRIMARY KEY CLUSTERED (BranchFlowRulePkId),
-    CONSTRAINT UQ_cfg_BF_Id UNIQUE NONCLUSTERED (BranchFlowRuleId)
-);
-
+-- Model: MessageTemplate. [Trigger]: APPOINTMENT_REMINDER, FOLLOWUP_REMINDER, LAB_RESULTS_READY, NO_SHOW, PRESCRIPTION_READY …
 CREATE TABLE cfg.MessageTemplate (
     MessageTemplatePkId BIGINT IDENTITY(1,1) NOT NULL,
-    MessageTemplateId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_MT_Id DEFAULT NEWSEQUENTIALID(),
-    HospitalId UNIQUEIDENTIFIER NOT NULL, Name NVARCHAR(100) NOT NULL,
-    TriggerEvent NVARCHAR(30) NOT NULL,
+    TemplateId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_MT_Id DEFAULT NEWSEQUENTIALID(),
+    HospitalId UNIQUEIDENTIFIER NOT NULL,
+    Name NVARCHAR(100) NOT NULL,
+    [Trigger] NVARCHAR(30) NOT NULL,
     Channel NVARCHAR(10) NOT NULL CONSTRAINT CK_cfg_MT_Ch CHECK (Channel IN ('WHATSAPP','EMAIL','BOTH')),
-    TemplateText NVARCHAR(1000) NOT NULL,
+    [Text] NVARCHAR(1000) NOT NULL,
     IsEnabled BIT NOT NULL CONSTRAINT DF_cfg_MT_Enabled DEFAULT 1,
     IsActive BIT NOT NULL CONSTRAINT DF_cfg_MT_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cfg_MT_Deleted DEFAULT 0,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cfg_MT_CreatedAt DEFAULT SYSUTCDATETIME(),
     CreatedBy UNIQUEIDENTIFIER NULL, ModifiedAt DATETIME2(3) NULL, ModifiedBy UNIQUEIDENTIFIER NULL,
     CONSTRAINT PK_cfg_MT PRIMARY KEY CLUSTERED (MessageTemplatePkId),
-    CONSTRAINT UQ_cfg_MT_Id UNIQUE NONCLUSTERED (MessageTemplateId),
+    CONSTRAINT UQ_cfg_MT_Id UNIQUE NONCLUSTERED (TemplateId),
     CONSTRAINT FK_cfg_MT_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     INDEX IX_cfg_MT_HospitalId NONCLUSTERED (HospitalId)
+);
+
+-- Model: ConsultFormConfig (DataStore.ConsultFormPublished / ConsultFormDrafts).
+-- Which sections, fields and option values the Consultation 360 page shows, per hospital. The configuration
+-- page edits the DRAFT row; only the PUBLISHED row drives the consultation. The nested model
+-- (Sections → Fields → Values, VitalUnits → Units; array position = order) is stored as JSON.
+CREATE TABLE cfg.ConsultationFormConfig (
+    ConsultationFormConfigPkId BIGINT IDENTITY(1,1) NOT NULL,
+    HospitalId UNIQUEIDENTIFIER NOT NULL,
+    ConfigState NVARCHAR(10) NOT NULL CONSTRAINT CK_cfg_CFC_State CHECK (ConfigState IN ('PUBLISHED','DRAFT')),
+    Version INT NOT NULL CONSTRAINT DF_cfg_CFC_Ver DEFAULT 1,
+    PublishedAt DATETIME2(3) NULL,
+    PublishedBy UNIQUEIDENTIFIER NULL,
+    Sections NVARCHAR(MAX) NOT NULL CONSTRAINT CK_cfg_CFC_Sections CHECK (ISJSON(Sections) = 1),     -- List<ConsultFormSection>
+    VitalUnits NVARCHAR(MAX) NULL CONSTRAINT CK_cfg_CFC_Units CHECK (VitalUnits IS NULL OR ISJSON(VitalUnits) = 1),  -- List<VitalUnitSetting>
+    ModifiedAt DATETIME2(3) NULL, ModifiedBy UNIQUEIDENTIFIER NULL,
+    CONSTRAINT PK_cfg_CFC PRIMARY KEY CLUSTERED (ConsultationFormConfigPkId),
+    CONSTRAINT UQ_cfg_CFC_Hosp_State UNIQUE (HospitalId, ConfigState),
+    CONSTRAINT FK_cfg_CFC_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId)
 );
 
 -- ============================================================
 -- B. sec — SECURITY (6 tables)
 -- ============================================================
 
+-- Model: AppUser. Roles live in sec.UserRole (AppUser.Roles; a user may hold several); permissions are the
+-- union of the user's roles. Role / RolesLabel / SeesOwnPatientsOnly are derived from Roles and not stored.
+-- FullName is rendered from the name parts via the DOCTOR_NAME_TEMPLATE hospital setting unless DisplayNameOverride is set.
 CREATE TABLE sec.ApplicationUser (
     UserPkId BIGINT IDENTITY(1,1) NOT NULL,
     UserId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_sec_Usr_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL,
     FullName NVARCHAR(200) NOT NULL,                        -- ENCRYPTION: DETERMINISTIC
     Email NVARCHAR(100) NOT NULL,                           -- ENCRYPTION: DETERMINISTIC
-    PasswordHash NVARCHAR(200) NOT NULL,                    -- ENCRYPTION: RANDOMIZED
+    PasswordHash NVARCHAR(200) NOT NULL,                    -- AppUser.Password — store a salted hash, never the plain text
     Phone NVARCHAR(20) NULL,                                -- ENCRYPTION: DETERMINISTIC
-    -- Roles live in sec.UserRole (a user may hold several); permissions are the union of the user's roles.
-    SpecialtyId UNIQUEIDENTIFIER NULL, LicenseNumber NVARCHAR(50) NULL, LabPartnerId UNIQUEIDENTIFIER NULL,
-    -- Doctor profile (Schedule Settings → Doctors). FullName is rendered from these via
-    -- the DOCTOR_NAME_TEMPLATE hospital setting unless DisplayNameOverride is set.
+    SpecialtyId UNIQUEIDENTIFIER NULL,                      -- primary specialty; others in sec.DoctorSpecialty
+    LicenseNumber NVARCHAR(50) NULL,
+    LabPartnerId UNIQUEIDENTIFIER NULL,                     -- LAB_PARTNER accounts only
     Prefix NVARCHAR(20) NULL, FirstName NVARCHAR(100) NULL, MiddleName NVARCHAR(100) NULL, LastName NVARCHAR(100) NULL,
     Qualifications NVARCHAR(200) NULL, DisplayNameOverride NVARCHAR(200) NULL,
     Room NVARCHAR(50) NULL, Languages NVARCHAR(200) NULL, Bio NVARCHAR(1000) NULL,
@@ -435,12 +499,12 @@ CREATE TABLE sec.ApplicationUser (
     CONSTRAINT UQ_sec_Usr_Email UNIQUE (Email),
     CONSTRAINT FK_sec_Usr_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_sec_Usr_SpecialtyId FOREIGN KEY (SpecialtyId) REFERENCES cfg.Specialty(SpecialtyId),
-    INDEX IX_sec_Usr_HospitalId NONCLUSTERED (HospitalId),
-    INDEX IX_sec_Usr_Email NONCLUSTERED (Email)
+    CONSTRAINT FK_sec_Usr_LabPartnerId FOREIGN KEY (LabPartnerId) REFERENCES cfg.LabPartner(LabPartnerId),
+    INDEX IX_sec_Usr_HospitalId NONCLUSTERED (HospitalId)
 );
 
--- One row per role a user holds. LAB_PARTNER is exclusive: a lab partner account holds no other role
--- (enforced in UserService.NormalizeRoles).
+-- Model: AppUser.Roles. One row per role a user holds. LAB_PARTNER is exclusive: a lab partner account
+-- holds no other role (enforced in UserService.NormalizeRoles).
 CREATE TABLE sec.UserRole (
     UserRolePkId BIGINT IDENTITY(1,1) NOT NULL,
     UserId UNIQUEIDENTIFIER NOT NULL,
@@ -452,8 +516,7 @@ CREATE TABLE sec.UserRole (
     CONSTRAINT FK_sec_UsrRole_UserId FOREIGN KEY (UserId) REFERENCES sec.ApplicationUser(UserId)
 );
 
--- A doctor may have several specialties; ApplicationUser.SpecialtyId stays the primary.
--- data.js: doctorSpecialties
+-- Model: DoctorSpecialty. A doctor may have several specialties; ApplicationUser.SpecialtyId stays the primary.
 CREATE TABLE sec.DoctorSpecialty (
     DoctorId UNIQUEIDENTIFIER NOT NULL, SpecialtyId UNIQUEIDENTIFIER NOT NULL,
     CONSTRAINT PK_sec_DS PRIMARY KEY CLUSTERED (DoctorId, SpecialtyId),
@@ -461,85 +524,87 @@ CREATE TABLE sec.DoctorSpecialty (
     CONSTRAINT FK_sec_DS_SpecialtyId FOREIGN KEY (SpecialtyId) REFERENCES cfg.Specialty(SpecialtyId)
 );
 
+-- DataStore.Permissions (feature → role → granted). PermissionRow is the grid view of this table
+-- (one row per Feature, Access keyed by Role); its Label is display text and not stored.
 CREATE TABLE sec.PermissionMatrix (
     PermissionMatrixPkId BIGINT IDENTITY(1,1) NOT NULL,
-    PermissionMatrixId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_sec_Perm_Id DEFAULT NEWSEQUENTIALID(),
-    HospitalId UNIQUEIDENTIFIER NOT NULL, [Role] NVARCHAR(20) NOT NULL, Feature NVARCHAR(30) NOT NULL,
+    HospitalId UNIQUEIDENTIFIER NOT NULL,
+    Feature NVARCHAR(30) NOT NULL,
+    [Role] NVARCHAR(20) NOT NULL,
     IsGranted BIT NOT NULL CONSTRAINT DF_sec_Perm_Granted DEFAULT 1,
+    ModifiedAt DATETIME2(3) NULL, ModifiedBy UNIQUEIDENTIFIER NULL,
     CONSTRAINT PK_sec_Perm PRIMARY KEY CLUSTERED (PermissionMatrixPkId),
-    CONSTRAINT UQ_sec_Perm_Id UNIQUE NONCLUSTERED (PermissionMatrixId),
     CONSTRAINT FK_sec_Perm_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
-    CONSTRAINT UQ_sec_Perm_Role_Feature UNIQUE (HospitalId, [Role], Feature),
-    INDEX IX_sec_Perm_HospitalId NONCLUSTERED (HospitalId)
+    CONSTRAINT UQ_sec_Perm_Feature_Role UNIQUE (HospitalId, Feature, [Role])
 );
 
-CREATE TABLE sec.AuditLog (  -- append-only: no ModifiedAt, no IsActive, no IsDeleted
+-- Model: AuditLogEntry. Append-only: no ModifiedAt, no IsActive, no IsDeleted. Written by AuditService.Record.
+CREATE TABLE sec.AuditLog (
     AuditLogPkId BIGINT IDENTITY(1,1) NOT NULL,
     AuditLogId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_sec_Aud_Id DEFAULT NEWSEQUENTIALID(),
-    HospitalId UNIQUEIDENTIFIER NOT NULL, UserId UNIQUEIDENTIFIER NOT NULL,
+    HospitalId UNIQUEIDENTIFIER NOT NULL, UserId UNIQUEIDENTIFIER NULL,   -- NULL for failed logins of unknown users
     [Action] NVARCHAR(20) NOT NULL CONSTRAINT CK_sec_Aud_Action CHECK ([Action] IN ('CREATE','READ','UPDATE','DELETE','LOGIN','LOGIN_FAIL','LOGOUT','EXPORT','PRINT','OVERRIDE','SIGNOFF','SUBMIT','APPROVE','REJECT')),
     EntityType NVARCHAR(50) NOT NULL, EntityId NVARCHAR(50) NULL, Details NVARCHAR(500) NULL,
-    SessionToken NVARCHAR(100) NULL, Browser NVARCHAR(100) NULL,
     IpAddress NVARCHAR(45) NULL, UserAgent NVARCHAR(200) NULL,
-    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_sec_Aud_CreatedAt DEFAULT SYSUTCDATETIME(),
+    [Timestamp] DATETIME2(3) NOT NULL CONSTRAINT DF_sec_Aud_Ts DEFAULT SYSUTCDATETIME(),
     CONSTRAINT PK_sec_Aud PRIMARY KEY CLUSTERED (AuditLogPkId),
     CONSTRAINT UQ_sec_Aud_Id UNIQUE NONCLUSTERED (AuditLogId),
-    INDEX IX_sec_Aud_HospitalId NONCLUSTERED (HospitalId),
+    INDEX IX_sec_Aud_HospitalId NONCLUSTERED (HospitalId, [Timestamp] DESC),
     INDEX IX_sec_Aud_UserId NONCLUSTERED (UserId),
-    INDEX IX_sec_Aud_CreatedAt NONCLUSTERED (CreatedAt DESC),
     INDEX IX_sec_Aud_Entity NONCLUSTERED (EntityType, EntityId)
 );
 
-CREATE TABLE sec.UserSession (
-    UserSessionPkId BIGINT IDENTITY(1,1) NOT NULL,
-    UserSessionId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_sec_Ses_Id DEFAULT NEWSEQUENTIALID(),
-    UserId UNIQUEIDENTIFIER NOT NULL, SessionToken NVARCHAR(100) NOT NULL,
-    Browser NVARCHAR(100) NULL, IpAddress NVARCHAR(45) NULL, UserAgent NVARCHAR(200) NULL,
-    IsActive BIT NOT NULL CONSTRAINT DF_sec_Ses_Active DEFAULT 1,
-    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_sec_Ses_CreatedAt DEFAULT SYSUTCDATETIME(),
-    ExpiresAt DATETIME2(3) NOT NULL,
-    InvalidatedAt DATETIME2(3) NULL,
-    InvalidationReason NVARCHAR(30) NULL CONSTRAINT CK_sec_Ses_Reason CHECK (InvalidationReason IN ('NEW_LOGIN','LOGOUT','TIMEOUT','ADMIN_REVOKE',NULL)),
-    CONSTRAINT PK_sec_Ses PRIMARY KEY CLUSTERED (UserSessionPkId),
-    CONSTRAINT UQ_sec_Ses_Id UNIQUE NONCLUSTERED (UserSessionId),
-    CONSTRAINT UQ_sec_Ses_Token UNIQUE (SessionToken),
-    CONSTRAINT FK_sec_Ses_UserId FOREIGN KEY (UserId) REFERENCES sec.ApplicationUser(UserId),
-    INDEX IX_sec_Ses_UserId NONCLUSTERED (UserId)
+-- Model: UserNotification. In-app notification for a staff user, shown under the top-bar bell.
+-- EntityId = what it is about (e.g. a ResultId), so it can be cleared once that is dealt with.
+CREATE TABLE sec.UserNotification (
+    UserNotificationPkId BIGINT IDENTITY(1,1) NOT NULL,
+    NotificationId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_sec_UN_Id DEFAULT NEWSEQUENTIALID(),
+    HospitalId UNIQUEIDENTIFIER NOT NULL, UserId UNIQUEIDENTIFIER NOT NULL,
+    Kind NVARCHAR(30) NOT NULL,                -- LAB_RESULT …
+    Title NVARCHAR(200) NOT NULL,
+    [Message] NVARCHAR(500) NULL,
+    Url NVARCHAR(500) NULL,                    -- app-absolute URL opened on click
+    IsCritical BIT NOT NULL CONSTRAINT DF_sec_UN_Crit DEFAULT 0,
+    EntityId NVARCHAR(50) NULL,
+    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_sec_UN_CreatedAt DEFAULT SYSUTCDATETIME(),
+    ReadAt DATETIME2(3) NULL,
+    CONSTRAINT PK_sec_UN PRIMARY KEY CLUSTERED (UserNotificationPkId),
+    CONSTRAINT UQ_sec_UN_Id UNIQUE NONCLUSTERED (NotificationId),
+    CONSTRAINT FK_sec_UN_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
+    CONSTRAINT FK_sec_UN_UserId FOREIGN KEY (UserId) REFERENCES sec.ApplicationUser(UserId),
+    INDEX IX_sec_UN_User_Unread NONCLUSTERED (UserId, ReadAt, CreatedAt DESC),
+    INDEX IX_sec_UN_EntityId NONCLUSTERED (EntityId)
 );
 
-CREATE TABLE sec.LoginAttempt (  -- append-only
-    LoginAttemptPkId BIGINT IDENTITY(1,1) NOT NULL,
-    LoginAttemptId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_sec_LA_Id DEFAULT NEWSEQUENTIALID(),
-    EmailAttempted NVARCHAR(100) NOT NULL, IsSuccess BIT NOT NULL,
-    IpAddress NVARCHAR(45) NULL,
-    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_sec_LA_CreatedAt DEFAULT SYSUTCDATETIME(),
-    CONSTRAINT PK_sec_LA PRIMARY KEY CLUSTERED (LoginAttemptPkId),
-    CONSTRAINT UQ_sec_LA_Id UNIQUE NONCLUSTERED (LoginAttemptId),
-    INDEX IX_sec_LA_Email NONCLUSTERED (EmailAttempted),
-    INDEX IX_sec_LA_CreatedAt NONCLUSTERED (CreatedAt DESC)
-);
+ALTER TABLE cfg.PhraseBank ADD CONSTRAINT FK_cfg_PB_DoctorId FOREIGN KEY (DoctorId) REFERENCES sec.ApplicationUser(UserId);
+ALTER TABLE cfg.ConsultationFormConfig ADD CONSTRAINT FK_cfg_CFC_PublishedBy FOREIGN KEY (PublishedBy) REFERENCES sec.ApplicationUser(UserId);
+GO
 
 -- ============================================================
--- C. opd — OPD CORE (11 tables)
+-- C. opd — OPD CORE (13 tables)
 -- ============================================================
 
+-- Model: Patient. AgeYears is computed from Dob in the application and not stored.
+-- FullName / Phone / Address hold the composed values the app reads; the structured parts are what the
+-- registration form edits.
 CREATE TABLE opd.Patient (  -- TEMPORAL: Phase 4
     PatientPkId BIGINT IDENTITY(1,1) NOT NULL,
     PatientId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_opd_Pat_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, Mrn NVARCHAR(20) NOT NULL,
     FullName NVARCHAR(200) NOT NULL,                        -- ENCRYPTION: DETERMINISTIC
     Gender NVARCHAR(10) NOT NULL CONSTRAINT CK_opd_Pat_Gender CHECK (Gender IN ('MALE','FEMALE','OTHER')),
-    Dob DATE NOT NULL,
-    Phone NVARCHAR(20) NOT NULL,                            -- ENCRYPTION: DETERMINISTIC
+    Dob DATE NULL,
+    Phone NVARCHAR(20) NULL,                                -- ENCRYPTION: DETERMINISTIC
     Email NVARCHAR(100) NULL,                               -- ENCRYPTION: DETERMINISTIC
     [Address] NVARCHAR(500) NULL,                           -- ENCRYPTION: RANDOMIZED
     NationalHealthId NVARCHAR(50) NULL,                     -- ENCRYPTION: DETERMINISTIC
-    InsuranceProvider NVARCHAR(100) NULL,                   -- ENCRYPTION: RANDOMIZED
+    InsuranceProvider NVARCHAR(100) NULL,                   -- ENCRYPTION: RANDOMIZED (legacy; coverage lives in opd.PatientCoverage)
     InsurancePolicyNo NVARCHAR(50) NULL,                    -- ENCRYPTION: RANDOMIZED
-    PhotoBase64 NVARCHAR(MAX) NULL,                         -- ENCRYPTION: RANDOMIZED
     EmergencyContactName NVARCHAR(200) NULL,                -- ENCRYPTION: RANDOMIZED
     EmergencyContactPhone NVARCHAR(20) NULL,                -- ENCRYPTION: RANDOMIZED
-    -- Structured registration fields (FullName / Phone / Address above hold the composed values)
+    BloodGroup NVARCHAR(5) NULL,                            -- A+, O-, …
+    RegisteredVia NVARCHAR(20) NULL CONSTRAINT CK_opd_Pat_RegVia CHECK (RegisteredVia IN ('FRONT_DESK','PATIENT_PORTAL','CSV_IMPORT')),
+    -- Structured registration fields
     Prefix NVARCHAR(10) NULL, FirstName NVARCHAR(60) NULL, MiddleName NVARCHAR(60) NULL, LastName NVARCHAR(60) NULL,
     Trn NVARCHAR(20) NULL,                                  -- ENCRYPTION: DETERMINISTIC
     CountryCode NVARCHAR(5) NULL, Mobile NVARCHAR(16) NULL, -- ENCRYPTION: DETERMINISTIC (Mobile)
@@ -560,94 +625,146 @@ CREATE TABLE opd.Patient (  -- TEMPORAL: Phase 4
     CONSTRAINT PK_opd_Pat PRIMARY KEY CLUSTERED (PatientPkId),
     CONSTRAINT UQ_opd_Pat_Id UNIQUE NONCLUSTERED (PatientId),
     CONSTRAINT FK_opd_Pat_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
+    CONSTRAINT FK_opd_Pat_PrefDoctor FOREIGN KEY (PreferredDoctorId) REFERENCES sec.ApplicationUser(UserId),
     CONSTRAINT UQ_opd_Pat_Hosp_Mrn UNIQUE (HospitalId, Mrn),
-    INDEX IX_opd_Pat_HospitalId NONCLUSTERED (HospitalId),
-    INDEX IX_opd_Pat_Hosp_Phone NONCLUSTERED (HospitalId, Phone)
+    INDEX IX_opd_Pat_Hosp_Phone NONCLUSTERED (HospitalId, Phone),
+    INDEX IX_opd_Pat_Hosp_Mobile NONCLUSTERED (HospitalId, Mobile),            -- duplicate check (PatientService.FindDuplicate)
+    INDEX IX_opd_Pat_Hosp_Nhid NONCLUSTERED (HospitalId, NationalHealthId),
+    INDEX IX_opd_Pat_Hosp_Trn NONCLUSTERED (HospitalId, Trn)
 );
 
+-- Model: PatientAllergy.
 CREATE TABLE opd.PatientAllergy (
     PatientAllergyPkId BIGINT IDENTITY(1,1) NOT NULL,
-    PatientAllergyId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_opd_PA_Id DEFAULT NEWSEQUENTIALID(),
+    AllergyId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_opd_PA_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, PatientId UNIQUEIDENTIFIER NOT NULL,
     AllergyType NVARCHAR(20) NOT NULL CONSTRAINT CK_opd_PA_Type CHECK (AllergyType IN ('DRUG','FOOD','ENVIRONMENT','OTHER')),
-    AllergyName NVARCHAR(100) NOT NULL, Reaction NVARCHAR(200) NULL,
+    AllergyName NVARCHAR(100) NOT NULL,
+    ReactionType NVARCHAR(30) NULL,            -- Allergy, Intolerance, …
+    ReactionDescription NVARCHAR(200) NULL,
     Severity NVARCHAR(10) NOT NULL CONSTRAINT CK_opd_PA_Sev CHECK (Severity IN ('MILD','MODERATE','SEVERE')),
-    Status NVARCHAR(10) NOT NULL CONSTRAINT CK_opd_PA_Status CHECK (Status IN ('ACTIVE','RESOLVED')) CONSTRAINT DF_opd_PA_Status DEFAULT 'ACTIVE',
-    OnsetDate DATE NULL,
+    Status NVARCHAR(10) NOT NULL CONSTRAINT CK_opd_PA_Status CHECK (Status IN ('ACTIVE','RESOLVED','INACTIVE')) CONSTRAINT DF_opd_PA_Status DEFAULT 'ACTIVE',
+    IsTreated BIT NOT NULL CONSTRAINT DF_opd_PA_Treated DEFAULT 0,
+    IsFamilyHistory BIT NOT NULL CONSTRAINT DF_opd_PA_FamHx DEFAULT 0,
+    SinceWhen DATE NULL,
+    Notes NVARCHAR(500) NULL,
     IsActive BIT NOT NULL CONSTRAINT DF_opd_PA_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_opd_PA_Deleted DEFAULT 0,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_opd_PA_CreatedAt DEFAULT SYSUTCDATETIME(),
     CreatedBy UNIQUEIDENTIFIER NULL, ModifiedAt DATETIME2(3) NULL, ModifiedBy UNIQUEIDENTIFIER NULL,
     CONSTRAINT PK_opd_PA PRIMARY KEY CLUSTERED (PatientAllergyPkId),
-    CONSTRAINT UQ_opd_PA_Id UNIQUE NONCLUSTERED (PatientAllergyId),
+    CONSTRAINT UQ_opd_PA_Id UNIQUE NONCLUSTERED (AllergyId),
     CONSTRAINT FK_opd_PA_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_opd_PA_PatientId FOREIGN KEY (PatientId) REFERENCES opd.Patient(PatientId),
     INDEX IX_opd_PA_PatientId NONCLUSTERED (PatientId)
 );
 
+-- Model: PatientMedicalHistory. ItemId → cfg.MedicalHistoryItem when picked from the list (NULL = free text).
 CREATE TABLE opd.PatientMedicalHistory (
     PatientMedicalHistoryPkId BIGINT IDENTITY(1,1) NOT NULL,
-    PatientMedicalHistoryId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_opd_PMH_Id DEFAULT NEWSEQUENTIALID(),
+    PatientMedHistoryId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_opd_PMH_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, PatientId UNIQUEIDENTIFIER NOT NULL,
-    ConditionName NVARCHAR(100) NOT NULL, SinceMonth INT NULL, SinceYear INT NULL, Notes NVARCHAR(500) NULL,
-    ConditionStatus NVARCHAR(12) NOT NULL CONSTRAINT CK_opd_PMH_Status CHECK (ConditionStatus IN ('ACTIVE','CONTROLLED','RESOLVED')) CONSTRAINT DF_opd_PMH_Status DEFAULT 'ACTIVE',
+    ItemId UNIQUEIDENTIFIER NULL,
+    ConditionName NVARCHAR(100) NOT NULL,
+    OnsetMonth INT NULL CONSTRAINT CK_opd_PMH_Month CHECK (OnsetMonth BETWEEN 1 AND 12),
+    OnsetYear INT NULL,
+    Status NVARCHAR(12) NULL CONSTRAINT CK_opd_PMH_Status CHECK (Status IN ('ACTIVE','CONTROLLED','RESOLVED')),  -- NULL on older records = ACTIVE
+    Notes NVARCHAR(500) NULL,
+    RecordedByUserId UNIQUEIDENTIFIER NULL,
+    RecordedAt DATETIME2(3) NOT NULL CONSTRAINT DF_opd_PMH_RecAt DEFAULT SYSUTCDATETIME(),
     IsActive BIT NOT NULL CONSTRAINT DF_opd_PMH_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_opd_PMH_Deleted DEFAULT 0,
-    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_opd_PMH_CreatedAt DEFAULT SYSUTCDATETIME(),
-    CreatedBy UNIQUEIDENTIFIER NULL,
     CONSTRAINT PK_opd_PMH PRIMARY KEY CLUSTERED (PatientMedicalHistoryPkId),
-    CONSTRAINT UQ_opd_PMH_Id UNIQUE NONCLUSTERED (PatientMedicalHistoryId),
+    CONSTRAINT UQ_opd_PMH_Id UNIQUE NONCLUSTERED (PatientMedHistoryId),
     CONSTRAINT FK_opd_PMH_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_opd_PMH_PatientId FOREIGN KEY (PatientId) REFERENCES opd.Patient(PatientId),
+    CONSTRAINT FK_opd_PMH_ItemId FOREIGN KEY (ItemId) REFERENCES cfg.MedicalHistoryItem(ItemId),
+    CONSTRAINT FK_opd_PMH_RecordedBy FOREIGN KEY (RecordedByUserId) REFERENCES sec.ApplicationUser(UserId),
     INDEX IX_opd_PMH_PatientId NONCLUSTERED (PatientId)
 );
 
+-- Model: PatientMedicalEvent. EventId → cfg.MedicalEventType when picked from the list (NULL = free text).
 CREATE TABLE opd.PatientMedicalEvent (
     PatientMedicalEventPkId BIGINT IDENTITY(1,1) NOT NULL,
-    PatientMedicalEventId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_opd_PME_Id DEFAULT NEWSEQUENTIALID(),
+    PatientMedEventId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_opd_PME_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, PatientId UNIQUEIDENTIFIER NOT NULL,
-    EventType NVARCHAR(50) NOT NULL, EventDate DATE NULL, Notes NVARCHAR(500) NULL,
+    EventId UNIQUEIDENTIFIER NULL,
+    EventName NVARCHAR(100) NOT NULL,
+    EventMonth INT NULL CONSTRAINT CK_opd_PME_Month CHECK (EventMonth BETWEEN 1 AND 12),
+    EventYear INT NULL,
+    Notes NVARCHAR(500) NULL,
+    RecordedByUserId UNIQUEIDENTIFIER NULL,
+    RecordedAt DATETIME2(3) NOT NULL CONSTRAINT DF_opd_PME_RecAt DEFAULT SYSUTCDATETIME(),
     IsActive BIT NOT NULL CONSTRAINT DF_opd_PME_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_opd_PME_Deleted DEFAULT 0,
-    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_opd_PME_CreatedAt DEFAULT SYSUTCDATETIME(),
-    CreatedBy UNIQUEIDENTIFIER NULL,
     CONSTRAINT PK_opd_PME PRIMARY KEY CLUSTERED (PatientMedicalEventPkId),
-    CONSTRAINT UQ_opd_PME_Id UNIQUE NONCLUSTERED (PatientMedicalEventId),
+    CONSTRAINT UQ_opd_PME_Id UNIQUE NONCLUSTERED (PatientMedEventId),
     CONSTRAINT FK_opd_PME_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_opd_PME_PatientId FOREIGN KEY (PatientId) REFERENCES opd.Patient(PatientId),
+    CONSTRAINT FK_opd_PME_EventId FOREIGN KEY (EventId) REFERENCES cfg.MedicalEventType(EventId),
+    CONSTRAINT FK_opd_PME_RecordedBy FOREIGN KEY (RecordedByUserId) REFERENCES sec.ApplicationUser(UserId),
     INDEX IX_opd_PME_PatientId NONCLUSTERED (PatientId)
 );
 
+-- Model: PatientFamilyHistory. RelationshipType: FATHER, MOTHER, SIBLING, …
 CREATE TABLE opd.PatientFamilyHistory (
     PatientFamilyHistoryPkId BIGINT IDENTITY(1,1) NOT NULL,
-    PatientFamilyHistoryId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_opd_PFH_Id DEFAULT NEWSEQUENTIALID(),
+    FamilyHistoryId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_opd_PFH_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, PatientId UNIQUEIDENTIFIER NOT NULL,
-    Relation NVARCHAR(30) NOT NULL, [Condition] NVARCHAR(100) NOT NULL, Notes NVARCHAR(300) NULL,
+    RelationshipType NVARCHAR(30) NOT NULL,
+    ConditionName NVARCHAR(100) NOT NULL,
+    Notes NVARCHAR(300) NULL,
+    RecordedAt DATETIME2(3) NOT NULL CONSTRAINT DF_opd_PFH_RecAt DEFAULT SYSUTCDATETIME(),
     IsActive BIT NOT NULL CONSTRAINT DF_opd_PFH_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_opd_PFH_Deleted DEFAULT 0,
-    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_opd_PFH_CreatedAt DEFAULT SYSUTCDATETIME(),
     CreatedBy UNIQUEIDENTIFIER NULL,
     CONSTRAINT PK_opd_PFH PRIMARY KEY CLUSTERED (PatientFamilyHistoryPkId),
-    CONSTRAINT UQ_opd_PFH_Id UNIQUE NONCLUSTERED (PatientFamilyHistoryId),
+    CONSTRAINT UQ_opd_PFH_Id UNIQUE NONCLUSTERED (FamilyHistoryId),
     CONSTRAINT FK_opd_PFH_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_opd_PFH_PatientId FOREIGN KEY (PatientId) REFERENCES opd.Patient(PatientId),
     INDEX IX_opd_PFH_PatientId NONCLUSTERED (PatientId)
 );
 
+-- Model: PatientConsentDocument. Scanned copy of the patient's signed "Consent for Sharing Health Information"
+-- form (printed from the coverage page). The bytes live outside the database
+-- (App_Data/consent-forms/{StoredFileName}) and are only streamed after a permission check.
+CREATE TABLE opd.PatientConsentDocument (
+    PatientConsentDocumentPkId BIGINT IDENTITY(1,1) NOT NULL,
+    ConsentDocumentId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_opd_PCD_Id DEFAULT NEWSEQUENTIALID(),
+    HospitalId UNIQUEIDENTIFIER NOT NULL, PatientId UNIQUEIDENTIFIER NOT NULL,
+    FormVersion NVARCHAR(20) NULL,
+    FileName NVARCHAR(255) NOT NULL,
+    ContentType NVARCHAR(100) NOT NULL,
+    SizeBytes BIGINT NOT NULL CONSTRAINT CK_opd_PCD_Size CHECK (SizeBytes >= 0),
+    StoredFileName NVARCHAR(100) NOT NULL,
+    UploadedByUserId UNIQUEIDENTIFIER NULL,
+    UploadedAt DATETIME2(3) NOT NULL CONSTRAINT DF_opd_PCD_UpAt DEFAULT SYSUTCDATETIME(),
+    IsDeleted BIT NOT NULL CONSTRAINT DF_opd_PCD_Deleted DEFAULT 0,
+    CONSTRAINT PK_opd_PCD PRIMARY KEY CLUSTERED (PatientConsentDocumentPkId),
+    CONSTRAINT UQ_opd_PCD_Id UNIQUE NONCLUSTERED (ConsentDocumentId),
+    CONSTRAINT UQ_opd_PCD_Stored UNIQUE (StoredFileName),
+    CONSTRAINT FK_opd_PCD_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
+    CONSTRAINT FK_opd_PCD_PatientId FOREIGN KEY (PatientId) REFERENCES opd.Patient(PatientId),
+    CONSTRAINT FK_opd_PCD_UploadedBy FOREIGN KEY (UploadedByUserId) REFERENCES sec.ApplicationUser(UserId),
+    INDEX IX_opd_PCD_PatientId NONCLUSTERED (PatientId, UploadedAt DESC)
+);
+
+-- Model: Appointment. SlotStart / SlotEnd are full date-times; AppointmentDate is derived for the day indexes.
 CREATE TABLE opd.Appointment (  -- TEMPORAL: Phase 4
     AppointmentPkId BIGINT IDENTITY(1,1) NOT NULL,
     AppointmentId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_opd_Appt_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, PatientId UNIQUEIDENTIFIER NOT NULL, DoctorId UNIQUEIDENTIFIER NOT NULL,
-    SlotStart NVARCHAR(10) NOT NULL, SlotEnd NVARCHAR(10) NULL, AppointmentDate DATE NOT NULL,
+    SlotStart DATETIME2(0) NOT NULL,
+    SlotEnd DATETIME2(0) NOT NULL,
+    AppointmentDate AS CAST(SlotStart AS DATE) PERSISTED,
     [Type] NVARCHAR(20) NOT NULL,          -- cfg.AppointmentType.Code (NEW, FOLLOWUP, PROC, …)
     -- Lifecycle: BOOKED → CHECKED_IN (front desk) → IN_CONSULT (doctor opens consultation)
-    --            → COMPLETED (consultation signed off, cln.usp_ConfirmSignOff).
-    -- CANCELLED / NO_SHOW only from BOOKED or CHECKED_IN. Enforced by opd.usp_UpdateAppointmentStatus.
+    --            → COMPLETED (consultation signed off). CANCELLED / NO_SHOW only from BOOKED or CHECKED_IN.
     Status NVARCHAR(15) NOT NULL CONSTRAINT CK_opd_Appt_Status CHECK (Status IN ('BOOKED','CHECKED_IN','IN_CONSULT','COMPLETED','CANCELLED','NO_SHOW')) CONSTRAINT DF_opd_Appt_Status DEFAULT 'BOOKED',
-    CheckedInAt DATETIME2(3) NULL,         -- set on → CHECKED_IN
-    CheckedInBy UNIQUEIDENTIFIER NULL,     -- front-desk user who checked the patient in
-    ConsultStartedAt DATETIME2(3) NULL,    -- set on → IN_CONSULT
-    CompletedAt DATETIME2(3) NULL,         -- set on → COMPLETED
+    CheckedInAt DATETIME2(3) NULL,
+    CheckedInBy UNIQUEIDENTIFIER NULL,
+    ConsultStartedAt DATETIME2(3) NULL,
+    CompletedAt DATETIME2(3) NULL,
     Notes NVARCHAR(300) NULL,
     IsActive BIT NOT NULL CONSTRAINT DF_opd_Appt_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_opd_Appt_Deleted DEFAULT 0,
@@ -655,6 +772,7 @@ CREATE TABLE opd.Appointment (  -- TEMPORAL: Phase 4
     CreatedBy UNIQUEIDENTIFIER NULL, ModifiedAt DATETIME2(3) NULL, ModifiedBy UNIQUEIDENTIFIER NULL,
     CONSTRAINT PK_opd_Appt PRIMARY KEY CLUSTERED (AppointmentPkId),
     CONSTRAINT UQ_opd_Appt_Id UNIQUE NONCLUSTERED (AppointmentId),
+    CONSTRAINT CK_opd_Appt_Slot CHECK (SlotEnd > SlotStart),
     CONSTRAINT FK_opd_Appt_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_opd_Appt_PatientId FOREIGN KEY (PatientId) REFERENCES opd.Patient(PatientId),
     CONSTRAINT FK_opd_Appt_DoctorId FOREIGN KEY (DoctorId) REFERENCES sec.ApplicationUser(UserId),
@@ -665,7 +783,7 @@ CREATE TABLE opd.Appointment (  -- TEMPORAL: Phase 4
     INDEX IX_opd_Appt_Status NONCLUSTERED (Status)
 );
 
--- A patient's coverages. No active row = Self-Pay. A patient may hold Private Insurance and a
+-- Model: PatientCoverage. No active row = Self-Pay. A patient may hold Private Insurance and a
 -- Govt scheme at the same time; Priority orders how liabilities are allocated at billing.
 CREATE TABLE opd.PatientCoverage (
     CoveragePkId BIGINT IDENTITY(1,1) NOT NULL,
@@ -680,7 +798,6 @@ CREATE TABLE opd.PatientCoverage (
     Relationship NVARCHAR(20) NULL,                -- Self, Spouse, Child, Parent, Dependent
     ClaimMode NVARCHAR(15) NULL CONSTRAINT CK_opd_Cov_Claim CHECK (ClaimMode IN ('CASHLESS','REIMBURSEMENT') OR ClaimMode IS NULL),
     GovtCardNumber NVARCHAR(50) NULL,              -- ENCRYPTION: DETERMINISTIC (scheme / NHF card)
-    CardImageUrl NVARCHAR(500) NULL,               -- blob storage URL of the uploaded card
     EffectiveDate DATE NULL, ExpiryDate DATE NULL,
     Status NVARCHAR(10) NOT NULL CONSTRAINT CK_opd_Cov_Status CHECK (Status IN ('ACTIVE','PENDING','INACTIVE','EXPIRED')) CONSTRAINT DF_opd_Cov_Status DEFAULT 'ACTIVE',
     Priority INT NOT NULL CONSTRAINT DF_opd_Cov_Priority DEFAULT 1,
@@ -696,16 +813,15 @@ CREATE TABLE opd.PatientCoverage (
     INDEX IX_opd_Cov_PatientId NONCLUSTERED (PatientId, IsActive)
 );
 
--- Weekly availability (Schedule Settings → Doctors): one row per time window, several
--- windows per weekday allowed, no row for a weekday = closed. The slot length is NOT
--- stored here — it comes from APPT_SLOT_MINS (opd.DoctorSetting → cfg.HospitalSetting)
--- or the appointment type's duration. data.js: doctorSlotConfig
+-- Model: DoctorSlotConfig. Weekly availability: one row per time window, several windows per weekday
+-- allowed, no row for a weekday = closed. The slot length comes from APPT_SLOT_MINS
+-- (opd.DoctorSetting → cfg.HospitalSetting) or the appointment type's duration.
 CREATE TABLE opd.DoctorSlotConfig (
     SlotConfigPkId BIGINT IDENTITY(1,1) NOT NULL,
     SlotConfigId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_opd_SC_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, DoctorId UNIQUEIDENTIFIER NOT NULL,
     DayOfWeek NVARCHAR(3) NOT NULL CONSTRAINT CK_opd_SC_Day CHECK (DayOfWeek IN ('MON','TUE','WED','THU','FRI','SAT','SUN')),
-    StartTime NVARCHAR(5) NOT NULL, EndTime NVARCHAR(5) NOT NULL,
+    StartTime NVARCHAR(5) NOT NULL, EndTime NVARCHAR(5) NOT NULL,     -- 'HH:mm'
     IsActive BIT NOT NULL CONSTRAINT DF_opd_SC_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_opd_SC_Deleted DEFAULT 0,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_opd_SC_CreatedAt DEFAULT SYSUTCDATETIME(),
@@ -717,9 +833,9 @@ CREATE TABLE opd.DoctorSlotConfig (
     INDEX IX_opd_SC_DoctorDay NONCLUSTERED (DoctorId, DayOfWeek)
 );
 
--- Per-doctor overrides of APPT_SLOT_MINS / FREE_FOLLOWUP_ALLOWED / FREE_FOLLOWUP_DAYS and
+-- Model: DoctorSetting. Per-doctor overrides of APPT_SLOT_MINS / FREE_FOLLOWUP_ALLOWED / FREE_FOLLOWUP_DAYS and
 -- the doctor's charge model (CHARGE_MODEL FLAT|UNIT, CHARGE_UNIT_MINS, CHARGE_UNIT_RATE).
--- No row = inherit cfg.HospitalSetting. data.js: doctorSettings
+-- No row = inherit cfg.HospitalSetting.
 CREATE TABLE opd.DoctorSetting (
     DoctorSettingPkId BIGINT IDENTITY(1,1) NOT NULL,
     HospitalId UNIQUEIDENTIFIER NOT NULL, DoctorId UNIQUEIDENTIFIER NOT NULL,
@@ -733,7 +849,7 @@ CREATE TABLE opd.DoctorSetting (
     CONSTRAINT FK_opd_DSet_DoctorId FOREIGN KEY (DoctorId) REFERENCES sec.ApplicationUser(UserId)
 );
 
--- Full-day leave / holidays: no slots are offered on these dates. data.js: doctorLeave
+-- Model: DoctorLeave. Full-day leave / holidays: no slots are offered on these dates.
 CREATE TABLE opd.DoctorLeave (
     DoctorLeavePkId BIGINT IDENTITY(1,1) NOT NULL,
     LeaveId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_opd_DL_Id DEFAULT NEWSEQUENTIALID(),
@@ -748,23 +864,24 @@ CREATE TABLE opd.DoctorLeave (
     CONSTRAINT FK_opd_DL_DoctorId FOREIGN KEY (DoctorId) REFERENCES sec.ApplicationUser(UserId)
 );
 
--- Patient answers to the intake form, one per appointment. AnswersJson =
--- [{ QuestionId, Label, Answer }] — labels snapshotted. data.js: intakeResponses
+-- Model: IntakeResponse. Patient answers to the intake form, one per appointment.
+-- Answers = JSON List<IntakeAnswer> [{ QuestionId, Label, Answer }] — labels snapshotted.
 CREATE TABLE opd.IntakeResponse (
     IntakeResponsePkId BIGINT IDENTITY(1,1) NOT NULL,
     ResponseId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_opd_IR_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, AppointmentId UNIQUEIDENTIFIER NOT NULL, PatientId UNIQUEIDENTIFIER NOT NULL,
-    AnswersJson NVARCHAR(MAX) NOT NULL CONSTRAINT CK_opd_IR_Json CHECK (ISJSON(AnswersJson) = 1),
+    Answers NVARCHAR(MAX) NOT NULL CONSTRAINT CK_opd_IR_Json CHECK (ISJSON(Answers) = 1),
     SubmittedAt DATETIME2(3) NOT NULL CONSTRAINT DF_opd_IR_At DEFAULT SYSUTCDATETIME(),
     CONSTRAINT PK_opd_IR PRIMARY KEY CLUSTERED (IntakeResponsePkId),
     CONSTRAINT UQ_opd_IR_Id UNIQUE NONCLUSTERED (ResponseId),
     CONSTRAINT UQ_opd_IR_Appt UNIQUE NONCLUSTERED (AppointmentId),
+    CONSTRAINT FK_opd_IR_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_opd_IR_AppointmentId FOREIGN KEY (AppointmentId) REFERENCES opd.Appointment(AppointmentId),
     CONSTRAINT FK_opd_IR_PatientId FOREIGN KEY (PatientId) REFERENCES opd.Patient(PatientId)
 );
 
--- Signed consents — append-only (no update/delete); title/text snapshotted at signing.
--- data.js: consentRecords
+-- Model: ConsentRecord. Signed consents — append-only (no update/delete); title/text snapshotted at signing.
+-- FK ConsultationId → cln.Consultation is added at the end of section D.
 CREATE TABLE opd.ConsentRecord (
     ConsentRecordPkId BIGINT IDENTITY(1,1) NOT NULL,
     ConsentRecordId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_opd_CR_Id DEFAULT NEWSEQUENTIALID(),
@@ -773,31 +890,35 @@ CREATE TABLE opd.ConsentRecord (
     SignedByName NVARCHAR(200) NOT NULL,
     Method NVARCHAR(10) NOT NULL CONSTRAINT CK_opd_CR_Method CHECK (Method IN ('IN_CLINIC','PORTAL')),
     FormVersion INT NOT NULL, TitleSnapshot NVARCHAR(200) NOT NULL, BodySnapshot NVARCHAR(MAX) NOT NULL,
-    RecordedBy UNIQUEIDENTIFIER NULL,
     SignedAt DATETIME2(3) NOT NULL CONSTRAINT DF_opd_CR_At DEFAULT SYSUTCDATETIME(),
     CONSTRAINT PK_opd_CR PRIMARY KEY CLUSTERED (ConsentRecordPkId),
     CONSTRAINT UQ_opd_CR_Id UNIQUE NONCLUSTERED (ConsentRecordId),
+    CONSTRAINT FK_opd_CR_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_opd_CR_FormId FOREIGN KEY (ConsentFormId) REFERENCES cfg.ConsentForm(ConsentFormId),
     CONSTRAINT FK_opd_CR_PatientId FOREIGN KEY (PatientId) REFERENCES opd.Patient(PatientId),
-    INDEX IX_opd_CR_Appt NONCLUSTERED (AppointmentId)
+    CONSTRAINT FK_opd_CR_ApptId FOREIGN KEY (AppointmentId) REFERENCES opd.Appointment(AppointmentId),
+    INDEX IX_opd_CR_Appt NONCLUSTERED (AppointmentId),
+    INDEX IX_opd_CR_PatientId NONCLUSTERED (PatientId)
 );
 
 -- ============================================================
--- D. cln — CLINICAL (14 tables)
+-- D. cln — CLINICAL (18 tables)
 -- ============================================================
 
+-- Model: Consultation. Status: IN_PROGRESS → LOCKED (signed off).
+-- *Personal = the doctor's private working notes per SOAP section; SkippedSteps = JSON array of section keys.
 CREATE TABLE cln.Consultation (  -- TEMPORAL: Phase 4
     ConsultationPkId BIGINT IDENTITY(1,1) NOT NULL,
     ConsultationId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_Con_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, PatientId UNIQUEIDENTIFIER NOT NULL, DoctorId UNIQUEIDENTIFIER NOT NULL,
-    AppointmentId UNIQUEIDENTIFIER NULL, VisitDate DATE NOT NULL,
-    ConsultationType NVARCHAR(10) NOT NULL CONSTRAINT CK_cln_Con_Type CHECK (ConsultationType IN ('NEW','FOLLOWUP')) CONSTRAINT DF_cln_Con_Type DEFAULT 'NEW',
+    AppointmentId UNIQUEIDENTIFIER NULL,
+    VisitDate DATETIME2(0) NOT NULL,
     Status NVARCHAR(15) NOT NULL CONSTRAINT CK_cln_Con_Status CHECK (Status IN ('IN_PROGRESS','COMPLETED','LOCKED')) CONSTRAINT DF_cln_Con_Status DEFAULT 'IN_PROGRESS',
-    ChiefComplaint NVARCHAR(500) NULL,
-    SubjectiveText NVARCHAR(MAX) NULL, ObjectiveText NVARCHAR(MAX) NULL,
-    AssessmentText NVARCHAR(MAX) NULL, PlanText NVARCHAR(MAX) NULL,
-    FollowUpDate DATE NULL, FollowUpNotes NVARCHAR(500) NULL,
     IsLocked BIT NOT NULL CONSTRAINT DF_cln_Con_Locked DEFAULT 0,
+    SubjectiveText NVARCHAR(MAX) NULL, ObjectiveText NVARCHAR(MAX) NULL, PlanText NVARCHAR(MAX) NULL,
+    SubjectivePersonal NVARCHAR(MAX) NULL, ObjectivePersonal NVARCHAR(MAX) NULL, PlanPersonal NVARCHAR(MAX) NULL,
+    FollowupDate DATE NULL, FollowupNotes NVARCHAR(500) NULL,
+    SkippedSteps NVARCHAR(1000) NULL CONSTRAINT CK_cln_Con_Skipped CHECK (SkippedSteps IS NULL OR ISJSON(SkippedSteps) = 1),
     IsActive BIT NOT NULL CONSTRAINT DF_cln_Con_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cln_Con_Deleted DEFAULT 0,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_Con_CreatedAt DEFAULT SYSUTCDATETIME(),
@@ -814,29 +935,32 @@ CREATE TABLE cln.Consultation (  -- TEMPORAL: Phase 4
     INDEX IX_cln_Con_Status NONCLUSTERED (Status)
 );
 
+-- Model: ConsultationVitals — one row per consultation, values in the base unit (°F, mmHg, cm, kg, …).
+-- ConsultationVitals.CustomValues → cln.ConsultationCustomVital.
 CREATE TABLE cln.ConsultationVital (
     ConsultationVitalPkId BIGINT IDENTITY(1,1) NOT NULL,
-    ConsultationVitalId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_CV_Id DEFAULT NEWSEQUENTIALID(),
+    VitalId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_CV_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, ConsultationId UNIQUEIDENTIFIER NOT NULL,
-    TempValue DECIMAL(5,1) NULL, BpSystolic INT NULL, BpDiastolic INT NULL,
-    PulseBpm INT NULL, SpO2 INT NULL, RespRate INT NULL,
-    HeightCm DECIMAL(5,1) NULL, WeightKg DECIMAL(5,1) NULL, Bmi DECIMAL(4,1) NULL,
-    PainScale INT NULL, WaistCircCm DECIMAL(5,1) NULL, HeadCircCm DECIMAL(5,1) NULL,
-    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_CV_CreatedAt DEFAULT SYSUTCDATETIME(),
-    ModifiedAt DATETIME2(3) NULL,
+    TempValue DECIMAL(5,1) NULL, BpSystolic DECIMAL(5,1) NULL, BpDiastolic DECIMAL(5,1) NULL,
+    PulseBpm DECIMAL(5,1) NULL, SpO2 DECIMAL(5,1) NULL, RespRate DECIMAL(5,1) NULL,
+    HeightCm DECIMAL(5,1) NULL, WeightKg DECIMAL(6,2) NULL, Bmi DECIMAL(4,1) NULL,
+    PainScale DECIMAL(4,1) NULL, WaistCircCm DECIMAL(5,1) NULL, HeadCircCm DECIMAL(5,1) NULL,
+    RecordedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_CV_RecAt DEFAULT SYSUTCDATETIME(),
+    RecordedBy UNIQUEIDENTIFIER NULL,
     CONSTRAINT PK_cln_CV PRIMARY KEY CLUSTERED (ConsultationVitalPkId),
-    CONSTRAINT UQ_cln_CV_Id UNIQUE NONCLUSTERED (ConsultationVitalId),
+    CONSTRAINT UQ_cln_CV_Id UNIQUE NONCLUSTERED (VitalId),
     CONSTRAINT FK_cln_CV_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_cln_CV_ConsultId FOREIGN KEY (ConsultationId) REFERENCES cln.Consultation(ConsultationId),
+    CONSTRAINT FK_cln_CV_RecordedBy FOREIGN KEY (RecordedBy) REFERENCES sec.ApplicationUser(UserId),
     CONSTRAINT UQ_cln_CV_ConsultId UNIQUE (ConsultationId)
 );
 
-/* Values of hospital-defined (custom) vitals: one row per consultation per custom vital code */
+-- Model: ConsultationVitals.CustomValues (keyed by vital code). One row per consultation per custom vital.
 CREATE TABLE cln.ConsultationCustomVital (
     ConsultationCustomVitalPkId BIGINT IDENTITY(1,1) NOT NULL,
     HospitalId UNIQUEIDENTIFIER NOT NULL, ConsultationId UNIQUEIDENTIFIER NOT NULL,
     VitalCode NVARCHAR(40) NOT NULL,
-    VitalValue DECIMAL(10,2) NOT NULL,
+    VitalValue DECIMAL(10,2) NULL,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_CCV_CreatedAt DEFAULT SYSUTCDATETIME(),
     ModifiedAt DATETIME2(3) NULL,
     CONSTRAINT PK_cln_CCV PRIMARY KEY CLUSTERED (ConsultationCustomVitalPkId),
@@ -845,60 +969,74 @@ CREATE TABLE cln.ConsultationCustomVital (
     CONSTRAINT UQ_cln_CCV_Consult_Code UNIQUE (ConsultationId, VitalCode)
 );
 
+-- Model: ConsultationSymptom. Tri-state complaint: UNSET → YES → NO → UNSET.
 CREATE TABLE cln.ConsultationSymptom (
     ConsultationSymptomPkId BIGINT IDENTITY(1,1) NOT NULL,
-    ConsultationSymptomId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_CS_Id DEFAULT NEWSEQUENTIALID(),
+    SymptomId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_CS_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, ConsultationId UNIQUEIDENTIFIER NOT NULL,
-    SymptomName NVARCHAR(100) NOT NULL,
-    [State] NVARCHAR(10) NOT NULL CONSTRAINT CK_cln_CS_State CHECK ([State] IN ('YES','NO','NOT_ASKED')) CONSTRAINT DF_cln_CS_State DEFAULT 'NOT_ASKED',
+    SymptomCode NVARCHAR(40) NOT NULL,         -- cfg.SymptomCatalog.SymptomCode
+    [State] NVARCHAR(10) NOT NULL CONSTRAINT CK_cln_CS_State CHECK ([State] IN ('UNSET','YES','NO')) CONSTRAINT DF_cln_CS_State DEFAULT 'UNSET',
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_CS_CreatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT PK_cln_CS PRIMARY KEY CLUSTERED (ConsultationSymptomPkId),
-    CONSTRAINT UQ_cln_CS_Id UNIQUE NONCLUSTERED (ConsultationSymptomId),
+    CONSTRAINT UQ_cln_CS_Id UNIQUE NONCLUSTERED (SymptomId),
+    CONSTRAINT UQ_cln_CS_Consult_Code UNIQUE (ConsultationId, SymptomCode),
     CONSTRAINT FK_cln_CS_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
-    CONSTRAINT FK_cln_CS_ConsultId FOREIGN KEY (ConsultationId) REFERENCES cln.Consultation(ConsultationId),
-    INDEX IX_cln_CS_ConsultId NONCLUSTERED (ConsultationId)
+    CONSTRAINT FK_cln_CS_ConsultId FOREIGN KEY (ConsultationId) REFERENCES cln.Consultation(ConsultationId)
 );
 
+-- Model: ConsultationDiagnosis. Laterality / AcuteChronic options are hospital-extensible
+-- (cfg.ConsultationFormConfig), so they are not CHECK-constrained.
 CREATE TABLE cln.ConsultationDiagnosis (
     ConsultationDiagnosisPkId BIGINT IDENTITY(1,1) NOT NULL,
-    ConsultationDiagnosisId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_Dx_Id DEFAULT NEWSEQUENTIALID(),
+    DiagnosisId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_Dx_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, ConsultationId UNIQUEIDENTIFIER NOT NULL,
-    ICD10Code NVARCHAR(10) NOT NULL, [Description] NVARCHAR(300) NOT NULL,
+    Icd10Code NVARCHAR(10) NOT NULL,
+    Icd10Description NVARCHAR(300) NOT NULL,
+    ClinicalNotes NVARCHAR(500) NULL,
+    Laterality NVARCHAR(20) NULL,
+    AcuteChronic NVARCHAR(20) NULL,
     IsPrimary BIT NOT NULL CONSTRAINT DF_cln_Dx_Primary DEFAULT 0,
-    Laterality NVARCHAR(10) NULL,
-    Chronicity NVARCHAR(10) NULL CONSTRAINT CK_cln_Dx_Chron CHECK (Chronicity IN ('ACUTE','CHRONIC',NULL)),
-    SequenceOrder INT NOT NULL CONSTRAINT DF_cln_Dx_Seq DEFAULT 1,
+    SequenceOrder INT NOT NULL CONSTRAINT DF_cln_Dx_Seq DEFAULT 0,
     IsActive BIT NOT NULL CONSTRAINT DF_cln_Dx_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cln_Dx_Deleted DEFAULT 0,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_Dx_CreatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT PK_cln_Dx PRIMARY KEY CLUSTERED (ConsultationDiagnosisPkId),
-    CONSTRAINT UQ_cln_Dx_Id UNIQUE NONCLUSTERED (ConsultationDiagnosisId),
+    CONSTRAINT UQ_cln_Dx_Id UNIQUE NONCLUSTERED (DiagnosisId),
     CONSTRAINT FK_cln_Dx_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_cln_Dx_ConsultId FOREIGN KEY (ConsultationId) REFERENCES cln.Consultation(ConsultationId),
     INDEX IX_cln_Dx_ConsultId NONCLUSTERED (ConsultationId)
 );
 
+-- Model: Prescription. Source NULL = prescribed in a consultation here; 'OUTSIDE' = medicine from elsewhere,
+-- recorded on the Health Record (no consultation). IsOutside / TimingLabel are derived and not stored.
 CREATE TABLE cln.Prescription (  -- TEMPORAL: Phase 4
     PrescriptionPkId BIGINT IDENTITY(1,1) NOT NULL,
     PrescriptionId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_Rx_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL,
-    ConsultationId UNIQUEIDENTIFIER NULL,                   -- NULL for outside medicines recorded on the Health Record
+    ConsultationId UNIQUEIDENTIFIER NULL,
     PatientId UNIQUEIDENTIFIER NOT NULL,
-    Source NVARCHAR(10) NULL CONSTRAINT CK_cln_Rx_Source CHECK (Source IN ('OUTSIDE')),  -- NULL = prescribed in a consultation
+    Source NVARCHAR(10) NULL CONSTRAINT CK_cln_Rx_Source CHECK (Source IN ('OUTSIDE')),
     SourceDetail NVARCHAR(120) NULL,                       -- who prescribed an outside medicine
+    Category NVARCHAR(20) NULL,
     MedicineName NVARCHAR(200) NOT NULL, Strength NVARCHAR(50) NULL,
-    DrugForm NVARCHAR(30) NULL, DeliveryRoute NVARCHAR(30) NULL,
-    Category NVARCHAR(20) NULL, TargetArea NVARCHAR(50) NULL,
-    TakeInUnit NVARCHAR(20) NULL, TakeInQty DECIMAL(5,1) NOT NULL CONSTRAINT DF_cln_Rx_Qty DEFAULT 1,
+    GenericClass NVARCHAR(200) NULL, TherapeuticClass NVARCHAR(300) NULL,
+    DrugForm NVARCHAR(30) NULL, DeliveryRoute NVARCHAR(30) NULL, TargetArea NVARCHAR(50) NULL,
+    TakeInUnit NVARCHAR(20) NULL, TakeInQty DECIMAL(6,2) NOT NULL CONSTRAINT DF_cln_Rx_Qty DEFAULT 1,
     TimesPerDay INT NOT NULL CONSTRAINT DF_cln_Rx_Times DEFAULT 1,
-    DurationValue INT NULL, DurationUnit NVARCHAR(10) NULL,
-    PeriodStartDate DATE NULL, PeriodEndDate DATE NULL, FrequencyMode NVARCHAR(10) NULL,
-    IsTimingBf BIT NOT NULL CONSTRAINT DF_cln_Rx_Bf DEFAULT 0,
-    IsTimingAn BIT NOT NULL CONSTRAINT DF_cln_Rx_An DEFAULT 0,
-    IsTimingNi BIT NOT NULL CONSTRAINT DF_cln_Rx_Ni DEFAULT 0,
-    IsTimingEm BIT NOT NULL CONSTRAINT DF_cln_Rx_Em DEFAULT 0,
-    IsPrn BIT NOT NULL CONSTRAINT DF_cln_Rx_Prn DEFAULT 0,
+    DurationValue INT NOT NULL CONSTRAINT DF_cln_Rx_Dur DEFAULT 0, DurationUnit NVARCHAR(10) NULL,
+    PeriodStart DATE NULL, PeriodEnd DATE NULL,
+    FrequencyMode NVARCHAR(10) NULL, FrequencyPeriod NVARCHAR(10) NULL,
+    TimingBf BIT NOT NULL CONSTRAINT DF_cln_Rx_Bf DEFAULT 0,
+    TimingAn BIT NOT NULL CONSTRAINT DF_cln_Rx_An DEFAULT 0,
+    TimingNi BIT NOT NULL CONSTRAINT DF_cln_Rx_Ni DEFAULT 0,
+    TimingEm BIT NOT NULL CONSTRAINT DF_cln_Rx_Em DEFAULT 0,
+    Prn BIT NOT NULL CONSTRAINT DF_cln_Rx_Prn DEFAULT 0,
     Instructions NVARCHAR(500) NULL, DynamicInstruction NVARCHAR(500) NULL,
+    ValidityDays INT NOT NULL CONSTRAINT DF_cln_Rx_Valid DEFAULT 30,
+    ValidUntil DATE NULL,
+    TotalDispenseQty DECIMAL(8,2) NOT NULL CONSTRAINT DF_cln_Rx_Disp DEFAULT 0,
+    PrescribedDate DATETIME2(0) NOT NULL CONSTRAINT DF_cln_Rx_PrescAt DEFAULT SYSUTCDATETIME(),
+    RepeatedFromConsultationId UNIQUEIDENTIFIER NULL,      -- "repeat previous Rx" source visit
     Status NVARCHAR(15) NOT NULL CONSTRAINT CK_cln_Rx_Status CHECK (Status IN ('ACTIVE','DISCONTINUED','COMPLETED')) CONSTRAINT DF_cln_Rx_Status DEFAULT 'ACTIVE',
     IsActive BIT NOT NULL CONSTRAINT DF_cln_Rx_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cln_Rx_Deleted DEFAULT 0,
@@ -908,97 +1046,102 @@ CREATE TABLE cln.Prescription (  -- TEMPORAL: Phase 4
     CONSTRAINT UQ_cln_Rx_Id UNIQUE NONCLUSTERED (PrescriptionId),
     CONSTRAINT FK_cln_Rx_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_cln_Rx_ConsultId FOREIGN KEY (ConsultationId) REFERENCES cln.Consultation(ConsultationId),
+    CONSTRAINT FK_cln_Rx_RepeatedFrom FOREIGN KEY (RepeatedFromConsultationId) REFERENCES cln.Consultation(ConsultationId),
     CONSTRAINT FK_cln_Rx_PatientId FOREIGN KEY (PatientId) REFERENCES opd.Patient(PatientId),
-    INDEX IX_cln_Rx_ConsultId NONCLUSTERED (ConsultationId),
     CONSTRAINT CK_cln_Rx_Origin CHECK (ConsultationId IS NOT NULL OR Source = 'OUTSIDE'),
-    INDEX IX_cln_Rx_PatientId NONCLUSTERED (PatientId)
+    INDEX IX_cln_Rx_ConsultId NONCLUSTERED (ConsultationId),
+    INDEX IX_cln_Rx_PatientId NONCLUSTERED (PatientId, Status)
 );
 
-CREATE TABLE cln.PrescriptionSafetyAlert (
-    SafetyAlertPkId BIGINT IDENTITY(1,1) NOT NULL,
-    SafetyAlertId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_SA_Id DEFAULT NEWSEQUENTIALID(),
-    HospitalId UNIQUEIDENTIFIER NOT NULL, PrescriptionId UNIQUEIDENTIFIER NOT NULL,
-    AlertType NVARCHAR(30) NOT NULL, AlertMessage NVARCHAR(500) NOT NULL,
-    IsOverridden BIT NOT NULL CONSTRAINT DF_cln_SA_Over DEFAULT 0,
-    OverrideReason NVARCHAR(300) NULL, OverriddenBy UNIQUEIDENTIFIER NULL,
-    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_SA_CreatedAt DEFAULT SYSUTCDATETIME(),
-    CONSTRAINT PK_cln_SA PRIMARY KEY CLUSTERED (SafetyAlertPkId),
-    CONSTRAINT UQ_cln_SA_Id UNIQUE NONCLUSTERED (SafetyAlertId),
-    CONSTRAINT FK_cln_SA_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
-    CONSTRAINT FK_cln_SA_RxId FOREIGN KEY (PrescriptionId) REFERENCES cln.Prescription(PrescriptionId),
-    INDEX IX_cln_SA_RxId NONCLUSTERED (PrescriptionId)
-);
-
+-- Model: InvestigationOrder. Lab / imaging order. Status: ORDERED → SENT → RESULTS_READY.
 CREATE TABLE cln.InvestigationOrder (
     InvestigationOrderPkId BIGINT IDENTITY(1,1) NOT NULL,
-    InvestigationOrderId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_IO_Id DEFAULT NEWSEQUENTIALID(),
+    OrderId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_IO_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, ConsultationId UNIQUEIDENTIFIER NOT NULL, PatientId UNIQUEIDENTIFIER NOT NULL,
-    TestName NVARCHAR(100) NOT NULL, TestType NVARCHAR(20) NOT NULL,
-    Priority NVARCHAR(10) NOT NULL CONSTRAINT CK_cln_IO_Pri CHECK (Priority IN ('ROUTINE','URGENT','STAT')) CONSTRAINT DF_cln_IO_Pri DEFAULT 'ROUTINE',
-    ClinicalNotes NVARCHAR(300) NULL, IsFasting BIT NOT NULL CONSTRAINT DF_cln_IO_Fast DEFAULT 0,
-    LabPartnerId UNIQUEIDENTIFIER NULL,  -- set when a lab partner claims the order from the patient's requisition
-    Status NVARCHAR(15) NOT NULL CONSTRAINT CK_cln_IO_Status CHECK (Status IN ('ORDERED','IN_PROGRESS','COMPLETED','CANCELLED')) CONSTRAINT DF_cln_IO_Status DEFAULT 'ORDERED',
+    TestId UNIQUEIDENTIFIER NULL,          -- cfg.LabTestCatalog; NULL for a free-text test
+    TestName NVARCHAR(100) NOT NULL,
+    TestType NVARCHAR(20) NOT NULL,
+    Status NVARCHAR(15) NOT NULL CONSTRAINT CK_cln_IO_Status CHECK (Status IN ('ORDERED','SENT','RESULTS_READY')) CONSTRAINT DF_cln_IO_Status DEFAULT 'ORDERED',
+    OrderedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_IO_OrderedAt DEFAULT SYSUTCDATETIME(),
+    LabPartnerId UNIQUEIDENTIFIER NULL,    -- set when a lab partner claims the order from the patient's requisition
     IsActive BIT NOT NULL CONSTRAINT DF_cln_IO_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cln_IO_Deleted DEFAULT 0,
-    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_IO_CreatedAt DEFAULT SYSUTCDATETIME(),
     CreatedBy UNIQUEIDENTIFIER NULL,
     CONSTRAINT PK_cln_IO PRIMARY KEY CLUSTERED (InvestigationOrderPkId),
-    CONSTRAINT UQ_cln_IO_Id UNIQUE NONCLUSTERED (InvestigationOrderId),
+    CONSTRAINT UQ_cln_IO_Id UNIQUE NONCLUSTERED (OrderId),
     CONSTRAINT FK_cln_IO_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_cln_IO_ConsultId FOREIGN KEY (ConsultationId) REFERENCES cln.Consultation(ConsultationId),
     CONSTRAINT FK_cln_IO_PatientId FOREIGN KEY (PatientId) REFERENCES opd.Patient(PatientId),
-    INDEX IX_cln_IO_ConsultId NONCLUSTERED (ConsultationId)
+    CONSTRAINT FK_cln_IO_TestId FOREIGN KEY (TestId) REFERENCES cfg.LabTestCatalog(TestId),
+    CONSTRAINT FK_cln_IO_LabPartnerId FOREIGN KEY (LabPartnerId) REFERENCES cfg.LabPartner(LabPartnerId),
+    INDEX IX_cln_IO_ConsultId NONCLUSTERED (ConsultationId),
+    INDEX IX_cln_IO_PatientId NONCLUSTERED (PatientId),
+    INDEX IX_cln_IO_LabPartner NONCLUSTERED (LabPartnerId, Status)
 );
 
+-- Model: LabResult. Uploaded by a lab partner. Status: PENDING_REVIEW → REVIEWED.
 CREATE TABLE cln.LabResult (
     LabResultPkId BIGINT IDENTITY(1,1) NOT NULL,
-    LabResultId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_LR_Id DEFAULT NEWSEQUENTIALID(),
-    HospitalId UNIQUEIDENTIFIER NOT NULL, InvestigationOrderId UNIQUEIDENTIFIER NOT NULL,
-    LabPartnerId UNIQUEIDENTIFIER NULL, ResultSummary NVARCHAR(500) NULL,
+    ResultId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_LR_Id DEFAULT NEWSEQUENTIALID(),
+    OrderId UNIQUEIDENTIFIER NOT NULL,
+    HospitalId UNIQUEIDENTIFIER NOT NULL, PatientId UNIQUEIDENTIFIER NOT NULL, ConsultationId UNIQUEIDENTIFIER NULL,
+    TestName NVARCHAR(100) NOT NULL,
+    ResultSummary NVARCHAR(500) NULL,
     ResultValue NVARCHAR(100) NULL, ReferenceRange NVARCHAR(100) NULL,
-    Interpretation NVARCHAR(10) NULL CONSTRAINT CK_cln_LR_Interp CHECK (Interpretation IN ('NORMAL','ABNORMAL','CRITICAL',NULL)),
-    TechnicianName NVARCHAR(100) NULL, ReviewedBy UNIQUEIDENTIFIER NULL,
+    Interpretation NVARCHAR(10) NULL CONSTRAINT CK_cln_LR_Interp CHECK (Interpretation IN ('NORMAL','ABNORMAL','CRITICAL')),
+    Technician NVARCHAR(100) NULL,
+    Notes NVARCHAR(500) NULL,
+    UploadedByUserId UNIQUEIDENTIFIER NULL,
+    LabPartnerId UNIQUEIDENTIFIER NULL,
+    UploadedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_LR_UpAt DEFAULT SYSUTCDATETIME(),
+    Status NVARCHAR(15) NOT NULL CONSTRAINT CK_cln_LR_Status CHECK (Status IN ('PENDING_REVIEW','REVIEWED')) CONSTRAINT DF_cln_LR_Status DEFAULT 'PENDING_REVIEW',
     ReviewedAt DATETIME2(3) NULL, ReviewNotes NVARCHAR(300) NULL,
-    Status NVARCHAR(10) NOT NULL CONSTRAINT CK_cln_LR_Status CHECK (Status IN ('PENDING','UPLOADED','REVIEWED')) CONSTRAINT DF_cln_LR_Status DEFAULT 'PENDING',
     IsActive BIT NOT NULL CONSTRAINT DF_cln_LR_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cln_LR_Deleted DEFAULT 0,
-    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_LR_CreatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT PK_cln_LR PRIMARY KEY CLUSTERED (LabResultPkId),
-    CONSTRAINT UQ_cln_LR_Id UNIQUE NONCLUSTERED (LabResultId),
+    CONSTRAINT UQ_cln_LR_Id UNIQUE NONCLUSTERED (ResultId),
     CONSTRAINT FK_cln_LR_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
-    CONSTRAINT FK_cln_LR_OrderId FOREIGN KEY (InvestigationOrderId) REFERENCES cln.InvestigationOrder(InvestigationOrderId),
-    INDEX IX_cln_LR_OrderId NONCLUSTERED (InvestigationOrderId)
+    CONSTRAINT FK_cln_LR_OrderId FOREIGN KEY (OrderId) REFERENCES cln.InvestigationOrder(OrderId),
+    CONSTRAINT FK_cln_LR_PatientId FOREIGN KEY (PatientId) REFERENCES opd.Patient(PatientId),
+    CONSTRAINT FK_cln_LR_ConsultId FOREIGN KEY (ConsultationId) REFERENCES cln.Consultation(ConsultationId),
+    CONSTRAINT FK_cln_LR_UploadedBy FOREIGN KEY (UploadedByUserId) REFERENCES sec.ApplicationUser(UserId),
+    CONSTRAINT FK_cln_LR_LabPartnerId FOREIGN KEY (LabPartnerId) REFERENCES cfg.LabPartner(LabPartnerId),
+    INDEX IX_cln_LR_OrderId NONCLUSTERED (OrderId),
+    INDEX IX_cln_LR_PatientId NONCLUSTERED (PatientId),
+    INDEX IX_cln_LR_Status NONCLUSTERED (HospitalId, Status)
 );
 
--- Report files (PDF / JPG / PNG / DICOM) uploaded with a lab result. The bytes are stored outside the
--- database (App_Data/lab-reports/{HospitalId}/{StoredFileName}); this row holds the metadata. data.js: labResultAttachments
+-- Model: LabResultAttachment. Report files (PDF / JPG / PNG / DICOM) uploaded with a lab result. The bytes are
+-- stored outside the database (App_Data/lab-reports/{HospitalId}/{StoredFileName}); this row holds the metadata.
 CREATE TABLE cln.LabResultAttachment (
     LabResultAttachmentPkId BIGINT IDENTITY(1,1) NOT NULL,
-    LabResultAttachmentId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_LRA_Id DEFAULT NEWSEQUENTIALID(),
-    HospitalId UNIQUEIDENTIFIER NOT NULL, LabResultId UNIQUEIDENTIFIER NOT NULL, InvestigationOrderId UNIQUEIDENTIFIER NOT NULL,
-    LabPartnerId UNIQUEIDENTIFIER NULL,
-    FileName NVARCHAR(255) NOT NULL, ContentType NVARCHAR(50) NOT NULL, SizeBytes BIGINT NOT NULL,
+    AttachmentId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_LRA_Id DEFAULT NEWSEQUENTIALID(),
+    ResultId UNIQUEIDENTIFIER NOT NULL, OrderId UNIQUEIDENTIFIER NOT NULL,
+    HospitalId UNIQUEIDENTIFIER NOT NULL, LabPartnerId UNIQUEIDENTIFIER NULL,
+    FileName NVARCHAR(255) NOT NULL, ContentType NVARCHAR(100) NOT NULL, SizeBytes BIGINT NOT NULL,
     StoredFileName NVARCHAR(100) NOT NULL,
+    UploadedByUserId UNIQUEIDENTIFIER NULL,
+    UploadedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_LRA_UpAt DEFAULT SYSUTCDATETIME(),
     IsActive BIT NOT NULL CONSTRAINT DF_cln_LRA_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cln_LRA_Deleted DEFAULT 0,
-    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_LRA_CreatedAt DEFAULT SYSUTCDATETIME(),
-    CreatedBy UNIQUEIDENTIFIER NULL,
     CONSTRAINT PK_cln_LRA PRIMARY KEY CLUSTERED (LabResultAttachmentPkId),
-    CONSTRAINT UQ_cln_LRA_Id UNIQUE NONCLUSTERED (LabResultAttachmentId),
+    CONSTRAINT UQ_cln_LRA_Id UNIQUE NONCLUSTERED (AttachmentId),
     CONSTRAINT FK_cln_LRA_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
-    CONSTRAINT FK_cln_LRA_ResultId FOREIGN KEY (LabResultId) REFERENCES cln.LabResult(LabResultId),
-    CONSTRAINT FK_cln_LRA_OrderId FOREIGN KEY (InvestigationOrderId) REFERENCES cln.InvestigationOrder(InvestigationOrderId),
-    INDEX IX_cln_LRA_ResultId NONCLUSTERED (LabResultId)
+    CONSTRAINT FK_cln_LRA_ResultId FOREIGN KEY (ResultId) REFERENCES cln.LabResult(ResultId),
+    CONSTRAINT FK_cln_LRA_OrderId FOREIGN KEY (OrderId) REFERENCES cln.InvestigationOrder(OrderId),
+    CONSTRAINT FK_cln_LRA_UploadedBy FOREIGN KEY (UploadedByUserId) REFERENCES sec.ApplicationUser(UserId),
+    INDEX IX_cln_LRA_ResultId NONCLUSTERED (ResultId)
 );
 
+-- Model: Referral. Urgency options are hospital-extensible (cfg.ConsultationFormConfig).
 CREATE TABLE cln.Referral (
     ReferralPkId BIGINT IDENTITY(1,1) NOT NULL,
     ReferralId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_Ref_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, ConsultationId UNIQUEIDENTIFIER NOT NULL, PatientId UNIQUEIDENTIFIER NOT NULL,
-    ReferToSpecialty NVARCHAR(100) NOT NULL, ReferToDoctorName NVARCHAR(200) NULL,
-    Urgency NVARCHAR(10) NOT NULL CONSTRAINT CK_cln_Ref_Urg CHECK (Urgency IN ('ROUTINE','URGENT','EMERGENCY')) CONSTRAINT DF_cln_Ref_Urg DEFAULT 'ROUTINE',
+    Specialty NVARCHAR(100) NOT NULL,
+    DoctorName NVARCHAR(200) NULL,
+    Urgency NVARCHAR(20) NOT NULL CONSTRAINT DF_cln_Ref_Urg DEFAULT 'ROUTINE',
     Reason NVARCHAR(500) NULL,
-    Status NVARCHAR(15) NOT NULL CONSTRAINT CK_cln_Ref_Status CHECK (Status IN ('PENDING','ACCEPTED','COMPLETED','CANCELLED')) CONSTRAINT DF_cln_Ref_Status DEFAULT 'PENDING',
     IsActive BIT NOT NULL CONSTRAINT DF_cln_Ref_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_cln_Ref_Deleted DEFAULT 0,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_Ref_CreatedAt DEFAULT SYSUTCDATETIME(),
@@ -1011,58 +1154,88 @@ CREATE TABLE cln.Referral (
     INDEX IX_cln_Ref_ConsultId NONCLUSTERED (ConsultationId)
 );
 
+-- Model: ConsultationServiceItem. A service or procedure done during the visit, picked from
+-- bil.ServiceChargeMaster. Holds no price: sign-off turns each row into an invoice line at the
+-- master's amount and tax. ServiceName / Category are snapshotted from the master.
+CREATE TABLE cln.ConsultationServiceItem (
+    ConsultationServiceItemPkId BIGINT IDENTITY(1,1) NOT NULL,
+    ConsultationServiceId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_CSI_Id DEFAULT NEWSEQUENTIALID(),
+    HospitalId UNIQUEIDENTIFIER NOT NULL, ConsultationId UNIQUEIDENTIFIER NOT NULL, PatientId UNIQUEIDENTIFIER NOT NULL,
+    ServiceChargeId UNIQUEIDENTIFIER NOT NULL,
+    ServiceName NVARCHAR(200) NOT NULL,
+    Category NVARCHAR(20) NOT NULL,
+    Qty INT NOT NULL CONSTRAINT DF_cln_CSI_Qty DEFAULT 1 CONSTRAINT CK_cln_CSI_Qty CHECK (Qty > 0),
+    Notes NVARCHAR(300) NULL,
+    AddedByUserId UNIQUEIDENTIFIER NULL,
+    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_CSI_CreatedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_cln_CSI PRIMARY KEY CLUSTERED (ConsultationServiceItemPkId),
+    CONSTRAINT UQ_cln_CSI_Id UNIQUE NONCLUSTERED (ConsultationServiceId),
+    CONSTRAINT FK_cln_CSI_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
+    CONSTRAINT FK_cln_CSI_ConsultId FOREIGN KEY (ConsultationId) REFERENCES cln.Consultation(ConsultationId),
+    CONSTRAINT FK_cln_CSI_PatientId FOREIGN KEY (PatientId) REFERENCES opd.Patient(PatientId),
+    CONSTRAINT FK_cln_CSI_AddedBy FOREIGN KEY (AddedByUserId) REFERENCES sec.ApplicationUser(UserId),
+    INDEX IX_cln_CSI_ConsultId NONCLUSTERED (ConsultationId)
+    -- FK ServiceChargeId → bil.ServiceChargeMaster is added at the end of section E
+);
+
+-- Model: ConsultationAttestation. The doctor's sign-off; one per consultation.
 CREATE TABLE cln.ConsultationAttestation (
     AttestationPkId BIGINT IDENTITY(1,1) NOT NULL,
     AttestationId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_Att_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, ConsultationId UNIQUEIDENTIFIER NOT NULL,
-    IsSubjectiveChecked BIT NOT NULL CONSTRAINT DF_cln_Att_S DEFAULT 0,
-    IsObjectiveChecked BIT NOT NULL CONSTRAINT DF_cln_Att_O DEFAULT 0,
-    IsAssessmentChecked BIT NOT NULL CONSTRAINT DF_cln_Att_A DEFAULT 0,
-    IsPlanChecked BIT NOT NULL CONSTRAINT DF_cln_Att_P DEFAULT 0,
+    DoctorId UNIQUEIDENTIFIER NOT NULL,
     SignedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_Att_SignedAt DEFAULT SYSUTCDATETIME(),
-    SignedBy UNIQUEIDENTIFIER NOT NULL,
+    SignatureHash NVARCHAR(128) NOT NULL,
     CONSTRAINT PK_cln_Att PRIMARY KEY CLUSTERED (AttestationPkId),
     CONSTRAINT UQ_cln_Att_Id UNIQUE NONCLUSTERED (AttestationId),
     CONSTRAINT FK_cln_Att_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_cln_Att_ConsultId FOREIGN KEY (ConsultationId) REFERENCES cln.Consultation(ConsultationId),
+    CONSTRAINT FK_cln_Att_DoctorId FOREIGN KEY (DoctorId) REFERENCES sec.ApplicationUser(UserId),
     CONSTRAINT UQ_cln_Att_ConsultId UNIQUE (ConsultationId)
 );
 
-CREATE TABLE cln.ConsultationAddendum (  -- append-only
+-- Model: Addendum. Append-only post-lock correction.
+CREATE TABLE cln.ConsultationAddendum (
     AddendumPkId BIGINT IDENTITY(1,1) NOT NULL,
     AddendumId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_Add_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, ConsultationId UNIQUEIDENTIFIER NOT NULL,
-    AddendumText NVARCHAR(MAX) NOT NULL, AddedBy UNIQUEIDENTIFIER NOT NULL,
+    DoctorId UNIQUEIDENTIFIER NOT NULL,
+    Category NVARCHAR(30) NULL,
+    AddendumText NVARCHAR(MAX) NOT NULL,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_Add_CreatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT PK_cln_Add PRIMARY KEY CLUSTERED (AddendumPkId),
     CONSTRAINT UQ_cln_Add_Id UNIQUE NONCLUSTERED (AddendumId),
     CONSTRAINT FK_cln_Add_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_cln_Add_ConsultId FOREIGN KEY (ConsultationId) REFERENCES cln.Consultation(ConsultationId),
+    CONSTRAINT FK_cln_Add_DoctorId FOREIGN KEY (DoctorId) REFERENCES sec.ApplicationUser(UserId),
     INDEX IX_cln_Add_ConsultId NONCLUSTERED (ConsultationId)
 );
 
+-- Model: ConfidentialNote. Author-only note; never shown to anyone but the writing doctor.
 CREATE TABLE cln.ConfidentialNote (
     ConfidentialNotePkId BIGINT IDENTITY(1,1) NOT NULL,
     ConfidentialNoteId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_CN_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, ConsultationId UNIQUEIDENTIFIER NOT NULL,
-    NoteText NVARCHAR(MAX) NOT NULL, CreatedBy UNIQUEIDENTIFIER NOT NULL,
+    DoctorId UNIQUEIDENTIFIER NOT NULL,
+    NoteText NVARCHAR(MAX) NOT NULL,                        -- ENCRYPTION: RANDOMIZED
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_CN_CreatedAt DEFAULT SYSUTCDATETIME(),
-    ModifiedAt DATETIME2(3) NULL,
+    UpdatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_CN_UpdatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT PK_cln_CN PRIMARY KEY CLUSTERED (ConfidentialNotePkId),
     CONSTRAINT UQ_cln_CN_Id UNIQUE NONCLUSTERED (ConfidentialNoteId),
     CONSTRAINT FK_cln_CN_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_cln_CN_ConsultId FOREIGN KEY (ConsultationId) REFERENCES cln.Consultation(ConsultationId),
-    CONSTRAINT UQ_cln_CN_ConsultId UNIQUE (ConsultationId)
+    CONSTRAINT FK_cln_CN_DoctorId FOREIGN KEY (DoctorId) REFERENCES sec.ApplicationUser(UserId),
+    CONSTRAINT UQ_cln_CN_Consult_Doctor UNIQUE (ConsultationId, DoctorId)
 );
 
+-- Model: ConsultationSketch. Drawing-pad sketch saved with a consultation (ImageData = JPEG data URL).
 CREATE TABLE cln.ConsultationSketch (
     SketchPkId BIGINT IDENTITY(1,1) NOT NULL,
     SketchId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_Sk_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, ConsultationId UNIQUEIDENTIFIER NOT NULL,
     PatientId UNIQUEIDENTIFIER NOT NULL, DoctorId UNIQUEIDENTIFIER NOT NULL,
     Title NVARCHAR(100) NULL,
-    SketchDataUrl NVARCHAR(MAX) NOT NULL,                   -- JPEG base64
-    StrokesJson NVARCHAR(MAX) NULL,
+    ImageData NVARCHAR(MAX) NOT NULL,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_Sk_CreatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT PK_cln_Sk PRIMARY KEY CLUSTERED (SketchPkId),
     CONSTRAINT UQ_cln_Sk_Id UNIQUE NONCLUSTERED (SketchId),
@@ -1073,22 +1246,47 @@ CREATE TABLE cln.ConsultationSketch (
     INDEX IX_cln_Sk_PatientId NONCLUSTERED (PatientId)
 );
 
+-- Model: DoctorLabFavorite.
 CREATE TABLE cln.DoctorLabFavorite (
     DoctorLabFavoritePkId BIGINT IDENTITY(1,1) NOT NULL,
-    DoctorLabFavoriteId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_DLF_Id DEFAULT NEWSEQUENTIALID(),
-    DoctorId UNIQUEIDENTIFIER NOT NULL, LabTestCatalogId UNIQUEIDENTIFIER NOT NULL,
+    FavoriteId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_DLF_Id DEFAULT NEWSEQUENTIALID(),
+    DoctorId UNIQUEIDENTIFIER NOT NULL, TestId UNIQUEIDENTIFIER NOT NULL,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_DLF_CreatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT PK_cln_DLF PRIMARY KEY CLUSTERED (DoctorLabFavoritePkId),
-    CONSTRAINT UQ_cln_DLF_Id UNIQUE NONCLUSTERED (DoctorLabFavoriteId),
+    CONSTRAINT UQ_cln_DLF_Id UNIQUE NONCLUSTERED (FavoriteId),
     CONSTRAINT FK_cln_DLF_DoctorId FOREIGN KEY (DoctorId) REFERENCES sec.ApplicationUser(UserId),
-    CONSTRAINT FK_cln_DLF_TestId FOREIGN KEY (LabTestCatalogId) REFERENCES cfg.LabTestCatalog(LabTestCatalogId),
-    CONSTRAINT UQ_cln_DLF_Doc_Test UNIQUE (DoctorId, LabTestCatalogId)
+    CONSTRAINT FK_cln_DLF_TestId FOREIGN KEY (TestId) REFERENCES cfg.LabTestCatalog(TestId),
+    CONSTRAINT UQ_cln_DLF_Doc_Test UNIQUE (DoctorId, TestId)
 );
 
+-- Model: ConsultationCustomValue (DataStore.CustomFieldValues). A custom consultation field's value
+-- (multiple-choice keys joined with "|"). Labels and DisplayValue are captured when saved, so prints of
+-- the visit don't change if the form setup does.
+CREATE TABLE cln.ConsultationCustomValue (
+    ConsultationCustomValuePkId BIGINT IDENTITY(1,1) NOT NULL,
+    HospitalId UNIQUEIDENTIFIER NOT NULL, ConsultationId UNIQUEIDENTIFIER NOT NULL,
+    SectionKey NVARCHAR(60) NOT NULL, FieldKey NVARCHAR(60) NOT NULL,
+    [Value] NVARCHAR(MAX) NULL,
+    SectionLabel NVARCHAR(100) NULL, FieldLabel NVARCHAR(100) NULL,
+    InputType NVARCHAR(10) NOT NULL CONSTRAINT CK_cln_CCVal_Type CHECK (InputType IN ('TEXT','TEXTAREA','NUMBER','DATE','YESNO','SELECT','MULTI')),
+    DisplayValue NVARCHAR(MAX) NULL,
+    UpdatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_CCVal_UpdAt DEFAULT SYSUTCDATETIME(),
+    UpdatedBy UNIQUEIDENTIFIER NULL,
+    CONSTRAINT PK_cln_CCVal PRIMARY KEY CLUSTERED (ConsultationCustomValuePkId),
+    CONSTRAINT UQ_cln_CCVal_Field UNIQUE (ConsultationId, SectionKey, FieldKey),
+    CONSTRAINT FK_cln_CCVal_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
+    CONSTRAINT FK_cln_CCVal_ConsultId FOREIGN KEY (ConsultationId) REFERENCES cln.Consultation(ConsultationId),
+    CONSTRAINT FK_cln_CCVal_UpdatedBy FOREIGN KEY (UpdatedBy) REFERENCES sec.ApplicationUser(UserId)
+);
+
+ALTER TABLE opd.ConsentRecord ADD CONSTRAINT FK_opd_CR_ConsultId FOREIGN KEY (ConsultationId) REFERENCES cln.Consultation(ConsultationId);
+GO
+
 -- ============================================================
--- E. bil — BILLING (7 tables) — FULLY ALIGNED WITH data.js v2.0
+-- E. bil — BILLING (9 tables)
 -- ============================================================
 
+-- Model: DoctorFee. Effective-dated doctor fee.
 CREATE TABLE bil.DoctorFeeSchedule (
     FeeSchedulePkId BIGINT IDENTITY(1,1) NOT NULL,
     FeeScheduleId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_bil_FS_Id DEFAULT NEWSEQUENTIALID(),
@@ -1102,11 +1300,13 @@ CREATE TABLE bil.DoctorFeeSchedule (
     CreatedBy UNIQUEIDENTIFIER NULL, ModifiedAt DATETIME2(3) NULL, ModifiedBy UNIQUEIDENTIFIER NULL,
     CONSTRAINT PK_bil_FS PRIMARY KEY CLUSTERED (FeeSchedulePkId),
     CONSTRAINT UQ_bil_FS_Id UNIQUE NONCLUSTERED (FeeScheduleId),
+    CONSTRAINT CK_bil_FS_Range CHECK (EffectiveTo IS NULL OR EffectiveTo >= EffectiveFrom),
     CONSTRAINT FK_bil_FS_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_bil_FS_DoctorId FOREIGN KEY (DoctorId) REFERENCES sec.ApplicationUser(UserId),
-    INDEX IX_bil_FS_HospitalId NONCLUSTERED (HospitalId)
+    INDEX IX_bil_FS_Doctor NONCLUSTERED (DoctorId, ConsultationType, EffectiveFrom DESC)
 );
 
+-- Model: ServiceCharge. Priced in the hospital's currency (cfg.Hospital.Currency).
 CREATE TABLE bil.ServiceChargeMaster (
     ServiceChargePkId BIGINT IDENTITY(1,1) NOT NULL,
     ServiceChargeId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_bil_SC_Id DEFAULT NEWSEQUENTIALID(),
@@ -1115,7 +1315,6 @@ CREATE TABLE bil.ServiceChargeMaster (
     Category NVARCHAR(20) NOT NULL CONSTRAINT CK_bil_SC_Cat CHECK (Category IN ('CONSULTATION','LAB','IMAGING','PROCEDURE','SUPPLY','INJECTION','OTHER')),
     DefaultAmount DECIMAL(10,2) NOT NULL,
     TaxPercent DECIMAL(5,2) NOT NULL CONSTRAINT DF_bil_SC_Tax DEFAULT 0,
-    Currency NVARCHAR(5) NOT NULL CONSTRAINT DF_bil_SC_Curr DEFAULT 'USD',
     IsActive BIT NOT NULL CONSTRAINT DF_bil_SC_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_bil_SC_Deleted DEFAULT 0,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_bil_SC_CreatedAt DEFAULT SYSUTCDATETIME(),
@@ -1127,6 +1326,7 @@ CREATE TABLE bil.ServiceChargeMaster (
     INDEX IX_bil_SC_HospitalId NONCLUSTERED (HospitalId)
 );
 
+-- Model: Invoice. Status: PENDING → PARTIAL → PAID (or CANCELLED with a credit note).
 CREATE TABLE bil.Invoice (  -- TEMPORAL: Phase 4
     InvoicePkId BIGINT IDENTITY(1,1) NOT NULL,
     InvoiceId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_bil_Inv_Id DEFAULT NEWSEQUENTIALID(),
@@ -1134,7 +1334,7 @@ CREATE TABLE bil.Invoice (  -- TEMPORAL: Phase 4
     ConsultationId UNIQUEIDENTIFIER NULL, PatientId UNIQUEIDENTIFIER NOT NULL,
     DoctorId UNIQUEIDENTIFIER NULL,
     ConsultationType NVARCHAR(10) NULL,
-    IsFreeFollowup BIT NOT NULL CONSTRAINT DF_bil_Inv_FreeFU DEFAULT 0,   -- billed ₹0 under the free follow-up policy
+    IsFreeFollowup BIT NOT NULL CONSTRAINT DF_bil_Inv_FreeFU DEFAULT 0,   -- billed 0 under the free follow-up policy
     ChargeNote NVARCHAR(300) NULL,                                        -- why the consultation fee is what it is
     Currency NVARCHAR(5) NOT NULL CONSTRAINT DF_bil_Inv_Curr DEFAULT 'USD',
     SubTotal DECIMAL(10,2) NOT NULL CONSTRAINT DF_bil_Inv_Sub DEFAULT 0,
@@ -1142,11 +1342,10 @@ CREATE TABLE bil.Invoice (  -- TEMPORAL: Phase 4
     TaxAmount DECIMAL(10,2) NOT NULL CONSTRAINT DF_bil_Inv_Tax DEFAULT 0,
     TotalAmount DECIMAL(10,2) NOT NULL,
     PaidAmount DECIMAL(10,2) NOT NULL CONSTRAINT DF_bil_Inv_Paid DEFAULT 0,       -- all non-voided payments (patient + payer settlements)
-    -- N-way split (bil.usp_RecalculateInvoiceSplit): TotalAmount = CoveredAmount + PatientLiability
+    -- N-way split: TotalAmount = CoveredAmount + PatientLiability
     CoveredAmount DECIMAL(10,2) NOT NULL CONSTRAINT DF_bil_Inv_Covered DEFAULT 0,     -- Σ verified bil.InvoiceCoverageLine.Liability
     PatientLiability DECIMAL(10,2) NOT NULL CONSTRAINT DF_bil_Inv_PatLiab DEFAULT 0,  -- TotalAmount − CoveredAmount
     PatientPaidAmount DECIMAL(10,2) NOT NULL CONSTRAINT DF_bil_Inv_PatPaid DEFAULT 0, -- non-voided PATIENT payments
-    -- PAID once the patient share is settled (covered amounts are payer receivables) or everything is paid
     Status NVARCHAR(10) NOT NULL CONSTRAINT CK_bil_Inv_Status CHECK (Status IN ('DRAFT','PENDING','PAID','PARTIAL','CANCELLED')) CONSTRAINT DF_bil_Inv_Status DEFAULT 'PENDING',
     IsActive BIT NOT NULL CONSTRAINT DF_bil_Inv_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_bil_Inv_Deleted DEFAULT 0,
@@ -1159,12 +1358,13 @@ CREATE TABLE bil.Invoice (  -- TEMPORAL: Phase 4
     CONSTRAINT FK_bil_Inv_ConsultId FOREIGN KEY (ConsultationId) REFERENCES cln.Consultation(ConsultationId),
     CONSTRAINT FK_bil_Inv_DoctorId FOREIGN KEY (DoctorId) REFERENCES sec.ApplicationUser(UserId),
     CONSTRAINT UQ_bil_Inv_Hosp_Number UNIQUE (HospitalId, InvoiceNumber),
-    INDEX IX_bil_Inv_HospitalId NONCLUSTERED (HospitalId),
     INDEX IX_bil_Inv_PatientId NONCLUSTERED (PatientId),
-    INDEX IX_bil_Inv_Status NONCLUSTERED (Status),
-    INDEX IX_bil_Inv_CreatedAt NONCLUSTERED (CreatedAt DESC)
+    INDEX IX_bil_Inv_ConsultId NONCLUSTERED (ConsultationId),
+    INDEX IX_bil_Inv_Status NONCLUSTERED (HospitalId, Status),
+    INDEX IX_bil_Inv_CreatedAt NONCLUSTERED (HospitalId, CreatedAt DESC)
 );
 
+-- Model: InvoiceLineItem.
 CREATE TABLE bil.InvoiceLineItem (
     LineItemPkId BIGINT IDENTITY(1,1) NOT NULL,
     LineItemId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_bil_LI_Id DEFAULT NEWSEQUENTIALID(),
@@ -1182,10 +1382,11 @@ CREATE TABLE bil.InvoiceLineItem (
     CONSTRAINT PK_bil_LI PRIMARY KEY CLUSTERED (LineItemPkId),
     CONSTRAINT UQ_bil_LI_Id UNIQUE NONCLUSTERED (LineItemId),
     CONSTRAINT FK_bil_LI_InvoiceId FOREIGN KEY (InvoiceId) REFERENCES bil.Invoice(InvoiceId),
+    CONSTRAINT FK_bil_LI_ServiceChargeId FOREIGN KEY (ServiceChargeId) REFERENCES bil.ServiceChargeMaster(ServiceChargeId),
     INDEX IX_bil_LI_InvoiceId NONCLUSTERED (InvoiceId)
 );
 
--- Every insurer / scheme eligibility response recorded at billing (history kept, never updated).
+-- Model: EligibilityVerification. Every insurer / scheme eligibility response recorded at billing (history kept, never updated).
 CREATE TABLE bil.EligibilityVerification (
     VerificationPkId BIGINT IDENTITY(1,1) NOT NULL,
     VerificationId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_bil_ELV_Id DEFAULT NEWSEQUENTIALID(),
@@ -1205,8 +1406,9 @@ CREATE TABLE bil.EligibilityVerification (
     INDEX IX_bil_ELV_CoverageId NONCLUSTERED (CoverageId, VerifiedAt)
 );
 
--- A verified coverage applied to an invoice. Liability = ApprovedValue % of the invoice total
--- (re-derived when charges change) or the fixed amount, capped so Σ liabilities ≤ TotalAmount.
+-- Model: InvoiceCoverageLine. A verified coverage applied to an invoice. Liability = ApprovedValue % of the
+-- invoice total (re-derived when charges change) or the fixed amount, capped so Σ liabilities ≤ TotalAmount.
+-- PayerName on the model is joined from cfg.Payer for display and not stored.
 CREATE TABLE bil.InvoiceCoverageLine (
     CoverageLinePkId BIGINT IDENTITY(1,1) NOT NULL,
     CoverageLineId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_bil_ICL_Id DEFAULT NEWSEQUENTIALID(),
@@ -1231,13 +1433,14 @@ CREATE TABLE bil.InvoiceCoverageLine (
     INDEX IX_bil_ICL_InvoiceId NONCLUSTERED (InvoiceId)
 );
 
+-- Model: Payment. ComponentType PATIENT, or INSURANCE for a payer settlement (CoverageLineId = the claim settled).
 CREATE TABLE bil.Payment (
     PaymentPkId BIGINT IDENTITY(1,1) NOT NULL,
-    PaymentId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_bil_Pay_Id DEFAULT NEWSEQUENTIALID(),
+    TransactionId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_bil_Pay_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, InvoiceId UNIQUEIDENTIFIER NOT NULL,
     TransactionNumber NVARCHAR(30) NOT NULL,
-    ComponentType NVARCHAR(15) NULL CONSTRAINT CK_bil_Pay_Comp CHECK (ComponentType IN ('PATIENT','INSURANCE',NULL)),
-    CoverageLineId UNIQUEIDENTIFIER NULL,          -- INSURANCE settlements: the claim (coverage line) being settled
+    ComponentType NVARCHAR(15) NULL CONSTRAINT CK_bil_Pay_Comp CHECK (ComponentType IN ('PATIENT','INSURANCE')),
+    CoverageLineId UNIQUEIDENTIFIER NULL,
     PaymentMethod NVARCHAR(30) NOT NULL,
     Amount DECIMAL(10,2) NOT NULL,
     Reference NVARCHAR(100) NULL,
@@ -1251,37 +1454,41 @@ CREATE TABLE bil.Payment (
     IsDeleted BIT NOT NULL CONSTRAINT DF_bil_Pay_Deleted DEFAULT 0,
     CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_bil_Pay_CreatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT PK_bil_Pay PRIMARY KEY CLUSTERED (PaymentPkId),
-    CONSTRAINT UQ_bil_Pay_Id UNIQUE NONCLUSTERED (PaymentId),
+    CONSTRAINT UQ_bil_Pay_Id UNIQUE NONCLUSTERED (TransactionId),
+    CONSTRAINT UQ_bil_Pay_Hosp_Number UNIQUE (HospitalId, TransactionNumber),
     CONSTRAINT FK_bil_Pay_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_bil_Pay_InvoiceId FOREIGN KEY (InvoiceId) REFERENCES bil.Invoice(InvoiceId),
     CONSTRAINT FK_bil_Pay_CoverageLineId FOREIGN KEY (CoverageLineId) REFERENCES bil.InvoiceCoverageLine(CoverageLineId),
+    CONSTRAINT FK_bil_Pay_ReceivedBy FOREIGN KEY (ReceivedBy) REFERENCES sec.ApplicationUser(UserId),
+    CONSTRAINT FK_bil_Pay_VoidedBy FOREIGN KEY (VoidedBy) REFERENCES sec.ApplicationUser(UserId),
     CONSTRAINT CK_bil_Pay_CovLine CHECK (CoverageLineId IS NULL OR ComponentType = 'INSURANCE'),
+    CONSTRAINT CK_bil_Pay_Void CHECK (IsVoided = 0 OR VoidedAt IS NOT NULL),
     INDEX IX_bil_Pay_InvoiceId NONCLUSTERED (InvoiceId),
-    INDEX IX_bil_Pay_HospitalId NONCLUSTERED (HospitalId),
-    INDEX IX_bil_Pay_PaidAt NONCLUSTERED (PaidAt DESC)
+    INDEX IX_bil_Pay_PaidAt NONCLUSTERED (HospitalId, PaidAt DESC)
 );
 
+-- Model: Receipt.
 CREATE TABLE bil.Receipt (
     ReceiptPkId BIGINT IDENTITY(1,1) NOT NULL,
     ReceiptId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_bil_Rcp_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, ReceiptNumber NVARCHAR(30) NOT NULL,
-    PaymentId UNIQUEIDENTIFIER NULL, InvoiceId UNIQUEIDENTIFIER NOT NULL,
+    InvoiceId UNIQUEIDENTIFIER NOT NULL,
     PatientId UNIQUEIDENTIFIER NULL,
     TotalAmount DECIMAL(10,2) NOT NULL,
     Currency NVARCHAR(5) NOT NULL CONSTRAINT DF_bil_Rcp_Curr DEFAULT 'USD',
     GeneratedAt DATETIME2(3) NOT NULL CONSTRAINT DF_bil_Rcp_GenAt DEFAULT SYSUTCDATETIME(),
     IsActive BIT NOT NULL CONSTRAINT DF_bil_Rcp_Active DEFAULT 1,
     IsDeleted BIT NOT NULL CONSTRAINT DF_bil_Rcp_Deleted DEFAULT 0,
-    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_bil_Rcp_CreatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT PK_bil_Rcp PRIMARY KEY CLUSTERED (ReceiptPkId),
     CONSTRAINT UQ_bil_Rcp_Id UNIQUE NONCLUSTERED (ReceiptId),
     CONSTRAINT FK_bil_Rcp_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_bil_Rcp_InvoiceId FOREIGN KEY (InvoiceId) REFERENCES bil.Invoice(InvoiceId),
     CONSTRAINT FK_bil_Rcp_PatientId FOREIGN KEY (PatientId) REFERENCES opd.Patient(PatientId),
     CONSTRAINT UQ_bil_Rcp_Hosp_Number UNIQUE (HospitalId, ReceiptNumber),
-    INDEX IX_bil_Rcp_HospitalId NONCLUSTERED (HospitalId)
+    INDEX IX_bil_Rcp_InvoiceId NONCLUSTERED (InvoiceId)
 );
 
+-- Model: CreditNote.
 CREATE TABLE bil.CreditNote (
     CreditNotePkId BIGINT IDENTITY(1,1) NOT NULL,
     CreditNoteId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_bil_CN_Id DEFAULT NEWSEQUENTIALID(),
@@ -1294,64 +1501,159 @@ CREATE TABLE bil.CreditNote (
     CONSTRAINT UQ_bil_CN_Id UNIQUE NONCLUSTERED (CreditNoteId),
     CONSTRAINT FK_bil_CN_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_bil_CN_InvoiceId FOREIGN KEY (InvoiceId) REFERENCES bil.Invoice(InvoiceId),
+    CONSTRAINT FK_bil_CN_IssuedBy FOREIGN KEY (IssuedBy) REFERENCES sec.ApplicationUser(UserId),
     CONSTRAINT UQ_bil_CN_Hosp_Number UNIQUE (HospitalId, CreditNoteNumber),
     INDEX IX_bil_CN_InvoiceId NONCLUSTERED (InvoiceId)
 );
+
+ALTER TABLE cln.ConsultationServiceItem ADD CONSTRAINT FK_cln_CSI_ServiceChargeId FOREIGN KEY (ServiceChargeId) REFERENCES bil.ServiceChargeMaster(ServiceChargeId);
+GO
 
 -- ============================================================
 -- F. msg — MESSAGING (2 tables)
 -- ============================================================
 
+-- Model: ChannelConfig (DataStore.WhatsAppConfig / EmailConfig) — one row per hospital per channel.
+-- WHATSAPP uses PhoneNumberId / BusinessAccountId; EMAIL uses the Smtp* / From* columns.
 CREATE TABLE msg.NotificationConfig (
     NotificationConfigPkId BIGINT IDENTITY(1,1) NOT NULL,
-    NotificationConfigId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_msg_NC_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL,
     Channel NVARCHAR(10) NOT NULL CONSTRAINT CK_msg_NC_Ch CHECK (Channel IN ('WHATSAPP','EMAIL')),
     Provider NVARCHAR(20) NULL,
     ApiKey NVARCHAR(500) NULL,                              -- ENCRYPTION: RANDOMIZED
-    ConfigJson NVARCHAR(MAX) NULL,
-    IsEnabled BIT NOT NULL CONSTRAINT DF_msg_NC_Enabled DEFAULT 0,
-    IsActive BIT NOT NULL CONSTRAINT DF_msg_NC_Active DEFAULT 1,
-    IsDeleted BIT NOT NULL CONSTRAINT DF_msg_NC_Deleted DEFAULT 0,
-    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_msg_NC_CreatedAt DEFAULT SYSUTCDATETIME(),
+    PhoneNumberId NVARCHAR(50) NULL,
+    BusinessAccountId NVARCHAR(50) NULL,
+    SmtpHost NVARCHAR(200) NULL,
+    SmtpPort INT NULL CONSTRAINT CK_msg_NC_Port CHECK (SmtpPort IS NULL OR SmtpPort BETWEEN 0 AND 65535),
+    FromEmail NVARCHAR(100) NULL,
+    FromName NVARCHAR(100) NULL,
+    Enabled BIT NOT NULL CONSTRAINT DF_msg_NC_Enabled DEFAULT 0,
     ModifiedAt DATETIME2(3) NULL, ModifiedBy UNIQUEIDENTIFIER NULL,
     CONSTRAINT PK_msg_NC PRIMARY KEY CLUSTERED (NotificationConfigPkId),
-    CONSTRAINT UQ_msg_NC_Id UNIQUE NONCLUSTERED (NotificationConfigId),
     CONSTRAINT FK_msg_NC_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
-    CONSTRAINT UQ_msg_NC_Hosp_Ch UNIQUE (HospitalId, Channel),
-    INDEX IX_msg_NC_HospitalId NONCLUSTERED (HospitalId)
+    CONSTRAINT UQ_msg_NC_Hosp_Ch UNIQUE (HospitalId, Channel)
 );
 
+-- Model: QueuedMessage. Outgoing WhatsApp / email messages (sent or simulated).
 CREATE TABLE msg.MessageQueue (
     MessageQueuePkId BIGINT IDENTITY(1,1) NOT NULL,
-    MessageQueueId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_msg_MQ_Id DEFAULT NEWSEQUENTIALID(),
+    MessageId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_msg_MQ_Id DEFAULT NEWSEQUENTIALID(),
     HospitalId UNIQUEIDENTIFIER NOT NULL, PatientId UNIQUEIDENTIFIER NULL,
-    Channel NVARCHAR(10) NOT NULL, TemplateName NVARCHAR(100) NULL,
+    Channel NVARCHAR(10) NOT NULL CONSTRAINT CK_msg_MQ_Ch CHECK (Channel IN ('WHATSAPP','EMAIL')),
+    TemplateName NVARCHAR(100) NULL,
     PatientName NVARCHAR(200) NULL,                         -- ENCRYPTION: RANDOMIZED
     PatientPhone NVARCHAR(20) NULL,                         -- ENCRYPTION: RANDOMIZED
     MessageText NVARCHAR(MAX) NULL,                         -- ENCRYPTION: RANDOMIZED
     Status NVARCHAR(15) NOT NULL CONSTRAINT CK_msg_MQ_Status CHECK (Status IN ('QUEUED','SENDING','SENT','FAILED','SIMULATED')) CONSTRAINT DF_msg_MQ_Status DEFAULT 'QUEUED',
     QueuedAt DATETIME2(3) NOT NULL CONSTRAINT DF_msg_MQ_QueuedAt DEFAULT SYSUTCDATETIME(),
-    SentAt DATETIME2(3) NULL, ErrorMessage NVARCHAR(500) NULL,
+    SentAt DATETIME2(3) NULL,
     CONSTRAINT PK_msg_MQ PRIMARY KEY CLUSTERED (MessageQueuePkId),
-    CONSTRAINT UQ_msg_MQ_Id UNIQUE NONCLUSTERED (MessageQueueId),
+    CONSTRAINT UQ_msg_MQ_Id UNIQUE NONCLUSTERED (MessageId),
     CONSTRAINT FK_msg_MQ_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
     CONSTRAINT FK_msg_MQ_PatientId FOREIGN KEY (PatientId) REFERENCES opd.Patient(PatientId),
-    INDEX IX_msg_MQ_HospitalId NONCLUSTERED (HospitalId),
-    INDEX IX_msg_MQ_Status NONCLUSTERED (Status),
-    INDEX IX_msg_MQ_QueuedAt NONCLUSTERED (QueuedAt DESC)
+    INDEX IX_msg_MQ_Status NONCLUSTERED (HospitalId, Status),
+    INDEX IX_msg_MQ_QueuedAt NONCLUSTERED (HospitalId, QueuedAt DESC)
 );
+GO
+
+-- ============================================================
+-- G. RESERVED — designed for planned features; NOT used by the application yet (5 tables)
+--    Nothing in Models/ or Services/ reads or writes these. Create them only when the feature is built.
+-- ============================================================
+
+-- Planned: data-driven contradiction rules (today hard-coded in Services/ClinicalEngines.cs).
+CREATE TABLE cfg.ContradictionRule (
+    ContradictionRulePkId BIGINT IDENTITY(1,1) NOT NULL,
+    ContradictionRuleId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_CR_Id DEFAULT NEWSEQUENTIALID(),
+    RuleType NVARCHAR(30) NOT NULL, ConditionJson NVARCHAR(MAX) NOT NULL,
+    MessageTemplate NVARCHAR(300) NOT NULL,
+    Severity NVARCHAR(15) NOT NULL CONSTRAINT CK_cfg_CR_Sev CHECK (Severity IN ('WARNING','HIGH_WARNING','CRITICAL')),
+    IsActive BIT NOT NULL CONSTRAINT DF_cfg_CR_Active DEFAULT 1,
+    IsDeleted BIT NOT NULL CONSTRAINT DF_cfg_CR_Deleted DEFAULT 0,
+    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cfg_CR_CreatedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_cfg_CR PRIMARY KEY CLUSTERED (ContradictionRulePkId),
+    CONSTRAINT UQ_cfg_CR_Id UNIQUE NONCLUSTERED (ContradictionRuleId)
+);
+
+-- Planned: data-driven branching of the consultation flow.
+CREATE TABLE cfg.BranchFlowRule (
+    BranchFlowRulePkId BIGINT IDENTITY(1,1) NOT NULL,
+    BranchFlowRuleId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cfg_BF_Id DEFAULT NEWSEQUENTIALID(),
+    RuleType NVARCHAR(30) NOT NULL, ConditionJson NVARCHAR(MAX) NOT NULL, ActionJson NVARCHAR(MAX) NOT NULL,
+    IsActive BIT NOT NULL CONSTRAINT DF_cfg_BF_Active DEFAULT 1,
+    IsDeleted BIT NOT NULL CONSTRAINT DF_cfg_BF_Deleted DEFAULT 0,
+    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cfg_BF_CreatedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_cfg_BF PRIMARY KEY CLUSTERED (BranchFlowRulePkId),
+    CONSTRAINT UQ_cfg_BF_Id UNIQUE NONCLUSTERED (BranchFlowRuleId)
+);
+
+-- Planned: server-side sessions (today ASP.NET session state).
+CREATE TABLE sec.UserSession (
+    UserSessionPkId BIGINT IDENTITY(1,1) NOT NULL,
+    UserSessionId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_sec_Ses_Id DEFAULT NEWSEQUENTIALID(),
+    UserId UNIQUEIDENTIFIER NOT NULL, SessionToken NVARCHAR(100) NOT NULL,
+    Browser NVARCHAR(100) NULL, IpAddress NVARCHAR(45) NULL, UserAgent NVARCHAR(200) NULL,
+    IsActive BIT NOT NULL CONSTRAINT DF_sec_Ses_Active DEFAULT 1,
+    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_sec_Ses_CreatedAt DEFAULT SYSUTCDATETIME(),
+    ExpiresAt DATETIME2(3) NOT NULL,
+    InvalidatedAt DATETIME2(3) NULL,
+    InvalidationReason NVARCHAR(30) NULL CONSTRAINT CK_sec_Ses_Reason CHECK (InvalidationReason IN ('NEW_LOGIN','LOGOUT','TIMEOUT','ADMIN_REVOKE')),
+    CONSTRAINT PK_sec_Ses PRIMARY KEY CLUSTERED (UserSessionPkId),
+    CONSTRAINT UQ_sec_Ses_Id UNIQUE NONCLUSTERED (UserSessionId),
+    CONSTRAINT UQ_sec_Ses_Token UNIQUE (SessionToken),
+    CONSTRAINT FK_sec_Ses_UserId FOREIGN KEY (UserId) REFERENCES sec.ApplicationUser(UserId),
+    INDEX IX_sec_Ses_UserId NONCLUSTERED (UserId)
+);
+
+-- Planned: brute-force lockout (today failed logins are only audited).
+CREATE TABLE sec.LoginAttempt (  -- append-only
+    LoginAttemptPkId BIGINT IDENTITY(1,1) NOT NULL,
+    LoginAttemptId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_sec_LA_Id DEFAULT NEWSEQUENTIALID(),
+    EmailAttempted NVARCHAR(100) NOT NULL, IsSuccess BIT NOT NULL,
+    IpAddress NVARCHAR(45) NULL,
+    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_sec_LA_CreatedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_sec_LA PRIMARY KEY CLUSTERED (LoginAttemptPkId),
+    CONSTRAINT UQ_sec_LA_Id UNIQUE NONCLUSTERED (LoginAttemptId),
+    INDEX IX_sec_LA_Email NONCLUSTERED (EmailAttempted, CreatedAt DESC)
+);
+
+-- Planned: persisting prescription safety alerts and their overrides (today ClinicalAlert is computed
+-- on the fly by Services/ClinicalEngines.cs and not stored).
+CREATE TABLE cln.PrescriptionSafetyAlert (
+    SafetyAlertPkId BIGINT IDENTITY(1,1) NOT NULL,
+    SafetyAlertId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_cln_SA_Id DEFAULT NEWSEQUENTIALID(),
+    HospitalId UNIQUEIDENTIFIER NOT NULL, PrescriptionId UNIQUEIDENTIFIER NOT NULL,
+    AlertType NVARCHAR(30) NOT NULL, AlertMessage NVARCHAR(500) NOT NULL,
+    Severity NVARCHAR(15) NOT NULL CONSTRAINT CK_cln_SA_Sev CHECK (Severity IN ('WARNING','HIGH_WARNING','CRITICAL')),
+    IsOverridden BIT NOT NULL CONSTRAINT DF_cln_SA_Over DEFAULT 0,
+    OverrideReason NVARCHAR(300) NULL, OverriddenBy UNIQUEIDENTIFIER NULL,
+    CreatedAt DATETIME2(3) NOT NULL CONSTRAINT DF_cln_SA_CreatedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_cln_SA PRIMARY KEY CLUSTERED (SafetyAlertPkId),
+    CONSTRAINT UQ_cln_SA_Id UNIQUE NONCLUSTERED (SafetyAlertId),
+    CONSTRAINT FK_cln_SA_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
+    CONSTRAINT FK_cln_SA_RxId FOREIGN KEY (PrescriptionId) REFERENCES cln.Prescription(PrescriptionId),
+    INDEX IX_cln_SA_RxId NONCLUSTERED (PrescriptionId)
+);
+GO
 
 -- ============================================================
 -- SUMMARY
 -- ============================================================
--- cfg: 17 | sec: 5 | opd: 8 | cln: 14 | bil: 9 | msg: 2 = 55 tables
--- Dual-key: BIGINT IDENTITY clustered + UNIQUEIDENTIFIER NEWSEQUENTIALID() external
--- All FKs reference the UNIQUEIDENTIFIER column
--- Temporal: Patient, Appointment, Consultation, Prescription, Invoice, ApplicationUser
--- 423+ named constraints, 73 FKs, 61+ indexes
--- Encryption: 19 PII columns annotated
--- AuditLog: SessionToken + Browser columns for forensic attribution
--- Billing: SubTotal, DiscountAmount, TaxAmount on Invoice; ComponentType, IsVoided on Payment
--- Coverage split: cfg.Payer, opd.PatientCoverage, bil.EligibilityVerification, bil.InvoiceCoverageLine;
---   Invoice.CoveredAmount / PatientLiability / PatientPaidAmount; Payment.CoverageLineId (payer settlement)
+-- Application tables: cfg 22 | sec 6 | opd 13 | cln 18 | bil 9 | msg 2 = 70;  reserved (G): 5;  total 75
+-- Dual-key: BIGINT IDENTITY clustered + UNIQUEIDENTIFIER NEWSEQUENTIALID() external; all FKs reference the
+--   UNIQUEIDENTIFIER column. Column names = model property names.
+-- Not stored (computed / display-only on the model): Patient.AgeYears, AppUser.Role / RolesLabel /
+--   SeesOwnPatientsOnly, Prescription.IsOutside / TimingLabel, InvoiceCoverageLine.PayerName,
+--   PermissionRow.Label; view models (AppointmentView, TimeSlot, DoctorSchedule, BillingSplit,
+--   ConsultationCharge, PastVisit, ClinicalAlert, SoapDraft, PatientDuplicate, ResolvedSetting, …).
+-- Stored elsewhere: AppUser.Roles → sec.UserRole; LabTest.SpecialtyIds → cfg.LabTestSpecialty;
+--   ConsultationVitals.CustomValues → cln.ConsultationCustomVital; AppUser.Password → PasswordHash (hashed).
+-- JSON columns: cfg.ConsultationFormConfig.Sections / VitalUnits, opd.IntakeResponse.Answers,
+--   cln.Consultation.SkippedSteps.
+-- Temporal (Phase 4): Patient, Appointment, Consultation, Prescription, Invoice.
+-- Files outside the DB: App_Data/consent-forms (opd.PatientConsentDocument), App_Data/lab-reports (cln.LabResultAttachment).
+-- v4.0 changes vs v3.0: added cfg.ConsultationFormConfig, cfg.LabTestSpecialty, sec.UserNotification,
+--   opd.PatientConsentDocument, cln.ConsultationServiceItem, cln.ConsultationCustomValue; renamed columns to the
+--   model names; added missing model columns; dropped columns the application does not have; aligned CHECK values
+--   with the statuses the application writes; moved 5 unused tables to section G.
+-- NOTE: docs/stored-procedures.sql was written against v3.0 column names and must be updated to match.

@@ -81,7 +81,7 @@ namespace OpdProject.Services
                     result.FeeAmount = 0;
                     result.IsFreeFollowup = true;
                     result.Description += " (free follow-up)";
-                    result.Note = "Free follow-up — within " + windowDays + " days of the " + anchor.Value.ToString("yyyy-MM-dd") + " consultation (day " + days + ").";
+                    result.Note = "Free follow-up — within " + windowDays + " days of the " + HospitalService.FormatDate(hid, anchor.Value) + " consultation (day " + days + ").";
                     return result;
                 }
             }
