@@ -25,7 +25,7 @@ namespace OpdProject.templates.billing
         protected void Page_Load(object sender, EventArgs e)
         {
             if (IsPostBack) return;
-            DayDate.Text = IsoDate(DateTime.Today);
+            DayDate.Text = IsoDate(Today);
             Bind();
         }
 
@@ -39,9 +39,11 @@ namespace OpdProject.templates.billing
 
         private void Bind()
         {
-            var date = ParseDate(DayDate.Text) ?? DateTime.Today;
-            var invoices = BillingService.ListInvoices(HospitalId).Where(i => i.CreatedAt.Date == date && i.Status != "CANCELLED").ToList();
-            var payments = BillingService.ListHospitalPayments(HospitalId).Where(p => p.PaidAt.Date == date && !p.IsVoided).ToList();
+            var date = ParseDate(DayDate.Text) ?? Today;
+            // The day is the hospital's calendar day; invoices and payments are UTC instants.
+            var zone = TimeZoneService.HospitalZoneId(HospitalId);
+            var invoices = BillingService.ListInvoices(HospitalId).Where(i => TimeZoneService.LocalDate(i.CreatedAt, zone) == date && i.Status != "CANCELLED").ToList();
+            var payments = BillingService.ListHospitalPayments(HospitalId).Where(p => TimeZoneService.LocalDate(p.PaidAt, zone) == date && !p.IsVoided).ToList();
             decimal billed = invoices.Sum(i => i.TotalAmount), collected = payments.Sum(p => p.Amount);
             BilledText.Text = Server.HtmlEncode(Money(billed));
             CollectedText.Text = Server.HtmlEncode(Money(collected));

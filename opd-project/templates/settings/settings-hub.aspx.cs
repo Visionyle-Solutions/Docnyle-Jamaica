@@ -157,7 +157,7 @@ namespace OpdProject.templates.settings
         {
             Validate("Service");
             if (!IsValid) return;
-            var code = SvcCode.Text.Trim().Length > 0 ? SvcCode.Text.Trim().ToUpperInvariant() : "SVC-" + DateTime.Now.ToString("HHmmss");
+            var code = SvcCode.Text.Trim().Length > 0 ? SvcCode.Text.Trim().ToUpperInvariant() : "SVC-" + DateTime.UtcNow.ToString("HHmmss");
             var svc = BillingService.AddServiceCharge(HospitalId, code, SvcName.Text.Trim(), SvcCategory.SelectedValue, ParseMoney(SvcAmount.Text), ParseMoney(SvcTax.Text));
             Audit("CREATE", "ServiceCharge", svc.ServiceChargeId, svc.ServiceName);
             ToastSuccess(svc.ServiceName + " added to the service master");

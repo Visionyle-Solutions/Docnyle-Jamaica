@@ -14,6 +14,9 @@
   <link rel="stylesheet" href="<%: Asset("~/css/consultation-v4.css") %>" />
   <link rel="stylesheet" href="<%: Asset("~/css/webforms.css") %>" />
   <asp:ContentPlaceHolder ID="HeadContent" runat="server" />
+  <%-- The browser's timezone (IANA, e.g. America/New_York) for showing system times in the viewer's own zone.
+       Set on every page, the sign-in page included, so a user who travels sees their current zone. --%>
+  <script>try { var z = Intl.DateTimeFormat().resolvedOptions().timeZone; if (z) document.cookie = 'c360tz=' + encodeURIComponent(z) + ';path=/;SameSite=Lax'; } catch (e) { }</script>
 </head>
 <body>
   <form id="AppForm" runat="server">

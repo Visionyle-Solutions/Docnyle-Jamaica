@@ -51,7 +51,7 @@ namespace OpdProject.Models
             get
             {
                 if (!Dob.HasValue) return null;
-                var today = DateTime.Today;
+                var today = OpdProject.Services.TimeZoneService.Today(HospitalId);
                 int age = today.Year - Dob.Value.Year;
                 if (Dob.Value.Date > today.AddYears(-age)) age--;
                 return age;

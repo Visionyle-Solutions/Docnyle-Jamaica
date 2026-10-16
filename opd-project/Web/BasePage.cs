@@ -117,6 +117,30 @@ namespace OpdProject.Web
             return FmtDate(value) + " " + FmtTime(value);
         }
 
+        /* ── Time zones (see TimeZoneService) ── */
+
+        /// <summary>The hospital's current calendar date — use instead of DateTime.Today.</summary>
+        public DateTime Today { get { return TimeZoneService.Today(HospitalId); } }
+
+        /// <summary>The hospital's current wall-clock time.</summary>
+        public DateTime HospitalNow { get { return TimeZoneService.Now(HospitalId); } }
+
+        /// <summary>The viewer's timezone (browser, else the hospital's).</summary>
+        public string ViewerZoneId { get { return TimeZoneService.ViewerZoneId(HospitalId); } }
+
+        /// <summary>
+        /// A business event's time (appointment, visit) in the clinic's timezone only, e.g. "9:00 AM" — the same for every
+        /// viewer, wherever they are. <paramref name="value"/> is a UTC instant, or a wall-clock time already in <paramref name="zoneId"/>.
+        /// </summary>
+        public string EventTime(DateTime value, string zoneId)
+        {
+            zoneId = TimeZoneService.IsKnown(zoneId) ? zoneId : TimeZoneService.HospitalZoneId(HospitalId);
+            return FmtTime(value.Kind == DateTimeKind.Utc ? TimeZoneService.ToZone(value, zoneId) : value);
+        }
+
+        /// <summary><see cref="EventTime(DateTime, string)"/> for an appointment row.</summary>
+        public string EventTime(AppointmentView a) { return a == null ? "" : EventTime(a.Appointment.SlotStart, a.Appointment.TimeZoneId); }
+
         /// <summary>One-line coverage identifiers: card number for a govt scheme (NHF …), member/policy/group and claim mode for private cover, plus validity.</summary>
         protected string CoverageIdent(PatientCoverage c)
         {

@@ -15,6 +15,9 @@
     <div class="form-group"><label class="form-label" for="<%= HpCurrency.ClientID %>">Currency</label>
       <asp:DropDownList ID="HpCurrency" runat="server" CssClass="form-select"><asp:ListItem Value="JMD">JMD ($)</asp:ListItem><asp:ListItem Value="INR">INR (₹)</asp:ListItem><asp:ListItem Value="USD">USD ($)</asp:ListItem><asp:ListItem Value="GBP">GBP (£)</asp:ListItem><asp:ListItem Value="AED">AED</asp:ListItem></asp:DropDownList>
       <div class="text-xs text-muted mt-1">Set automatically from the country — change it here if you bill in another currency.</div></div>
+    <div class="form-group"><label class="form-label" for="<%= HpTimeZone.ClientID %>">Time zone</label>
+      <asp:DropDownList ID="HpTimeZone" runat="server" CssClass="form-select" />
+      <div class="text-xs text-muted mt-1">Appointments and visits are shown in this zone for every user; "today", expiry and report dates follow it too.</div></div>
     <div class="form-group"><label class="form-label" for="<%= HpLicense.ClientID %>">License / Reg. No.</label><asp:TextBox ID="HpLicense" runat="server" CssClass="form-control" MaxLength="60" /></div>
     <div class="form-group"><label class="form-label" for="<%= HpRxValidity.ClientID %>">Rx validity (days)</label><asp:TextBox ID="HpRxValidity" runat="server" CssClass="form-control" TextMode="Number" />
       <asp:RangeValidator runat="server" ControlToValidate="HpRxValidity" ValidationGroup="Profile" Type="Integer" MinimumValue="1" MaximumValue="365" ErrorMessage="Rx validity must be 1–365 days" Text="1–365" CssClass="field-error" Display="Dynamic" /></div>

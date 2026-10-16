@@ -67,6 +67,7 @@ namespace OpdProject.Models
         public string LineItemId { get; set; }
         public string InvoiceId { get; set; }
         public string ServiceChargeId { get; set; }
+        public string InventoryItemId { get; set; }
         public string Description { get; set; }
         public string Category { get; set; }
         public int Qty { get; set; }

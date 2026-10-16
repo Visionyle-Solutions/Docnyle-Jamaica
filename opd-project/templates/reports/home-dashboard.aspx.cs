@@ -27,7 +27,7 @@ namespace OpdProject.templates.reports
         protected void Page_Load(object sender, EventArgs e)
         {
             var doctorId = SeesOwnPatientsOnly ? UserId : null;
-            var stats = ReportService.Dashboard(HospitalId, doctorId, DateTime.Today);
+            var stats = ReportService.Dashboard(HospitalId, doctorId, Today);
 
             WelcomeText.Text = "Welcome, " + H(CurrentUser.FullName);
             ConsultationsHtml.Text = Group("Consultations", "consultations", stats.Consultations);

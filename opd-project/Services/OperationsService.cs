@@ -44,6 +44,7 @@ namespace OpdProject.Services
     /// <summary>The five dashboard reports, each over an inclusive date range.</summary>
     public static class ReportService
     {
+        /// <summary>Inclusive range of hospital-local calendar dates; pass a local date, never a UTC instant.</summary>
         private static bool InRange(DateTime d, DateTime from, DateTime to) { return d.Date >= from.Date && d.Date <= to.Date; }
 
         /// <summary>Appointment statuses that count as a consultation: the patient arrived and was (or is being) seen.</summary>
@@ -87,7 +88,7 @@ namespace OpdProject.Services
         private static List<Appointment> AppointmentsInRange(string hid, string doctorId, string kind, DateTime from, DateTime to)
         {
             return DataStore.Appointments.Where(a => a.HospitalId == hid && (doctorId == null || a.DoctorId == doctorId)
-                && MatchesKind(a, kind) && InRange(a.SlotStart, from, to)).ToList();
+                && MatchesKind(a, kind) && InRange(a.AppointmentDate, from, to)).ToList();
         }
 
         /// <summary>Appointment Summary with a custom date range (both days inclusive), oldest first.</summary>
@@ -131,15 +132,15 @@ namespace OpdProject.Services
         public static List<CountRow> ConsultationVolume(string hid, DateTime from, DateTime to)
         {
             lock (DataStore.Sync)
-                return DataStore.Consultations.Where(c => c.HospitalId == hid && InRange(c.VisitDate, from, to))
-                    .GroupBy(c => c.VisitDate.Date).OrderBy(g => g.Key).Select(g => new CountRow { Label = HospitalService.FormatDate(hid, g.Key), Count = g.Count() }).ToList();
+                return DataStore.Consultations.Where(c => c.HospitalId == hid && InRange(c.VisitLocalDate, from, to))
+                    .GroupBy(c => c.VisitLocalDate).OrderBy(g => g.Key).Select(g => new CountRow { Label = HospitalService.FormatDate(hid, g.Key), Count = g.Count() }).ToList();
         }
 
         public static List<CountRow> DiagnosisFrequency(string hid, DateTime from, DateTime to)
         {
             lock (DataStore.Sync)
                 return DataStore.Diagnoses.Join(DataStore.Consultations, d => d.ConsultationId, c => c.ConsultationId, (d, c) => new { d, c })
-                    .Where(x => x.c.HospitalId == hid && InRange(x.c.VisitDate, from, to))
+                    .Where(x => x.c.HospitalId == hid && InRange(x.c.VisitLocalDate, from, to))
                     .GroupBy(x => x.d.Icd10Code + " " + x.d.Icd10Description).Select(g => new CountRow { Label = g.Key, Count = g.Count() })
                     .OrderByDescending(r => r.Count).ToList();
         }
@@ -148,7 +149,7 @@ namespace OpdProject.Services
         {
             lock (DataStore.Sync)
                 return DataStore.Prescriptions.Join(DataStore.Consultations, p => p.ConsultationId, c => c.ConsultationId, (p, c) => new { p, c })
-                    .Where(x => x.c.HospitalId == hid && InRange(x.c.VisitDate, from, to))
+                    .Where(x => x.c.HospitalId == hid && InRange(x.c.VisitLocalDate, from, to))
                     .GroupBy(x => x.p.MedicineName).Select(g => new CountRow { Label = g.Key, Count = g.Count() })
                     .OrderByDescending(r => r.Count).ToList();
         }
@@ -157,7 +158,7 @@ namespace OpdProject.Services
         {
             lock (DataStore.Sync)
             {
-                var appts = DataStore.Appointments.Where(a => a.HospitalId == hid && InRange(a.SlotStart, from, to)).ToList();
+                var appts = DataStore.Appointments.Where(a => a.HospitalId == hid && InRange(a.AppointmentDate, from, to)).ToList();
                 total = appts.Count;
                 noShowRate = total > 0 ? (int)Math.Round(appts.Count(a => a.Status == "NO_SHOW") * 100.0 / total) : 0;
                 return appts.GroupBy(a => a.Status).Select(g => new CountRow { Label = g.Key, Count = g.Count() }).OrderByDescending(r => r.Count).ToList();
@@ -167,7 +168,7 @@ namespace OpdProject.Services
         public static List<RevenueRow> Revenue(string hid, DateTime from, DateTime to)
         {
             lock (DataStore.Sync)
-                return DataStore.Invoices.Where(i => i.HospitalId == hid && i.Status != "CANCELLED" && InRange(i.CreatedAt, from, to))
+                return DataStore.Invoices.Where(i => i.HospitalId == hid && i.Status != "CANCELLED" && InRange(TimeZoneService.LocalDate(i.CreatedAt, TimeZoneService.HospitalZoneId(hid)), from, to))
                     .GroupBy(i => i.DoctorId).Select(g => new RevenueRow
                     {
                         DoctorName = UserService.UserName(g.Key), Invoiced = g.Sum(i => i.TotalAmount), Paid = g.Sum(i => i.PaidAmount), Count = g.Count()
@@ -223,7 +224,7 @@ namespace OpdProject.Services
                 {
                     MessageId = DataStore.NextId("MSG"), HospitalId = hospitalId, PatientId = patient.PatientId, PatientName = patient.FullName,
                     PatientPhone = patient.Phone, Channel = template.Channel, TemplateName = template.Name, MessageText = text,
-                    Status = enabled ? "SENT" : "SIMULATED", QueuedAt = DateTime.Now, SentAt = DateTime.Now
+                    Status = enabled ? "SENT" : "SIMULATED", QueuedAt = DateTime.UtcNow, SentAt = DateTime.UtcNow
                 };
                 DataStore.Messages.Add(m);
                 return m;
@@ -250,7 +251,7 @@ namespace OpdProject.Services
             {
                 if (a.Patient == null) continue;
                 var vars = BaseVars(h, a.Patient, a.DoctorName, date);
-                vars["Time"] = HospitalService.FormatTime(hospitalId, a.SlotStart);
+                vars["Time"] = HospitalService.FormatTime(hospitalId, a.SlotStart);   // AppointmentView.SlotStart is the clinic's wall clock
                 Queue(hospitalId, a.Patient, tpl, Render(tpl.Text, vars));
                 n++;
             }
@@ -278,7 +279,7 @@ namespace OpdProject.Services
         {
             var tpl = ListTemplates().FirstOrDefault(t => t.Trigger == trigger && t.IsEnabled);
             if (tpl == null || patient == null) return;
-            var vars = BaseVars(HospitalService.GetHospital(hospitalId), patient, doctorName, DateTime.Today);
+            var vars = BaseVars(HospitalService.GetHospital(hospitalId), patient, doctorName, TimeZoneService.Today(hospitalId));
             if (extra != null) foreach (var kv in extra) vars[kv.Key] = kv.Value;
             Queue(hospitalId, patient, tpl, Render(tpl.Text, vars));
         }

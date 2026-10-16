@@ -31,7 +31,7 @@ namespace OpdProject.Web
             for (int m = 1; m <= 12; m++) month.Items.Add(new ListItem(CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedMonthName(m), m.ToString()));
             year.Items.Clear();
             year.Items.Add(new ListItem("—", ""));
-            for (int y = DateTime.Today.Year; y >= 1930; y--) year.Items.Add(new ListItem(y.ToString(), y.ToString()));
+            for (int y = DateTime.UtcNow.Year; y >= 1930; y--) year.Items.Add(new ListItem(y.ToString(), y.ToString()));
         }
 
         public static int? SelectedInt(DropDownList list)

@@ -67,7 +67,7 @@
     <div class="cf-grid">
       <div class="cf-field full"><b>Hospital/Clinic Name:</b> <span><%: Hospital.Name %></span></div>
       <div class="cf-field"><b>Patient Registration Number:</b> <span><%: P.Mrn %></span></div>
-      <div class="cf-field"><b>Date:</b> <span><%: Today %></span></div>
+      <div class="cf-field"><b>Date:</b> <span><%: TodayText %></span></div>
       <div class="cf-field full"><b>Attending Physician:</b> <span><%: DoctorLine %></span></div>
     </div>
 

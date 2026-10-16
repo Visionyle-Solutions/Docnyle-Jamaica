@@ -46,7 +46,7 @@ namespace OpdProject.templates.scheduling
 
         private List<AppointmentView> CheckedIn()
         {
-            return SchedulingService.ListAppointments(HospitalId, null, DateTime.Today).Where(a => a.Status == "CHECKED_IN").ToList();
+            return SchedulingService.ListAppointments(HospitalId, null, Today).Where(a => a.Status == "CHECKED_IN").ToList();
         }
 
         private void BindPatients()

@@ -63,9 +63,20 @@ namespace OpdProject.Services
 
         /* ── Display formats (Settings → Hospital & Practice → Formats) ── */
 
+        /// <summary>
+        /// A UTC instant (DateTimeKind.Utc — a system event such as CreatedAt or PaidAt) is shown in the viewer's own
+        /// timezone. Anything else (a calendar date, or a clinic wall-clock time such as AppointmentView.SlotStart) is
+        /// shown as it is.
+        /// </summary>
+        private static DateTime ForDisplay(string hospitalId, DateTime value)
+        {
+            return value.Kind == DateTimeKind.Utc ? TimeZoneService.ToZone(value, TimeZoneService.ViewerZoneId(hospitalId)) : value;
+        }
+
         public static string FormatDate(string hospitalId, DateTime? value)
         {
             if (!value.HasValue) return "";
+            value = ForDisplay(hospitalId, value.Value);
             switch (GetSetting(hospitalId, "DATE_FORMAT"))
             {
                 case "DD/MM/YYYY": return value.Value.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
@@ -77,6 +88,7 @@ namespace OpdProject.Services
         public static string FormatTime(string hospitalId, DateTime? value)
         {
             if (!value.HasValue) return "";
+            value = ForDisplay(hospitalId, value.Value);
             return GetSetting(hospitalId, "TIME_FORMAT") == "24h"
                 ? value.Value.ToString("HH:mm", CultureInfo.InvariantCulture)
                 : value.Value.ToString("h:mm tt", CultureInfo.InvariantCulture);
@@ -93,7 +105,7 @@ namespace OpdProject.Services
         public static string FormatMrn(string format, int seq, string prefix)
         {
             var s = string.IsNullOrEmpty(format) ? "{prefix}-{seq:5}" : format;
-            s = s.Replace("{prefix}", string.IsNullOrEmpty(prefix) ? "MRN" : prefix).Replace("{year}", DateTime.Now.Year.ToString());
+            s = s.Replace("{prefix}", string.IsNullOrEmpty(prefix) ? "MRN" : prefix).Replace("{year}", DateTime.UtcNow.Year.ToString());
             s = Regex.Replace(s, @"\{seq:(\d+)\}", m => seq.ToString().PadLeft(int.Parse(m.Groups[1].Value), '0'));
             return s.Replace("{seq}", seq.ToString());
         }

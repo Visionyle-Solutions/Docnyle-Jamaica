@@ -1,6 +1,8 @@
 using System;
 using System.Linq;
+using System.Web;
 using System.Web.UI.WebControls;
+using OpdProject.Models;
 using OpdProject.Services;
 using OpdProject.Web;
 
@@ -8,7 +10,9 @@ namespace OpdProject.templates.consultation
 {
     /// <summary>
     /// Services &amp; procedures done in the visit, picked from the Service Charge Master (consultation-fee items are left out:
-    /// sign-off bills the fee itself). The doctor never sees prices; sign-off adds each pick to the invoice.
+    /// sign-off bills the fee itself). Picking a service offers the stocked items linked to it in Clinic Inventory; the item is
+    /// optional, has its own quantity and can only be picked up to what is still available. The doctor never sees prices;
+    /// sign-off bills the service and the item on separate lines and deducts the item's stock.
     /// </summary>
     public partial class consultation_services : ConsultationSection
     {
@@ -30,6 +34,7 @@ namespace OpdProject.templates.consultation
             NoServicesHint.Visible = ServicePick.Items.Count == 1;
             PickerHolder.Visible = ServicePick.Items.Count > 1;
             ServiceQty.Text = "1";
+            BindItemPicker();
 
             var items = ConsultationService.ListServiceItems(ConsultationId);
             ServicesRepeater.DataSource = items;
@@ -40,6 +45,32 @@ namespace OpdProject.templates.consultation
                 : "Added to the invoice at sign-off; billing sets the final amount.";
         }
 
+        /// <summary>Items linked to the selected service, each with what is still available to this visit.</summary>
+        private void BindItemPicker()
+        {
+            ItemPick.Items.Clear();
+            ItemQty.Text = "1";
+            var linked = string.IsNullOrEmpty(ServicePick.SelectedValue) ? new System.Collections.Generic.List<StockSummary>()
+                : InventoryService.ItemsForService(HospitalId, ServicePick.SelectedValue);
+            ItemHolder.Visible = linked.Count > 0;
+            if (linked.Count == 0) return;
+            ItemPick.Items.Add(new ListItem("— None —", ""));
+            foreach (var st in linked)
+            {
+                var left = st.Available - InventoryService.QtyOnConsultation(ConsultationId, st.Item.InventoryItemId);
+                var li = new ListItem(st.Item.ItemName + " (" + BasePage.TitleCase(st.Item.Category) + ") — "
+                    + (left > 0 ? left + " " + st.Item.Unit + " available" : "out of stock"), st.Item.InventoryItemId);
+                if (left <= 0) li.Attributes["disabled"] = "disabled";
+                ItemPick.Items.Add(li);
+            }
+        }
+
+        protected void ServicePick_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            Host.ActivateStep("services");
+            BindItemPicker();
+        }
+
         protected void AddServiceButton_Click(object sender, EventArgs e)
         {
             Host.ActivateStep("services");
@@ -48,13 +79,36 @@ namespace OpdProject.templates.consultation
             if (!Page.IsValid) return;
             var svc = BillingService.GetServiceCharge(ServicePick.SelectedValue);
             if (svc == null || svc.HospitalId != HospitalId || !svc.IsActive || svc.Category == "CONSULTATION") return;
-            int qty;
+            int qty, itemQty;
             if (!int.TryParse(ServiceQty.Text, out qty)) qty = 1;
-            var row = ConsultationService.AddServiceItem(Visit, svc, qty, FieldOn("notes") ? ServiceNotes.Text.Trim() : "", Host.DoctorId);
+            if (!int.TryParse(ItemQty.Text, out itemQty)) itemQty = 1;
+            var item = PickedItem(svc.ServiceChargeId);
+            var row = ConsultationService.AddServiceItem(Visit, svc, qty, FieldOn("notes") ? ServiceNotes.Text.Trim() : "", Host.DoctorId, item, itemQty);
             Audit("CREATE", "ConsultationService", ConsultationService.ServiceItemLabel(row));
             ServiceNotes.Text = "";
             AppPage.ToastSuccess("Service added", ConsultationService.ServiceItemLabel(row));
             Host.RefreshAll();
+        }
+
+        /// <summary>The picked item, only if it is active, this hospital's and linked to the service.</summary>
+        private InventoryItem PickedItem(string serviceChargeId)
+        {
+            if (!ItemHolder.Visible || string.IsNullOrEmpty(ItemPick.SelectedValue)) return null;
+            var item = InventoryService.GetItem(ItemPick.SelectedValue);
+            return item != null && item.HospitalId == HospitalId && item.IsActive && item.ServiceChargeIds.Contains(serviceChargeId) ? item : null;
+        }
+
+        /// <summary>The item quantity may not exceed what is available, less what this visit already lists.</summary>
+        protected void StockValidator_ServerValidate(object source, ServerValidateEventArgs args)
+        {
+            args.IsValid = true;
+            int qty;
+            var item = PickedItem(ServicePick.SelectedValue);
+            if (item == null || !int.TryParse(ItemQty.Text, out qty) || qty < 1) return;
+            var left = InventoryService.Available(item.InventoryItemId) - InventoryService.QtyOnConsultation(ConsultationId, item.InventoryItemId);
+            if (qty <= left) return;
+            args.IsValid = false;
+            StockValidator.Text = HttpUtility.HtmlEncode(left > 0 ? "Only " + left + " " + item.Unit + " available" : item.ItemName + " is out of stock");
         }
 
         protected void ServicesRepeater_ItemCommand(object source, RepeaterCommandEventArgs e)

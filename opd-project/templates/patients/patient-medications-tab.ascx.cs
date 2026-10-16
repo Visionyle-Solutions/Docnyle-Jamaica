@@ -84,7 +84,7 @@ namespace OpdProject.templates.patients
         protected void Since_ServerValidate(object source, ServerValidateEventArgs args)
         {
             var d = ParseMonth(args.Value);
-            args.IsValid = d.HasValue && d.Value <= DateTime.Today;
+            args.IsValid = d.HasValue && d.Value <= ((OpdProject.Web.BasePage)Page).Today;
         }
 
         private static DateTime? ParseMonth(string value)

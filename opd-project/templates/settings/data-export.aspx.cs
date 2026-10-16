@@ -27,7 +27,7 @@ namespace OpdProject.templates.settings
             Response.Clear();
             Response.ContentType = "text/csv";
             Response.ContentEncoding = Encoding.UTF8;
-            Response.AddHeader("Content-Disposition", "attachment; filename=" + key + "-export-" + DateTime.Today.ToString("yyyy-MM-dd") + ".csv");
+            Response.AddHeader("Content-Disposition", "attachment; filename=" + key + "-export-" + Today.ToString("yyyy-MM-dd") + ".csv");
             Response.BinaryWrite(Encoding.UTF8.GetPreamble());
             Response.Write(csv);
             Response.End();

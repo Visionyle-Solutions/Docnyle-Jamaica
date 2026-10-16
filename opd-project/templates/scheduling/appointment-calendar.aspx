@@ -35,7 +35,7 @@
             <div style="display:flex; align-items:center; gap:10px; padding:10px 8px; border-bottom:1px solid var(--border-default);">
               <div style="width:4px; height:40px; border-radius:2px; background:<%# StatusColor(Item.Status) %>;"></div>
               <div style="min-width:70px;">
-                <div class="text-sm" style="font-weight:600;"><%#: FmtTime(Item.SlotStart) %></div>
+                <div class="text-sm" style="font-weight:600;"><%#: EventTime(Item) %></div>
                 <div class="text-xs text-muted"><%#: FmtTime(Item.SlotEnd) %></div>
               </div>
               <div style="flex:1;">

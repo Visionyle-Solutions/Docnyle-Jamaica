@@ -60,6 +60,7 @@ namespace OpdProject.Web
                     I("ti-microscope", "Lab Portal", "lab-portal", "lab_portal") } },
                 new NavSection { Key = "master", Label = "Master Data", Items = new List<NavItem> {
                     I("ti-pill", "Drug Formulary", "settings/formulary", "admin_formulary"),
+                    I("ti-packages", "Clinic Inventory", "settings/inventory", "admin_inventory"),
                     I("ti-vocabulary", "Phrase Library", "settings/phrases", "admin_phrases") } },
                 new NavSection { Key = "admin", Label = "Admin", Items = new List<NavItem> {
                     I("ti-settings", "Settings", "settings", "admin_hospital"),

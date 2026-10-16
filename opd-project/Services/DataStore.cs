@@ -85,6 +85,9 @@ namespace OpdProject.Services
         public static List<PaymentMethod> PaymentMethods = new List<PaymentMethod>();
         public static List<AuditLogEntry> AuditLogs = new List<AuditLogEntry>();
         public static List<ServiceCharge> ServiceCharges = new List<ServiceCharge>();
+        public static List<InventoryItem> InventoryItems = new List<InventoryItem>();
+        public static List<StockBatch> StockBatches = new List<StockBatch>();
+        public static List<StockMovement> StockMovements = new List<StockMovement>();
         public static List<Invoice> Invoices = new List<Invoice>();
         public static List<InvoiceLineItem> LineItems = new List<InvoiceLineItem>();
         public static List<CreditNote> CreditNotes = new List<CreditNote>();
@@ -113,6 +116,7 @@ namespace OpdProject.Services
                 SeedClinicalCatalogs();
                 SeedScheduling();
                 SeedBilling();
+                SeedInventory();
                 SeedMessaging();
                 foreach (var h in Hospitals) SchedulingService.RefreshDoctorNames(h.HospitalId);
                 _seeded = true;
@@ -144,7 +148,7 @@ namespace OpdProject.Services
 
             string[] features = { "consultation", "patients", "scheduling", "billing", "reports", "admin_hospital", "admin_scheduling",
                 "admin_vitals", "admin_specialty", "admin_formulary", "admin_phrases", "admin_users", "audit_log", "data_export",
-                "data_import", "print", "lab_portal", "admin_consultation" };
+                "data_import", "print", "lab_portal", "admin_consultation", "admin_inventory" };
             var grants = new Dictionary<string, string[]>
             {
                 { "ADMIN", features },
@@ -416,7 +420,7 @@ namespace OpdProject.Services
             add("USR-011", "HOSP-001", new[] { "MON", "WED", "FRI" }, "15:00", "18:00");
             add("USR-003", "HOSP-002", monFri, "08:00", "12:00"); add("USR-003", "HOSP-002", monFri, "13:00", "16:00");
 
-            Leave.Add(new DoctorLeave { LeaveId = "LV-001", HospitalId = "HOSP-001", DoctorId = "USR-010", LeaveDate = DateTime.Today.AddDays(7), Reason = "Cardiology conference" });
+            Leave.Add(new DoctorLeave { LeaveId = "LV-001", HospitalId = "HOSP-001", DoctorId = "USR-010", LeaveDate = TimeZoneService.Today("HOSP-001").AddDays(7), Reason = "Cardiology conference" });
 
             int t = 0;
             foreach (var hid in new[] { "HOSP-001", "HOSP-002" })
@@ -458,7 +462,8 @@ namespace OpdProject.Services
             ConsentForms.Add(new ConsentForm { ConsentFormId = "CF-001", HospitalId = "HOSP-001", Title = "Consent to examination & treatment", Version = 1, IsActive = true, BodyText = ConsentText });
             ConsentForms.Add(new ConsentForm { ConsentFormId = "CF-002", HospitalId = "HOSP-002", Title = "Consent to examination & treatment", Version = 1, IsActive = true, BodyText = ConsentText });
 
-            var today = DateTime.Today;
+            // Times below are the clinic's wall clock; converted to UTC + TimeZoneId after the list.
+            var today = TimeZoneService.Today("HOSP-001");
             Appointments.AddRange(new[]
             {
                 new Appointment { AppointmentId = "APT-001", HospitalId = "HOSP-001", PatientId = "PAT-001", DoctorId = "USR-001", SlotStart = today.AddHours(9), SlotEnd = today.AddHours(9).AddMinutes(15), Type = "FOLLOWUP", Status = "COMPLETED", Notes = "" },
@@ -467,6 +472,13 @@ namespace OpdProject.Services
                 new Appointment { AppointmentId = "APT-004", HospitalId = "HOSP-001", PatientId = "PAT-004", DoctorId = "USR-001", SlotStart = today.AddHours(10), SlotEnd = today.AddHours(10).AddMinutes(15), Type = "NEW", Status = "BOOKED", Notes = "" },
                 new Appointment { AppointmentId = "APT-005", HospitalId = "HOSP-001", PatientId = "PAT-005", DoctorId = "USR-001", SlotStart = today.AddHours(10).AddMinutes(15), SlotEnd = today.AddHours(10).AddMinutes(30), Type = "FOLLOWUP", Status = "BOOKED", Notes = "" },
             });
+            foreach (var a in Appointments)
+            {
+                a.TimeZoneId = TimeZoneService.HospitalZoneId(a.HospitalId);
+                a.AppointmentDate = a.SlotStart.Date;
+                a.SlotStart = TimeZoneService.ToUtc(a.SlotStart, a.TimeZoneId);
+                a.SlotEnd = TimeZoneService.ToUtc(a.SlotEnd, a.TimeZoneId);
+            }
         }
 
         private const string ConsentText = "I consent to examination, investigations and treatment advised by the treating physician, and acknowledge that no guarantee of outcome has been given. I consent to the processing of my health data for care and billing.";
@@ -508,6 +520,60 @@ namespace OpdProject.Services
                     ServiceChargeId = "SVC-" + (i + 1).ToString("000"), HospitalId = "HOSP-001", ServiceCode = (string)services[i][0],
                     ServiceName = (string)services[i][1], Category = (string)services[i][2], DefaultAmount = (decimal)services[i][3], TaxPercent = 0, IsActive = true
                 });
+        }
+
+        /// <summary>
+        /// Clinic stock for HOSP-001, each item linked to the services it is used with (SVC-003 Wound Dressing,
+        /// SVC-004 Injection Administration, SVC-005 Nebulization). Dates are relative to today so the
+        /// low-stock / expiring / expired flags always show.
+        /// </summary>
+        private static void SeedInventory()
+        {
+            var items = new[]
+            {
+                new object[] { "INJ-CEF1G", "Monocef 1g (Ceftriaxone)", "INJECTION", "vial", 120m, 12m, 10, "SVC-004" },
+                new object[] { "INJ-DICLO", "Diclofenac 75mg/3ml", "INJECTION", "ampoule", 25m, 12m, 10, "SVC-004" },
+                new object[] { "INJ-ONDAN", "Ondansetron 4mg/2ml", "INJECTION", "ampoule", 30m, 12m, 10, "SVC-004" },
+                new object[] { "INJ-DEXA", "Dexamethasone 8mg/2ml", "INJECTION", "vial", 20m, 12m, 5, "SVC-004" },
+                new object[] { "INJ-TT", "Tetanus Toxoid 0.5ml", "INJECTION", "vial", 45m, 5m, 5, "SVC-004" },
+                new object[] { "MED-SALB", "Salbutamol Respules 2.5mg", "MEDICATION", "respule", 18m, 12m, 10, "SVC-005" },
+                new object[] { "CON-SYR5", "Disposable Syringe 5ml", "CONSUMABLE", "piece", 8m, 12m, 50, "SVC-004" },
+                new object[] { "CON-DRESS", "Sterile Dressing Pad 10x10cm", "CONSUMABLE", "piece", 15m, 12m, 20, "SVC-003" },
+            };
+            foreach (var r in items)
+                InventoryItems.Add(new InventoryItem
+                {
+                    InventoryItemId = NextId("ITM"), HospitalId = "HOSP-001", ItemCode = (string)r[0], ItemName = (string)r[1], Category = (string)r[2],
+                    Unit = (string)r[3], UnitPrice = (decimal)r[4], TaxPercent = (decimal)r[5], ReorderLevel = (int)r[6], IsActive = true,
+                    ServiceChargeIds = new List<string> { (string)r[7] }
+                });
+
+            Action<int, string, int, int> batch = (itemIndex, batchNo, expiresInDays, qty) =>
+            {
+                var b = new StockBatch
+                {
+                    StockBatchId = NextId("BAT"), HospitalId = "HOSP-001", InventoryItemId = InventoryItems[itemIndex].InventoryItemId,
+                    BatchNo = batchNo, ExpiryDate = TimeZoneService.Today("HOSP-001").AddDays(expiresInDays), QtyReceived = qty, QtyOnHand = qty,
+                    UnitCost = InventoryItems[itemIndex].UnitPrice * 0.6m, Supplier = "MedLine Distributors", ReceivedByUserId = "USR-004",
+                    ReceivedAt = DateTime.UtcNow.AddDays(-20)
+                };
+                StockBatches.Add(b);
+                StockMovements.Add(new StockMovement
+                {
+                    StockMovementId = NextId("STM"), HospitalId = b.HospitalId, InventoryItemId = b.InventoryItemId, StockBatchId = b.StockBatchId,
+                    MovementType = "RECEIPT", Qty = qty, Reason = "Received from " + b.Supplier, UserId = b.ReceivedByUserId, CreatedAt = b.ReceivedAt
+                });
+            };
+            batch(0, "CF24A11", 20, 6);     // expiring soon, used first
+            batch(0, "CF25B03", 300, 30);
+            batch(1, "DC25C17", 240, 40);
+            batch(2, "ON25A02", 180, 4);    // below reorder level
+            batch(3, "DX24K09", -10, 8);    // expired, awaiting write-off
+            batch(3, "DX25D21", 400, 25);
+            batch(4, "TT25B14", 150, 12);
+            batch(5, "SB25C30", 200, 60);
+            batch(6, "SY25A01", 700, 400);
+            batch(7, "DP25B08", 500, 80);
         }
 
         private static void SeedMessaging()

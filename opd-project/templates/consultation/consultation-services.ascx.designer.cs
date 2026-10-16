@@ -34,6 +34,22 @@ namespace OpdProject.templates.consultation
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
         protected global::System.Web.UI.WebControls.TextBox ServiceQty;
 
+        /// <summary>ItemHolder control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.PlaceHolder ItemHolder;
+
+        /// <summary>ItemPick control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.DropDownList ItemPick;
+
+        /// <summary>ItemQty control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.TextBox ItemQty;
+
+        /// <summary>StockValidator control.</summary>
+        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        protected global::System.Web.UI.WebControls.CustomValidator StockValidator;
+
         /// <summary>NotesHolder control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
         protected global::System.Web.UI.WebControls.PlaceHolder NotesHolder;

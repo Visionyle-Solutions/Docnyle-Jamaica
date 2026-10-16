@@ -25,7 +25,7 @@ namespace OpdProject.Services
             var c = ConsultationService.Get(consultationId);
             if (c == null) return null;
             var hid = c.HospitalId;
-            var date = c.VisitDate.Date;
+            var date = c.VisitLocalDate;
             var appt = SchedulingService.AppointmentForConsultation(c);
             var type = appt != null ? SchedulingService.GetAppointmentType(hid, appt.Type) : null;
             var category = type != null ? type.FeeCategory : (appt != null && appt.Type == "FOLLOWUP" ? "FOLLOWUP" : "NEW");
@@ -69,7 +69,7 @@ namespace OpdProject.Services
                     .Select(i =>
                     {
                         var pc = DataStore.Consultations.FirstOrDefault(x => x.ConsultationId == i.ConsultationId);
-                        return pc != null ? pc.VisitDate.Date : i.CreatedAt.Date;
+                        return pc != null ? pc.VisitLocalDate : TimeZoneService.LocalDate(i.CreatedAt, TimeZoneService.HospitalZoneId(i.HospitalId));
                     })
                     .Where(d => d <= date).OrderBy(d => d).Select(d => (DateTime?)d).LastOrDefault();
             }
@@ -136,7 +136,7 @@ namespace OpdProject.Services
                     InvoiceNumber = (hospital.InvoicePrefix ?? "INV") + "-" + (DataStore.Invoices.Count + 1001).ToString("000000"),
                     HospitalId = c.HospitalId, ConsultationId = consultationId, PatientId = c.PatientId, DoctorId = c.DoctorId,
                     ConsultationType = charge.ConsultationType, IsFreeFollowup = charge.IsFreeFollowup, ChargeNote = charge.Note,
-                    Currency = hospital.Currency ?? "INR", Status = "PENDING", CreatedAt = DateTime.Now
+                    Currency = hospital.Currency ?? "INR", Status = "PENDING", CreatedAt = DateTime.UtcNow
                 };
                 DataStore.Invoices.Add(inv);
             }
@@ -147,6 +147,11 @@ namespace OpdProject.Services
                 if (svc == null) continue;
                 AddLineItem(inv.InvoiceId, svc.ServiceChargeId, svc.ServiceName + (string.IsNullOrEmpty(item.Notes) ? "" : " — " + item.Notes),
                     svc.Category, item.Qty, svc.DefaultAmount, 0, svc.TaxPercent);
+                // The stocked item used for the service is billed on its own line, at its own quantity and price.
+                var stock = item.InventoryItemId != null ? InventoryService.GetItem(item.InventoryItemId) : null;
+                if (stock != null)
+                    AddLineItem(inv.InvoiceId, null, stock.ItemName + " (for " + svc.ServiceName + ")", stock.Category,
+                        item.ItemQty ?? 1, stock.UnitPrice, 0, stock.TaxPercent, stock.InventoryItemId);
             }
             return RecalculateTotals(inv.InvoiceId);
         }
@@ -159,11 +164,11 @@ namespace OpdProject.Services
                 var inv = GetInvoice(invoiceId);
                 if (inv == null || inv.Status == "CANCELLED") return null;
                 inv.Status = "CANCELLED";
-                inv.ModifiedAt = DateTime.Now;
+                inv.ModifiedAt = DateTime.UtcNow;
                 var cn = new CreditNote
                 {
                     CreditNoteId = DataStore.NextId("CN"), CreditNoteNumber = "CN-" + (DataStore.CreditNotes.Count + 1001).ToString("000000"),
-                    HospitalId = inv.HospitalId, InvoiceId = invoiceId, Amount = inv.TotalAmount, Reason = reason, IssuedBy = userId, IssuedAt = DateTime.Now
+                    HospitalId = inv.HospitalId, InvoiceId = invoiceId, Amount = inv.TotalAmount, Reason = reason, IssuedBy = userId, IssuedAt = DateTime.UtcNow
                 };
                 DataStore.CreditNotes.Add(cn);
                 return cn;
@@ -217,7 +222,8 @@ namespace OpdProject.Services
         }
 
         /// <summary>Adds a line: subtotal − discount% then + tax%, rounded to 2 decimals.</summary>
-        public static InvoiceLineItem AddLineItem(string invoiceId, string serviceChargeId, string description, string category, int qty, decimal unit, decimal discountPercent, decimal taxPercent)
+        public static InvoiceLineItem AddLineItem(string invoiceId, string serviceChargeId, string description, string category, int qty, decimal unit, decimal discountPercent, decimal taxPercent,
+            string inventoryItemId = null)
         {
             lock (DataStore.Sync)
             {
@@ -227,7 +233,7 @@ namespace OpdProject.Services
                 var tax = R2((subtotal - disc) * taxPercent / 100m);
                 var row = new InvoiceLineItem
                 {
-                    LineItemId = DataStore.NextId("LI"), InvoiceId = invoiceId, ServiceChargeId = serviceChargeId, Description = description,
+                    LineItemId = DataStore.NextId("LI"), InvoiceId = invoiceId, ServiceChargeId = serviceChargeId, InventoryItemId = inventoryItemId, Description = description,
                     Category = category, Qty = qty, UnitAmount = unit, DiscountPercent = discountPercent, DiscountAmount = disc,
                     TaxPercent = taxPercent, TaxAmount = tax, LineTotal = R2(subtotal - disc + tax),
                     SortOrder = DataStore.LineItems.Count(l => l.InvoiceId == invoiceId) + 1
@@ -254,7 +260,7 @@ namespace OpdProject.Services
                 inv.DiscountAmount = R2(items.Sum(l => l.DiscountAmount));
                 inv.TaxAmount = R2(items.Sum(l => l.TaxAmount));
                 inv.TotalAmount = R2(items.Sum(l => l.LineTotal));
-                inv.ModifiedAt = DateTime.Now;
+                inv.ModifiedAt = DateTime.UtcNow;
                 return RecomputeSplit(inv);
             }
         }
@@ -349,7 +355,7 @@ namespace OpdProject.Services
                 DataStore.Verifications.Add(new EligibilityVerification
                 {
                     VerificationId = DataStore.NextId("ELV"), CoverageId = coverageId, InvoiceId = invoiceId, Status = status, AuthorizationNumber = authNo,
-                    ApprovedType = approvedType, ApprovedValue = approvedValue, Notes = notes, VerifiedBy = userId, VerifiedAt = DateTime.Now
+                    ApprovedType = approvedType, ApprovedValue = approvedValue, Notes = notes, VerifiedBy = userId, VerifiedAt = DateTime.UtcNow
                 });
                 var existing = GetCoverageLine(invoiceId, coverageId);
                 if (status == "VERIFIED")
@@ -418,7 +424,7 @@ namespace OpdProject.Services
                 {
                     TransactionId = DataStore.NextId("PAY"), TransactionNumber = "TXN-" + (DataStore.Payments.Count + 1001).ToString("000000"),
                     InvoiceId = invoiceId, HospitalId = inv.HospitalId, ComponentType = coverageLineId == null ? "PATIENT" : "INSURANCE",
-                    CoverageLineId = coverageLineId, PaymentMethod = method, Amount = amount, Reference = reference, ReceivedBy = userId, PaidAt = DateTime.Now
+                    CoverageLineId = coverageLineId, PaymentMethod = method, Amount = amount, Reference = reference, ReceivedBy = userId, PaidAt = DateTime.UtcNow
                 };
                 DataStore.Payments.Add(row);
                 RecomputeSplit(inv);
@@ -434,7 +440,7 @@ namespace OpdProject.Services
             {
                 var p = DataStore.Payments.FirstOrDefault(x => x.TransactionId == transactionId);
                 if (p == null || p.IsVoided) return false;
-                p.IsVoided = true; p.VoidedAt = DateTime.Now; p.VoidedBy = userId; p.VoidReason = reason;
+                p.IsVoided = true; p.VoidedAt = DateTime.UtcNow; p.VoidedBy = userId; p.VoidReason = reason;
                 RecomputeSplit(GetInvoice(p.InvoiceId));
                 return true;
             }
@@ -453,7 +459,7 @@ namespace OpdProject.Services
             r = new Receipt
             {
                 ReceiptId = DataStore.NextId("RCP"), ReceiptNumber = (hospital.ReceiptPrefix ?? "RCP") + "-" + (DataStore.Receipts.Count + 1001).ToString("000000"),
-                InvoiceId = inv.InvoiceId, HospitalId = inv.HospitalId, PatientId = inv.PatientId, TotalAmount = inv.TotalAmount, Currency = inv.Currency, GeneratedAt = DateTime.Now
+                InvoiceId = inv.InvoiceId, HospitalId = inv.HospitalId, PatientId = inv.PatientId, TotalAmount = inv.TotalAmount, Currency = inv.Currency, GeneratedAt = DateTime.UtcNow
             };
             DataStore.Receipts.Add(r);
             return r;

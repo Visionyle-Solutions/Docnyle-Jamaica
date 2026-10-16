@@ -45,10 +45,12 @@ namespace OpdProject.Services
             {
                 var c = DataStore.Consultations.FirstOrDefault(x => x.PatientId == patientId && x.DoctorId == doctorId && x.Status == "IN_PROGRESS");
                 if (c != null) return c;
+                var zone = TimeZoneService.HospitalZoneId(hospitalId);
                 c = new Consultation
                 {
                     ConsultationId = DataStore.NextId("CONS"), HospitalId = hospitalId, PatientId = patientId, DoctorId = doctorId,
-                    VisitDate = DateTime.Now, Status = "IN_PROGRESS", IsLocked = false
+                    VisitDate = DateTime.UtcNow, TimeZoneId = zone, VisitLocalDate = TimeZoneService.Today(hospitalId),
+                    Status = "IN_PROGRESS", IsLocked = false
                 };
                 DataStore.Consultations.Add(c);
                 return c;
@@ -68,7 +70,7 @@ namespace OpdProject.Services
         public static Consultation Open(string patientId, string doctorId, string hospitalId)
         {
             var c = GetOrCreate(patientId, doctorId, hospitalId);
-            var appt = SchedulingService.ListAppointments(hospitalId, doctorId, DateTime.Today)
+            var appt = SchedulingService.ListAppointments(hospitalId, doctorId, TimeZoneService.Today(hospitalId))
                 .FirstOrDefault(a => a.PatientId == patientId && (a.Status == "CHECKED_IN" || a.Status == "IN_CONSULT"));
             if (appt != null && !c.IsLocked)
             {
@@ -80,7 +82,7 @@ namespace OpdProject.Services
 
         public static List<Consultation> ListForDate(string hospitalId, DateTime date)
         {
-            lock (DataStore.Sync) return DataStore.Consultations.Where(c => c.HospitalId == hospitalId && c.VisitDate.Date == date.Date).ToList();
+            lock (DataStore.Sync) return DataStore.Consultations.Where(c => c.HospitalId == hospitalId && c.VisitLocalDate == date.Date).ToList();
         }
 
         /// <summary>Signed visits of the patient, newest first, summarised for the context panel.</summary>
@@ -97,7 +99,7 @@ namespace OpdProject.Services
                             .Select(s => SymptomLabel(c.HospitalId, s.SymptomCode)).ToList();
                         return new PastVisit
                         {
-                            ConsultationId = c.ConsultationId, VisitDate = c.VisitDate, DoctorName = UserService.UserName(c.DoctorId),
+                            ConsultationId = c.ConsultationId, VisitDate = c.VisitLocalDate, DoctorName = UserService.UserName(c.DoctorId),
                             ChiefComplaint = complaints.Count > 0 ? string.Join(", ", complaints) : "—",
                             PrimaryDiagnosis = primary != null ? primary.Icd10Code + " " + primary.Icd10Description : "—",
                             FollowupNotes = c.FollowupNotes,
@@ -177,7 +179,7 @@ namespace OpdProject.Services
                 foreach (var kv in values) SetVital(row, kv.Key, kv.Value);
                 row.Bmi = row.HeightCm.HasValue && row.WeightKg.HasValue && row.HeightCm.Value > 0
                     ? Math.Round(row.WeightKg.Value / Math.Pow(row.HeightCm.Value / 100.0, 2), 1) : (double?)null;
-                row.RecordedAt = DateTime.Now;
+                row.RecordedAt = DateTime.UtcNow;
                 row.RecordedBy = userId;
                 return row;
             }
@@ -367,7 +369,9 @@ namespace OpdProject.Services
         /// <summary>ACTIVE and its course end date (if any) not yet passed.</summary>
         public static bool IsCurrent(Prescription p)
         {
-            return p.Status == "ACTIVE" && (!p.PeriodEnd.HasValue || p.PeriodEnd.Value.Date >= DateTime.Today);
+            if (p.Status != "ACTIVE" || !p.PeriodEnd.HasValue) return p.Status == "ACTIVE";
+            var c = Get(p.ConsultationId);
+            return p.PeriodEnd.Value.Date >= TimeZoneService.Today(c != null ? c.HospitalId : null);
         }
 
         /// <summary>Every medicine on the patient's record (current, completed and discontinued), newest first.</summary>
@@ -396,7 +400,7 @@ namespace OpdProject.Services
                     record.ConsultationId = null;
                     record.Source = "OUTSIDE";
                     record.Status = "ACTIVE";
-                    record.PrescribedDate = DateTime.Now;
+                    record.PrescribedDate = DateTime.UtcNow;
                     var drug = CatalogService.GetDrugByName(record.MedicineName);
                     if (drug != null) { record.GenericClass = drug.GenericClass; record.TherapeuticClass = drug.TherapeuticClass; }
                     DataStore.Prescriptions.Add(record);
@@ -417,7 +421,7 @@ namespace OpdProject.Services
             {
                 record.PrescriptionId = DataStore.NextId("RX");
                 record.Status = "ACTIVE";
-                record.PrescribedDate = DateTime.Now;
+                record.PrescribedDate = DateTime.UtcNow;
                 if (string.IsNullOrEmpty(record.GenericClass))
                 {
                     var drug = CatalogService.GetDrugByName(record.MedicineName);
@@ -483,7 +487,7 @@ namespace OpdProject.Services
                 var row = new InvestigationOrder
                 {
                     OrderId = DataStore.NextId("ORD"), HospitalId = c.HospitalId, ConsultationId = c.ConsultationId, PatientId = c.PatientId,
-                    TestId = test.TestId, TestName = test.TestName, TestType = test.TestType, Status = "ORDERED", OrderedAt = DateTime.Now
+                    TestId = test.TestId, TestName = test.TestName, TestType = test.TestType, Status = "ORDERED", OrderedAt = DateTime.UtcNow
                 };
                 DataStore.Orders.Add(row);
                 return row;
@@ -506,27 +510,36 @@ namespace OpdProject.Services
             var row = new Referral
             {
                 ReferralId = DataStore.NextId("REF"), ConsultationId = c.ConsultationId, PatientId = c.PatientId, Specialty = specialty,
-                DoctorName = doctorName, Urgency = urgency, Reason = reason, CreatedAt = DateTime.Now
+                DoctorName = doctorName, Urgency = urgency, Reason = reason, CreatedAt = DateTime.UtcNow
             };
             lock (DataStore.Sync) DataStore.Referrals.Add(row);
             return row;
         }
 
-        /* ── Services & procedures (billed from the Service Charge Master at sign-off) ── */
+        /* ── Services & procedures (billed at sign-off from the Service Charge Master or Clinic Inventory) ── */
 
         public static List<ConsultationServiceItem> ListServiceItems(string consultationId)
         {
             lock (DataStore.Sync) return DataStore.ConsultationServiceItems.Where(s => s.ConsultationId == consultationId).OrderBy(s => s.CreatedAt).ToList();
         }
 
-        public static ConsultationServiceItem AddServiceItem(Consultation c, ServiceCharge svc, int qty, string notes, string userId)
+        /// <summary>A service / procedure, optionally with the stocked item used for it. Item stock is only checked by the caller; it is deducted at sign-off.</summary>
+        public static ConsultationServiceItem AddServiceItem(Consultation c, ServiceCharge svc, int qty, string notes, string userId,
+            InventoryItem item = null, int itemQty = 0)
         {
             var row = new ConsultationServiceItem
             {
                 ConsultationServiceId = DataStore.NextId("CSV"), ConsultationId = c.ConsultationId, PatientId = c.PatientId,
                 ServiceChargeId = svc.ServiceChargeId, ServiceName = svc.ServiceName, Category = svc.Category,
-                Qty = Math.Max(1, qty), Notes = notes ?? "", AddedByUserId = userId, CreatedAt = DateTime.Now
+                Qty = Math.Max(1, qty), Notes = notes ?? "", AddedByUserId = userId, CreatedAt = DateTime.UtcNow
             };
+            if (item != null)
+            {
+                row.InventoryItemId = item.InventoryItemId;
+                row.ItemName = item.ItemName;
+                row.ItemUnit = item.Unit;
+                row.ItemQty = Math.Max(1, itemQty);
+            }
             lock (DataStore.Sync) DataStore.ConsultationServiceItems.Add(row);
             return row;
         }
@@ -536,10 +549,16 @@ namespace OpdProject.Services
             lock (DataStore.Sync) DataStore.ConsultationServiceItems.RemoveAll(s => s.ConsultationServiceId == itemId && s.ConsultationId == consultationId);
         }
 
-        /// <summary>"Wound Dressing ×2 (left forearm)".</summary>
+        /// <summary>"Injection Administration + Monocef 1g ×2 vial (left deltoid)".</summary>
         public static string ServiceItemLabel(ConsultationServiceItem s)
         {
-            return s.ServiceName + (s.Qty > 1 ? " ×" + s.Qty : "") + (string.IsNullOrEmpty(s.Notes) ? "" : " (" + s.Notes + ")");
+            return s.ServiceName + (s.Qty > 1 ? " ×" + s.Qty : "") + ItemLabel(s) + (string.IsNullOrEmpty(s.Notes) ? "" : " (" + s.Notes + ")");
+        }
+
+        /// <summary>" + Monocef 1g ×2 vial", or "" when no item was used.</summary>
+        public static string ItemLabel(ConsultationServiceItem s)
+        {
+            return s.InventoryItemId == null ? "" : " + " + s.ItemName + " ×" + s.ItemQty + " " + s.ItemUnit;
         }
 
         public static void SaveFollowup(string consultationId, DateTime? date, string notes)
@@ -567,11 +586,11 @@ namespace OpdProject.Services
                 var n = GetConfidentialNote(consultationId, doctorId);
                 if (n == null)
                 {
-                    n = new ConfidentialNote { ConfidentialNoteId = DataStore.NextId("CNOTE"), ConsultationId = consultationId, DoctorId = doctorId, CreatedAt = DateTime.Now };
+                    n = new ConfidentialNote { ConfidentialNoteId = DataStore.NextId("CNOTE"), ConsultationId = consultationId, DoctorId = doctorId, CreatedAt = DateTime.UtcNow };
                     DataStore.ConfidentialNotes.Add(n);
                 }
                 n.NoteText = text;
-                n.UpdatedAt = DateTime.Now;
+                n.UpdatedAt = DateTime.UtcNow;
             }
         }
 
@@ -583,7 +602,7 @@ namespace OpdProject.Services
         public static void AddAddendum(string consultationId, string doctorId, string category, string text)
         {
             lock (DataStore.Sync)
-                DataStore.Addenda.Add(new Addendum { AddendumId = DataStore.NextId("ADD"), ConsultationId = consultationId, DoctorId = doctorId, Category = category, AddendumText = text, CreatedAt = DateTime.Now });
+                DataStore.Addenda.Add(new Addendum { AddendumId = DataStore.NextId("ADD"), ConsultationId = consultationId, DoctorId = doctorId, Category = category, AddendumText = text, CreatedAt = DateTime.UtcNow });
         }
 
         /* ── Sketches (drawing pad) ── */
@@ -598,7 +617,7 @@ namespace OpdProject.Services
             var row = new ConsultationSketch
             {
                 SketchId = DataStore.NextId("SKT"), ConsultationId = c.ConsultationId, PatientId = c.PatientId, DoctorId = doctorId,
-                Title = string.IsNullOrWhiteSpace(title) ? "Untitled" : title.Trim(), ImageData = imageData, CreatedAt = DateTime.Now
+                Title = string.IsNullOrWhiteSpace(title) ? "Untitled" : title.Trim(), ImageData = imageData, CreatedAt = DateTime.UtcNow
             };
             lock (DataStore.Sync) DataStore.Sketches.Add(row);
             return row;
@@ -613,15 +632,15 @@ namespace OpdProject.Services
             {
                 var c = Get(consultationId);
                 if (c == null || c.IsLocked) return;
-                var hash = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(consultationId + ":" + doctorId + ":" + DateTime.Now.Ticks));
-                DataStore.Attestations.Add(new ConsultationAttestation { AttestationId = DataStore.NextId("ATT"), ConsultationId = consultationId, DoctorId = doctorId, SignedAt = DateTime.Now, SignatureHash = hash });
+                var hash = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(consultationId + ":" + doctorId + ":" + DateTime.UtcNow.Ticks));
+                DataStore.Attestations.Add(new ConsultationAttestation { AttestationId = DataStore.NextId("ATT"), ConsultationId = consultationId, DoctorId = doctorId, SignedAt = DateTime.UtcNow, SignatureHash = hash });
                 c.IsLocked = true;
                 c.Status = "LOCKED";
                 var appt = SchedulingService.AppointmentForConsultation(c);
                 if (appt != null && appt.Status == "IN_CONSULT")
                 {
                     appt.Status = "COMPLETED";
-                    appt.CompletedAt = DateTime.Now;
+                    appt.CompletedAt = DateTime.UtcNow;
                 }
             }
         }

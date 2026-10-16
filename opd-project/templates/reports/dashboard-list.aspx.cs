@@ -34,7 +34,7 @@ namespace OpdProject.templates.reports
         protected void Page_Load(object sender, EventArgs e)
         {
             DateTime from, to;
-            if (!ReportService.IsDashboardKind(Kind) || !ReportService.PeriodRange(Period, DateTime.Today, out from, out to)
+            if (!ReportService.IsDashboardKind(Kind) || !ReportService.PeriodRange(Period, Today, out from, out to)
                 || (Status != null && !SchedulingService.StatusLabels.ContainsKey(Status)))
             {
                 Go(Urls.Dashboard);
@@ -47,8 +47,8 @@ namespace OpdProject.templates.reports
         {
             string kind = Kind, period = Period, status = Status;
             DateTime from, to;
-            ReportService.PeriodRange(period, DateTime.Today, out from, out to);
-            var rows = ReportService.DashboardList(HospitalId, SeesOwnPatientsOnly ? UserId : null, kind, period, status, DateTime.Today);
+            ReportService.PeriodRange(period, Today, out from, out to);
+            var rows = ReportService.DashboardList(HospitalId, SeesOwnPatientsOnly ? UserId : null, kind, period, status, Today);
             RowsRepeater.DataSource = rows;
             RowsRepeater.DataBind();
             EmptyRow.Visible = rows.Count == 0;
@@ -63,7 +63,7 @@ namespace OpdProject.templates.reports
             if (e.CommandName != "CheckIn") return;
             var appt = SchedulingService.GetAppointment((string)e.CommandArgument);
             /* same checks as the button: scheduling permission, this hospital, (for a doctor) their own patient, booked for today */
-            var allowed = appt != null && Can("scheduling") && appt.HospitalId == HospitalId && appt.SlotStart.Date == DateTime.Today
+            var allowed = appt != null && Can("scheduling") && appt.HospitalId == HospitalId && appt.AppointmentDate == Today
                 && (!SeesOwnPatientsOnly || appt.DoctorId == UserId);
             var updated = allowed ? SchedulingService.UpdateStatus(appt.AppointmentId, "CHECKED_IN", UserId) : null;
             if (updated != null && updated.Status == "CHECKED_IN")
@@ -78,12 +78,12 @@ namespace OpdProject.templates.reports
 
         protected bool CanCheckIn(AppointmentView a)
         {
-            return Can("scheduling") && a.Status == "BOOKED" && a.SlotStart.Date == DateTime.Today;
+            return Can("scheduling") && a.Status == "BOOKED" && a.SlotStart.Date == Today;
         }
 
         protected bool CanConsult(AppointmentView a)
         {
-            return HasRole("DOCTOR") && Can("consultation") && a.DoctorId == UserId && a.SlotStart.Date == DateTime.Today
+            return HasRole("DOCTOR") && Can("consultation") && a.DoctorId == UserId && a.SlotStart.Date == Today
                 && (a.Status == "CHECKED_IN" || a.Status == "IN_CONSULT");
         }
     }

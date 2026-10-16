@@ -19,7 +19,7 @@ namespace OpdProject.templates.scheduling
         public override string PageTitle { get { return "Appointment Calendar"; } }
 
         private string DoctorId { get { return DoctorFilter.SelectedValue; } }
-        private DateTime SelectedDate { get { return ParseDate(DateFilter.Text) ?? DateTime.Today; } }
+        private DateTime SelectedDate { get { return ParseDate(DateFilter.Text) ?? Today; } }
 
         protected void Page_Load(object sender, EventArgs e)
         {
@@ -29,7 +29,7 @@ namespace OpdProject.templates.scheduling
             foreach (var d in doctors)
                 DoctorFilter.Items.Add(new ListItem(d.FullName + (string.IsNullOrEmpty(d.Qualifications) ? "" : " — " + d.Qualifications) + (string.IsNullOrEmpty(d.Room) ? "" : " · " + d.Room), d.UserId));
             if (doctors.Any(d => d.UserId == UserId)) DoctorFilter.SelectedValue = UserId;
-            DateFilter.Text = IsoDate(Request.QueryString["date"] != null ? ParseDate(Request.QueryString["date"]) : DateTime.Today);
+            DateFilter.Text = IsoDate(Request.QueryString["date"] != null ? ParseDate(Request.QueryString["date"]) : Today);
             foreach (var t in SchedulingService.ListAppointmentTypes(HospitalId, false))
             {
                 var label = t.Name + (t.DurationMinutes.HasValue ? " (" + t.DurationMinutes + " min)" : "");
@@ -112,7 +112,7 @@ namespace OpdProject.templates.scheduling
                     var appt = SchedulingService.GetAppointment(id);
                     if (appt == null || appt.HospitalId != HospitalId) break;
                     RescheduleId.Value = id;
-                    RescheduleCurrent.Text = HttpUtility.HtmlEncode(FmtDate(appt.SlotStart) + ", " + FmtTime(appt.SlotStart) + " — " + FmtTime(appt.SlotEnd)
+                    RescheduleCurrent.Text = HttpUtility.HtmlEncode(FmtDate(appt.SlotStartLocal) + ", " + EventTime(appt.SlotStart, appt.TimeZoneId) + " — " + FmtTime(appt.SlotEndLocal)
                         + " · " + UserService.UserName(appt.DoctorId));
                     RescheduleDate.Text = IsoDate(SelectedDate.AddDays(1));
                     BindRescheduleSlots();
@@ -133,8 +133,8 @@ namespace OpdProject.templates.scheduling
             if (free.Count == 0)
             {
                 var sched = SchedulingService.GetDoctorSchedule(appt.DoctorId, HospitalId, date.Value);
-                var reason = date.Value.Date < DateTime.Today ? "Date is in the past"
-                    : date.Value.Date == DateTime.Today && sched.Windows.Count > 0 ? "No free times left today"
+                var reason = date.Value.Date < Today ? "Date is in the past"
+                    : date.Value.Date == Today && sched.Windows.Count > 0 ? "No free times left today"
                     : SchedulingService.NoSlotReason(sched);
                 RescheduleSlot.Items.Add(new ListItem("No free slots: " + reason, ""));
                 return;
@@ -162,8 +162,8 @@ namespace OpdProject.templates.scheduling
                 RescheduleModal.Visible = true;
                 return;
             }
-            Audit("UPDATE", "Appointment", RescheduleId.Value, "Rescheduled to " + moved.SlotStart.ToString("yyyy-MM-dd HH:mm") + " as " + moved.AppointmentId);
-            ToastSuccess("Rescheduled to " + FmtDate(moved.SlotStart) + " at " + FmtTime(moved.SlotStart));
+            Audit("UPDATE", "Appointment", RescheduleId.Value, "Rescheduled to " + moved.SlotStartLocal.ToString("yyyy-MM-dd HH:mm") + " (" + moved.TimeZoneId + ") as " + moved.AppointmentId);
+            ToastSuccess("Rescheduled to " + FmtDate(moved.SlotStartLocal) + " at " + EventTime(moved.SlotStart, moved.TimeZoneId));
             RescheduleModal.Visible = false;
             Bind();
         }
@@ -247,9 +247,9 @@ namespace OpdProject.templates.scheduling
             Response.End();
         }
 
-        private static int AgeYears(DateTime dob)
+        private int AgeYears(DateTime dob)
         {
-            var today = DateTime.Today;
+            var today = Today;
             int age = today.Year - dob.Year;
             return dob.Date > today.AddYears(-age) ? age - 1 : age;
         }

@@ -51,6 +51,7 @@ namespace OpdProject.Web
             routes.MapPageRoute("schedule-settings", "settings/scheduling", "~/templates/settings/schedule-settings.aspx");
             routes.MapPageRoute("consultation-config", "settings/consultation", "~/templates/settings/consultation-config.aspx");
             routes.MapPageRoute("formulary", "settings/formulary", "~/templates/settings/formulary-management.aspx");
+            routes.MapPageRoute("inventory", "settings/inventory", "~/templates/settings/inventory-management.aspx");
             routes.MapPageRoute("phrases", "settings/phrases", "~/templates/settings/phrase-management.aspx");
             routes.MapPageRoute("users", "settings/users", "~/templates/settings/user-management.aspx");
             routes.MapPageRoute("permissions", "settings/permissions", "~/templates/settings/permissions.aspx");

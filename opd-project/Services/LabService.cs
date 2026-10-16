@@ -97,7 +97,7 @@ namespace OpdProject.Services
             {
                 List<DateTime> list;
                 if (!ClaimFailures.TryGetValue(userId, out list)) return false;
-                list.RemoveAll(t => t < DateTime.Now - ClaimWindow);
+                list.RemoveAll(t => t < DateTime.UtcNow - ClaimWindow);
                 return list.Count >= MaxClaimFailures;
             }
         }
@@ -137,7 +137,7 @@ namespace OpdProject.Services
                 {
                     List<DateTime> list;
                     if (!ClaimFailures.TryGetValue(user.UserId, out list)) ClaimFailures[user.UserId] = list = new List<DateTime>();
-                    list.Add(DateTime.Now);
+                    list.Add(DateTime.UtcNow);
                 }
                 else ClaimFailures.Remove(user.UserId);
                 return found;
@@ -181,7 +181,7 @@ namespace OpdProject.Services
                 if (o == null || o.Status == "RESULTS_READY" || DataStore.LabResults.Any(r => r.OrderId == record.OrderId)) return null;
                 record.ResultId = DataStore.NextId("RES");
                 record.LabPartnerId = o.LabPartnerId;
-                record.UploadedAt = DateTime.Now;
+                record.UploadedAt = DateTime.UtcNow;
                 record.Status = "PENDING_REVIEW";
                 DataStore.LabResults.Add(record);
                 o.Status = "RESULTS_READY";
@@ -211,7 +211,7 @@ namespace OpdProject.Services
                 var r = GetResult(resultId);
                 if (r == null) return;
                 r.Status = "REVIEWED";
-                r.ReviewedAt = DateTime.Now;
+                r.ReviewedAt = DateTime.UtcNow;
                 r.ReviewNotes = notes ?? "";
             }
         }
@@ -261,7 +261,7 @@ namespace OpdProject.Services
             {
                 AttachmentId = DataStore.NextId("ATT"), ResultId = result.ResultId, OrderId = result.OrderId, HospitalId = result.HospitalId,
                 LabPartnerId = result.LabPartnerId, FileName = name, ContentType = FileTypes[ext], SizeBytes = length,
-                UploadedByUserId = userId, UploadedAt = DateTime.Now,
+                UploadedByUserId = userId, UploadedAt = DateTime.UtcNow,
             };
             att.StoredFileName = Guid.NewGuid().ToString("N") + ext;
             var dir = Path.Combine(StorageRoot, result.HospitalId);

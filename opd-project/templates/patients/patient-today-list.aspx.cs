@@ -54,17 +54,17 @@ namespace OpdProject.templates.patients
         /// <summary>"today" or "on 2026-10-03" — for the empty-list message.</summary>
         protected string DayText { get; private set; }
 
-        private static DateTime ParseDate(string value)
+        private new DateTime ParseDate(string value)
         {
             DateTime d;
-            return DateTime.TryParseExact((value ?? "").Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d) ? d : DateTime.Today;
+            return DateTime.TryParseExact((value ?? "").Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d) ? d : Today;
         }
 
         private void BindQueue()
         {
             var day = ParseDate(DateFilter.Text);
             DateFilter.Text = day.ToString("yyyy-MM-dd");
-            DayText = day == DateTime.Today ? "today" : "on " + FmtDate(day);
+            DayText = day == Today ? "today" : "on " + FmtDate(day);
             SubtitleText.Text = Server.HtmlEncode((ShowDoctor ? "All Doctors" : CurrentUser.FullName) + " · " + day.ToString("dddd", CultureInfo.InvariantCulture) + ", " + FmtDate(day));
 
             var rows = ReportService.AppointmentList(HospitalId, ShowDoctor ? null : UserId, KindFilter.SelectedValue, day, day);
@@ -128,7 +128,7 @@ namespace OpdProject.templates.patients
             if (e.CommandName != "CheckIn") return;
             var appt = SchedulingService.GetAppointment((string)e.CommandArgument);
             /* same checks as the button: scheduling permission, this hospital, (for a doctor) their own patient, booked for today */
-            var allowed = appt != null && Can("scheduling") && appt.HospitalId == HospitalId && appt.SlotStart.Date == DateTime.Today
+            var allowed = appt != null && Can("scheduling") && appt.HospitalId == HospitalId && appt.AppointmentDate == Today
                 && (!SeesOwnPatientsOnly || appt.DoctorId == UserId);
             var updated = allowed ? SchedulingService.UpdateStatus(appt.AppointmentId, "CHECKED_IN", UserId) : null;
             if (updated != null && updated.Status == "CHECKED_IN")
@@ -143,10 +143,10 @@ namespace OpdProject.templates.patients
         /* The consultation is opened by the appointment's own doctor, once the patient is checked in */
         protected bool CanConsult(AppointmentView a)
         {
-            return HasRole("DOCTOR") && Can("consultation") && a.DoctorId == UserId && a.SlotStart.Date == DateTime.Today && (a.Status == "CHECKED_IN" || a.Status == "IN_CONSULT");
+            return HasRole("DOCTOR") && Can("consultation") && a.DoctorId == UserId && a.SlotStart.Date == Today && (a.Status == "CHECKED_IN" || a.Status == "IN_CONSULT");
         }
 
-        protected bool CanCheckIn(AppointmentView a) { return Can("scheduling") && a.Status == "BOOKED" && a.SlotStart.Date == DateTime.Today; }
+        protected bool CanCheckIn(AppointmentView a) { return Can("scheduling") && a.Status == "BOOKED" && a.SlotStart.Date == Today; }
 
         protected string WaitingNote(AppointmentView a)
         {

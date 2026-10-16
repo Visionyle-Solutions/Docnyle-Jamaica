@@ -174,7 +174,7 @@ namespace OpdProject.templates.patients
         protected void DobValidator_ServerValidate(object source, ServerValidateEventArgs args)
         {
             var d = ParseDate(args.Value);
-            args.IsValid = d.HasValue && d.Value <= DateTime.Today && d.Value >= DateTime.Today.AddYears(-130);
+            args.IsValid = d.HasValue && d.Value <= ((OpdProject.Web.BasePage)Page).Today && d.Value >= ((OpdProject.Web.BasePage)Page).Today.AddYears(-130);
         }
 
         private static DateTime? ParseDate(string value)

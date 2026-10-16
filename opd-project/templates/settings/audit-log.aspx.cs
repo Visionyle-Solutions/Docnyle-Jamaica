@@ -15,8 +15,8 @@ namespace OpdProject.templates.settings
         protected void Page_Load(object sender, EventArgs e)
         {
             if (IsPostBack) return;
-            ToDate.Text = IsoDate(DateTime.Today);
-            FromDate.Text = IsoDate(DateTime.Today.AddDays(-30));
+            ToDate.Text = IsoDate(Today);
+            FromDate.Text = IsoDate(Today.AddDays(-30));
             EntityFilter.Items.Add(new System.Web.UI.WebControls.ListItem("All", ""));
             foreach (var t in AuditService.List(HospitalId, null, null, null, null).Select(a => a.EntityType).Where(t => !string.IsNullOrEmpty(t)).Distinct().OrderBy(t => t))
                 EntityFilter.Items.Add(t);
@@ -61,12 +61,12 @@ namespace OpdProject.templates.settings
             var sb = new StringBuilder("Timestamp,User,Action,EntityType,EntityId,Details,IpAddress\r\n");
             Func<string, string> q = s => "\"" + (s ?? "").Replace("\"", "\"\"") + "\"";
             foreach (var a in rows)
-                sb.Append(string.Join(",", q(a.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")), q(UserService.UserName(a.UserId)), q(a.Action), q(a.EntityType), q(a.EntityId), q(a.Details), q(a.IpAddress)) + "\r\n");
+                sb.Append(string.Join(",", q(a.Timestamp.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")), q(UserService.UserName(a.UserId)), q(a.Action), q(a.EntityType), q(a.EntityId), q(a.Details), q(a.IpAddress)) + "\r\n");
             Audit("EXPORT", "DataExport", "auditLogs", "Exported " + rows.Count + " audit entries to CSV");
             Response.Clear();
             Response.ContentType = "text/csv";
             Response.ContentEncoding = Encoding.UTF8;
-            Response.AddHeader("Content-Disposition", "attachment; filename=audit-logs-" + DateTime.Today.ToString("yyyy-MM-dd") + ".csv");
+            Response.AddHeader("Content-Disposition", "attachment; filename=audit-logs-" + Today.ToString("yyyy-MM-dd") + ".csv");
             Response.BinaryWrite(Encoding.UTF8.GetPreamble());
             Response.Write(sb.ToString());
             Response.End();

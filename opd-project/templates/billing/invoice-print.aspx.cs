@@ -70,7 +70,7 @@ namespace OpdProject.templates.billing
                 ? "<div style=\"text-align:center;margin-top:16px;padding:12px;border:2px solid #333;\"><div style=\"font-size:16px;font-weight:bold;color:green;\">" + (covered.Count > 0 ? "PATIENT SHARE PAID" : "PAID IN FULL") + "</div><div>Receipt #: " + H(receipt.ReceiptNumber) + " · Date: " + H(FmtDateTime(receipt.GeneratedAt)) + "</div>"
                   + (split.PayerOutstanding > 0 ? "<div>Receivable from payer(s): " + M(split.PayerOutstanding) + "</div>" : "") + "</div>"
                 : "<div style=\"margin-top:12px;\"><strong>Patient Due: " + M(split.PatientDue) + "</strong></div>");
-            sb.Append("<div style=\"margin-top:30px;font-size:10px;color:#888;\">Printed by " + H(CurrentUser.FullName) + " on " + H(FmtDateTime(DateTime.Now)) + "</div>");
+            sb.Append("<div style=\"margin-top:30px;font-size:10px;color:#888;\">Printed by " + H(CurrentUser.FullName) + " on " + H(FmtDateTime(DateTime.UtcNow)) + "</div>");
             InvoiceHtml.Text = sb.ToString();
             Page.Title = "Invoice " + inv.InvoiceNumber;
             Audit("PRINT", "Invoice", inv.InvoiceId, inv.InvoiceNumber);

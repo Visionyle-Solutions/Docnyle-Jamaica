@@ -11,7 +11,14 @@ namespace OpdProject.Models
         public string PatientId { get; set; }
         public string DoctorId { get; set; }
         public string AppointmentId { get; set; }
+        /// <summary>UTC instant the visit started (business event: shown in <see cref="TimeZoneId"/>).</summary>
         public DateTime VisitDate { get; set; }
+        /// <summary>The clinic's timezone (IANA).</summary>
+        public string TimeZoneId { get; set; }
+        /// <summary>Calendar date of VisitDate in TimeZoneId — day lists, reports, follow-up windows.</summary>
+        public DateTime VisitLocalDate { get; set; }
+        /// <summary>VisitDate on the clinic's wall clock (not stored).</summary>
+        public DateTime VisitDateLocal { get { return OpdProject.Services.TimeZoneService.ToZone(VisitDate, TimeZoneId); } }
         public string Status { get; set; }
         public bool IsLocked { get; set; }
         public string SubjectiveText { get; set; }
@@ -280,6 +287,11 @@ namespace OpdProject.Models
         public string ServiceName { get; set; }
         public string Category { get; set; }
         public int Qty { get; set; }
+        /// <summary>Optional stocked item used for the service (e.g. the injection given); deducted at sign-off, billed on its own line.</summary>
+        public string InventoryItemId { get; set; }
+        public string ItemName { get; set; }
+        public string ItemUnit { get; set; }
+        public int? ItemQty { get; set; }
         public string Notes { get; set; }
         public string AddedByUserId { get; set; }
         public DateTime CreatedAt { get; set; }
@@ -345,6 +357,7 @@ namespace OpdProject.Models
     public class PastVisit
     {
         public string ConsultationId { get; set; }
+        /// <summary>The clinic's calendar date of the visit.</summary>
         public DateTime VisitDate { get; set; }
         public string DoctorName { get; set; }
         public string ChiefComplaint { get; set; }

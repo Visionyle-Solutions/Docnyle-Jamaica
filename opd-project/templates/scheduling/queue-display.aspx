@@ -9,7 +9,7 @@
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
     <div>
       <h2 style="margin:0; font-size:24px;"><%: Hospital.Name %></h2>
-      <div class="text-muted"><%: FmtDate(DateTime.Today) %> · <%: FmtTime(DateTime.Now) %></div>
+      <div class="text-muted"><%: FmtDate(Today) %> · <%: FmtTime(HospitalNow) %></div>
     </div>
     <div style="display:flex; gap:12px; align-items:center;">
       <div class="badge badge--success" style="font-size:14px; padding:8px 16px;"><%: Completed.Count %> seen</div>
@@ -24,7 +24,7 @@
       <div class="card mb-3" style="border-left:4px solid var(--color-success); background:#f0fdf4;">
         <div class="text-xs text-muted" style="text-transform:uppercase; font-weight:600;">Now Consulting</div>
         <div style="font-size:20px; font-weight:700; margin:4px 0;"><%#: Item.PatientName %></div>
-        <div class="text-sm text-muted"><%#: Item.DoctorName %><%#: string.IsNullOrEmpty(Item.DoctorRoom) ? "" : " · " + Item.DoctorRoom %> · <%#: FmtTime(Item.SlotStart) %></div>
+        <div class="text-sm text-muted"><%#: Item.DoctorName %><%#: string.IsNullOrEmpty(Item.DoctorRoom) ? "" : " · " + Item.DoctorRoom %> · <%#: EventTime(Item) %></div>
       </div>
     </ItemTemplate>
   </asp:Repeater>
@@ -42,7 +42,7 @@
           <td style="padding:10px 8px;"><span style="display:inline-flex; width:36px; height:36px; border-radius:50%; background:var(--color-primary); color:#fff; align-items:center; justify-content:center; font-weight:700;"><%# Container.ItemIndex + 1 %></span></td>
           <td><%#: Item.PatientName %></td>
           <td class="text-muted"><%#: Item.DoctorName %></td>
-          <td class="text-muted"><%#: FmtTime(Item.SlotStart) %></td>
+          <td class="text-muted"><%#: EventTime(Item) %></td>
           <td style="text-align:center;"><span class="badge <%# WaitBadge(Container.ItemIndex) %>" style="font-size:13px;">~<%# (Container.ItemIndex + 1) * AvgConsultMinutes %> min</span></td>
         </tr>
       </ItemTemplate>
@@ -55,7 +55,7 @@
     <asp:Repeater ID="UpcomingRepeater" runat="server" ItemType="OpdProject.Models.AppointmentView">
       <ItemTemplate>
         <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--border-subtle,#f1f5f9); font-size:14px;">
-          <span><%#: Item.PatientName %></span><span class="text-muted"><%#: Item.DoctorName %> · <%#: FmtTime(Item.SlotStart) %></span>
+          <span><%#: Item.PatientName %></span><span class="text-muted"><%#: Item.DoctorName %> · <%#: EventTime(Item) %></span>
         </div>
       </ItemTemplate>
     </asp:Repeater>

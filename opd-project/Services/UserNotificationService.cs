@@ -17,7 +17,7 @@ namespace OpdProject.Services
             var n = new UserNotification
             {
                 NotificationId = DataStore.NextId("NTF"), HospitalId = hospitalId, UserId = userId, Kind = kind, Title = title,
-                Message = message, Url = url, IsCritical = isCritical, EntityId = entityId, CreatedAt = DateTime.Now,
+                Message = message, Url = url, IsCritical = isCritical, EntityId = entityId, CreatedAt = DateTime.UtcNow,
             };
             lock (DataStore.Sync) DataStore.UserNotifications.Add(n);
             return n;
@@ -44,7 +44,7 @@ namespace OpdProject.Services
             lock (DataStore.Sync)
             {
                 var n = DataStore.UserNotifications.FirstOrDefault(x => x.NotificationId == notificationId && x.UserId == userId);
-                if (n != null && n.ReadAt == null) n.ReadAt = DateTime.Now;
+                if (n != null && n.ReadAt == null) n.ReadAt = DateTime.UtcNow;
                 return n;
             }
         }
@@ -52,19 +52,19 @@ namespace OpdProject.Services
         public static void MarkAllRead(string userId)
         {
             lock (DataStore.Sync)
-                foreach (var n in DataStore.UserNotifications.Where(x => x.UserId == userId && x.ReadAt == null)) n.ReadAt = DateTime.Now;
+                foreach (var n in DataStore.UserNotifications.Where(x => x.UserId == userId && x.ReadAt == null)) n.ReadAt = DateTime.UtcNow;
         }
 
         /// <summary>Clears notifications about something that has been dealt with (e.g. a lab result marked reviewed).</summary>
         public static void MarkReadForEntity(string entityId)
         {
             lock (DataStore.Sync)
-                foreach (var n in DataStore.UserNotifications.Where(x => x.EntityId == entityId && x.ReadAt == null)) n.ReadAt = DateTime.Now;
+                foreach (var n in DataStore.UserNotifications.Where(x => x.EntityId == entityId && x.ReadAt == null)) n.ReadAt = DateTime.UtcNow;
         }
 
         public static string Ago(DateTime at)
         {
-            var span = DateTime.Now - at;
+            var span = DateTime.UtcNow - at;
             if (span.TotalMinutes < 1) return "just now";
             if (span.TotalHours < 1) return (int)span.TotalMinutes + " min ago";
             if (span.TotalDays < 1) return (int)span.TotalHours + " h ago";

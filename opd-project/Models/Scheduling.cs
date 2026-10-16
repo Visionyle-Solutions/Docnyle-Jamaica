@@ -10,8 +10,16 @@ namespace OpdProject.Models
         public string HospitalId { get; set; }
         public string PatientId { get; set; }
         public string DoctorId { get; set; }
+        /// <summary>UTC instants (business event: shown in <see cref="TimeZoneId"/> wherever the viewer is).</summary>
         public DateTime SlotStart { get; set; }
         public DateTime SlotEnd { get; set; }
+        /// <summary>The clinic's timezone when booked (IANA, e.g. America/Jamaica).</summary>
+        public string TimeZoneId { get; set; }
+        /// <summary>Calendar date of SlotStart in TimeZoneId — what the day lists filter on.</summary>
+        public DateTime AppointmentDate { get; set; }
+        /// <summary>SlotStart / SlotEnd on the clinic's wall clock (not stored).</summary>
+        public DateTime SlotStartLocal { get { return OpdProject.Services.TimeZoneService.ToZone(SlotStart, TimeZoneId); } }
+        public DateTime SlotEndLocal { get { return OpdProject.Services.TimeZoneService.ToZone(SlotEnd, TimeZoneId); } }
         public string Type { get; set; }
         public string Status { get; set; }
         public string Notes { get; set; }
@@ -119,6 +127,7 @@ namespace OpdProject.Models
     }
 
     /// <summary>A bookable (or already booked) slot computed from the doctor's timetable.</summary>
+    /// <summary>A bookable slot on the clinic's wall clock (hospital timezone); CreateAppointment converts it to UTC.</summary>
     public class TimeSlot
     {
         public DateTime SlotStart { get; set; }
@@ -168,8 +177,11 @@ namespace OpdProject.Models
         public string DoctorId { get { return Appointment.DoctorId; } }
         public string Status { get { return Appointment.Status; } }
         public string Type { get { return Appointment.Type; } }
-        public DateTime SlotStart { get { return Appointment.SlotStart; } }
-        public DateTime SlotEnd { get { return Appointment.SlotEnd; } }
+        /// <summary>Clinic wall-clock times (Appointment.SlotStartLocal); the UTC instants are on Appointment.</summary>
+        public DateTime SlotStart { get { return Appointment.SlotStartLocal; } }
+        public DateTime SlotEnd { get { return Appointment.SlotEndLocal; } }
+        public string TimeZoneId { get { return Appointment.TimeZoneId; } }
+        public DateTime AppointmentDate { get { return Appointment.AppointmentDate; } }
         public string PatientName { get { return Patient != null ? Patient.FullName : "Unknown"; } }
         public string PatientMrn { get { return Patient != null ? Patient.Mrn : ""; } }
     }

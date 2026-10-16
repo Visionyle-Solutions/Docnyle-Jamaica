@@ -150,7 +150,7 @@ namespace OpdProject.templates.consultation
             month.Items.Add(new ListItem("MM", ""));
             for (int m = 1; m <= 12; m++) month.Items.Add(new ListItem(Months[m], m.ToString()));
             year.Items.Add(new ListItem("YYYY", ""));
-            for (int y = DateTime.Today.Year; y > DateTime.Today.Year - 60; y--) year.Items.Add(new ListItem(y.ToString(), y.ToString()));
+            for (int y = AppPage.Today.Year; y > AppPage.Today.Year - 60; y--) year.Items.Add(new ListItem(y.ToString(), y.ToString()));
             if (existing != null && existing.OnsetMonth.HasValue) month.SelectedValue = existing.OnsetMonth.Value.ToString();
             if (existing != null && existing.OnsetYear.HasValue && year.Items.FindByValue(existing.OnsetYear.Value.ToString()) != null) year.SelectedValue = existing.OnsetYear.Value.ToString();
         }
@@ -186,7 +186,7 @@ namespace OpdProject.templates.consultation
             var c = ConsultationService.Get(id);
             if (c == null || c.PatientId != Patient.PatientId) return;
             var sb = new StringBuilder();
-            sb.Append("<div style=\"font-weight:600; margin-bottom:6px;\">Visit " + H(AppPage.FmtDate(c.VisitDate)) + " · " + H(UserService.UserName(c.DoctorId)) + "</div>");
+            sb.Append("<div style=\"font-weight:600; margin-bottom:6px;\">Visit " + H(AppPage.FmtDate(c.VisitLocalDate)) + " · " + H(UserService.UserName(c.DoctorId)) + "</div>");
             var v = ConsultationService.GetVitals(id);
             if (v != null)
                 sb.Append("<div class=\"zone-a-item\"><strong>Vitals:</strong> " + H(string.Join(", ", HospitalService.ListVitalsConfig(c.HospitalId, false)
@@ -205,7 +205,7 @@ namespace OpdProject.templates.consultation
         protected void EventPicksRepeater_ItemCommand(object source, RepeaterCommandEventArgs e)
         {
             if (e.CommandName != "AddEvent" || !EnsureNotLocked()) return;
-            PatientService.AddMedicalEvent(Patient.PatientId, (string)e.CommandArgument, DateTime.Today.Year, "", Host.DoctorId);
+            PatientService.AddMedicalEvent(Patient.PatientId, (string)e.CommandArgument, AppPage.Today.Year, "", Host.DoctorId);
             AuditService.Record(HospitalId, Host.DoctorId, "CREATE", "PatientMedicalEvent", Patient.PatientId, (string)e.CommandArgument);
             AppPage.ToastSuccess("Medical event added");
             Host.RefreshAll();

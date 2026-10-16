@@ -28,7 +28,7 @@ namespace OpdProject.templates.scheduling
 
         protected void Page_Load(object sender, EventArgs e)
         {
-            var all = SchedulingService.ListAppointments(HospitalId, null, DateTime.Today).Where(a => a.Status != "CANCELLED").ToList();
+            var all = SchedulingService.ListAppointments(HospitalId, null, Today).Where(a => a.Status != "CANCELLED").ToList();
             Waiting = all.Where(a => a.Status == "CHECKED_IN").ToList();
             Upcoming = all.Where(a => a.Status == "BOOKED").ToList();
             Completed = all.Where(a => a.Status == "COMPLETED").ToList();

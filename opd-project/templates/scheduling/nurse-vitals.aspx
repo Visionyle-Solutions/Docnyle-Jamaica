@@ -21,7 +21,7 @@
                         <asp:LinkButton runat="server" CssClass="card" CommandName="Select" CommandArgument="<%# Item.AppointmentId %>" CausesValidation="false"
                             Style='<%# "display:block; padding:10px; margin-bottom:6px; color:inherit; text-decoration:none; " + (Item.AppointmentId == SelectedAppointmentId ? "border:2px solid var(--color-primary); background:var(--color-primary-light,#e0f2fe);": "") %>'>
                             <div style="font-weight:600;"><%#: Item.PatientName %></div>
-                        <div class="text-xs text-muted">Slot: <%#: FmtTime(Item.SlotStart) %> · <%#: Item.DoctorName %><%# HasVitals(Item) ? " · <span class=\"text-success\" style=\"font-weight:700;\">vitals ✓</span>" : "" %></div>                        </asp:LinkButton>
+                        <div class="text-xs text-muted">Slot: <%#: EventTime(Item) %> · <%#: Item.DoctorName %><%# HasVitals(Item) ? " · <span class=\"text-success\" style=\"font-weight:700;\">vitals ✓</span>" : "" %></div>                        </asp:LinkButton>
                     </ItemTemplate>
                 </asp:Repeater>
                 <asp:PlaceHolder ID="NoPatients" runat="server">

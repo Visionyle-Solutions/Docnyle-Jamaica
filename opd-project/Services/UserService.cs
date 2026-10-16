@@ -21,6 +21,7 @@ namespace OpdProject.Services
             { "admin_formulary", "Drug Formulary" }, { "admin_phrases", "Phrase Library" }, { "admin_users", "User Management" },
             { "audit_log", "Audit Log" }, { "data_export", "Data Export" }, { "data_import", "CSV Import" },
             { "print", "Print Documents" }, { "lab_portal", "Lab Portal" }, { "admin_consultation", "Consultation Setup" },
+            { "admin_inventory", "Clinic Inventory" },
         };
 
         /// <summary>Verifies e-mail + password for an active user whose hospital exists. Returns null on failure.</summary>
@@ -185,7 +186,7 @@ namespace OpdProject.Services
             var row = new AuditLogEntry
             {
                 AuditLogId = DataStore.NextId("AUD"), HospitalId = hospitalId, UserId = userId, Action = action,
-                EntityType = entityType, EntityId = entityId, Details = details, Timestamp = DateTime.Now
+                EntityType = entityType, EntityId = entityId, Details = details, Timestamp = DateTime.UtcNow
             };
             var ctx = System.Web.HttpContext.Current;
             if (ctx != null && ctx.Request != null)
@@ -203,8 +204,10 @@ namespace OpdProject.Services
                 IEnumerable<AuditLogEntry> q = DataStore.AuditLogs.Where(a => a.HospitalId == hospitalId);
                 if (!string.IsNullOrEmpty(action)) q = q.Where(a => a.Action == action);
                 if (!string.IsNullOrEmpty(entityType)) q = q.Where(a => a.EntityType == entityType);
-                if (from.HasValue) q = q.Where(a => a.Timestamp >= from.Value.Date);
-                if (to.HasValue) q = q.Where(a => a.Timestamp < to.Value.Date.AddDays(1));
+                // from / to are hospital-local dates; Timestamp is a UTC instant.
+                var zone = TimeZoneService.HospitalZoneId(hospitalId);
+                if (from.HasValue) q = q.Where(a => a.Timestamp >= TimeZoneService.ToUtc(from.Value.Date, zone));
+                if (to.HasValue) q = q.Where(a => a.Timestamp < TimeZoneService.ToUtc(to.Value.Date.AddDays(1), zone));
                 return q.OrderByDescending(a => a.Timestamp).ToList();
             }
         }

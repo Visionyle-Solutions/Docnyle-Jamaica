@@ -34,6 +34,9 @@ namespace OpdProject.templates.settings
             var country = string.IsNullOrEmpty(h.Country) ? DefaultCountry : h.Country;
             Select(HpCountry, country);
             Select(HpCurrency, !string.IsNullOrEmpty(h.Currency) ? h.Currency : CountryCurrency.ContainsKey(country) ? CountryCurrency[country] : null);
+            HpTimeZone.Items.Clear();
+            foreach (var z in TimeZoneService.HospitalZones) HpTimeZone.Items.Add(new ListItem(z.Value, z.Key));
+            Select(HpTimeZone, TimeZoneService.HospitalZoneId(HospitalId));
             HpLicense.Text = h.LicenseNumber; HpRxValidity.Text = h.DefaultRxValidityDays.ToString();
             Select(HpTempUnit, h.DefaultTempUnit ?? "F");
             HpPatientIdLabel.Text = h.PatientIdLabel; HpHealthIdLabel.Text = h.NationalHealthIdLabel;
@@ -75,7 +78,8 @@ namespace OpdProject.templates.settings
             HospitalService.UpdateHospital(HospitalId, h =>
             {
                 h.Name = HpName.Text.Trim(); h.LegalAddress = HpAddress.Text.Trim(); h.ContactNumber = HpPhone.Text.Trim(); h.PrimaryEmail = HpEmail.Text.Trim();
-                h.Country = HpCountry.SelectedValue; h.Currency = HpCurrency.SelectedValue; h.LicenseNumber = HpLicense.Text.Trim();
+                h.Country = HpCountry.SelectedValue; h.Currency = HpCurrency.SelectedValue;
+                if (TimeZoneService.IsKnown(HpTimeZone.SelectedValue)) h.Timezone = HpTimeZone.SelectedValue; h.LicenseNumber = HpLicense.Text.Trim();
                 int days;
                 h.DefaultRxValidityDays = int.TryParse(HpRxValidity.Text, out days) ? days : 30;
                 h.DefaultTempUnit = HpTempUnit.SelectedValue;
@@ -106,9 +110,9 @@ namespace OpdProject.templates.settings
         {
             switch (FmtDateFormat.SelectedValue)
             {
-                case "DD/MM/YYYY": return DateTime.Now.ToString("dd/MM/yyyy") + " " + (FmtTimeFormat.SelectedValue == "24h" ? DateTime.Now.ToString("HH:mm") : DateTime.Now.ToString("h:mm tt"));
-                case "MM/DD/YYYY": return DateTime.Now.ToString("MM/dd/yyyy") + " " + (FmtTimeFormat.SelectedValue == "24h" ? DateTime.Now.ToString("HH:mm") : DateTime.Now.ToString("h:mm tt"));
-                default: return DateTime.Now.ToString("yyyy-MM-dd") + " " + (FmtTimeFormat.SelectedValue == "24h" ? DateTime.Now.ToString("HH:mm") : DateTime.Now.ToString("h:mm tt"));
+                case "DD/MM/YYYY": return ((OpdProject.Web.BasePage)Page).HospitalNow.ToString("dd/MM/yyyy") + " " + (FmtTimeFormat.SelectedValue == "24h" ? ((OpdProject.Web.BasePage)Page).HospitalNow.ToString("HH:mm") : ((OpdProject.Web.BasePage)Page).HospitalNow.ToString("h:mm tt"));
+                case "MM/DD/YYYY": return ((OpdProject.Web.BasePage)Page).HospitalNow.ToString("MM/dd/yyyy") + " " + (FmtTimeFormat.SelectedValue == "24h" ? ((OpdProject.Web.BasePage)Page).HospitalNow.ToString("HH:mm") : ((OpdProject.Web.BasePage)Page).HospitalNow.ToString("h:mm tt"));
+                default: return ((OpdProject.Web.BasePage)Page).HospitalNow.ToString("yyyy-MM-dd") + " " + (FmtTimeFormat.SelectedValue == "24h" ? ((OpdProject.Web.BasePage)Page).HospitalNow.ToString("HH:mm") : ((OpdProject.Web.BasePage)Page).HospitalNow.ToString("h:mm tt"));
             }
         }
 

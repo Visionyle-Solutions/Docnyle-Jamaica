@@ -48,7 +48,7 @@ namespace OpdProject.templates.patients
         protected void SinceWhen_ServerValidate(object source, ServerValidateEventArgs args)
         {
             DateTime d;
-            args.IsValid = DateTime.TryParse(args.Value, out d) && d.Date <= DateTime.Today;
+            args.IsValid = DateTime.TryParse(args.Value, out d) && d.Date <= ((OpdProject.Web.BasePage)Page).Today;
         }
 
         protected void ResetButton_Click(object sender, EventArgs e) { Reset(); }

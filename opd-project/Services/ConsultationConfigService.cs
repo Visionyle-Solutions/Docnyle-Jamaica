@@ -825,7 +825,7 @@ namespace OpdProject.Services
                 if (Diff(draft, live).Count == 0) return 0;
                 var next = Clone(draft);
                 next.Version = live.Version + 1;
-                next.PublishedAt = DateTime.Now;
+                next.PublishedAt = DateTime.UtcNow;
                 next.PublishedBy = userId;
                 /* Vitals added in the draft become real hospital vitals (Settings → Clinical lists them) */
                 foreach (var s in next.VitalUnits.Where(x => x.IsPending))
@@ -929,7 +929,7 @@ namespace OpdProject.Services
                     row.FieldLabel = field != null ? field.Label : row.FieldLabel;
                     row.InputType = field != null ? field.InputType : row.InputType;
                     row.DisplayValue = field != null ? DisplayValue(field, kv.Value) : kv.Value;
-                    row.UpdatedAt = DateTime.Now;
+                    row.UpdatedAt = DateTime.UtcNow;
                     row.UpdatedBy = userId;
                 }
             }

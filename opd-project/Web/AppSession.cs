@@ -39,6 +39,16 @@ namespace OpdProject.Web
 
         public static bool IsSignedIn { get { return CurrentUser != null; } }
 
+        /// <summary>The browser's timezone (IANA id) from the c360tz cookie set by Site.Master, or null.</summary>
+        public static string BrowserTimeZone
+        {
+            get
+            {
+                var c = Ctx != null ? Ctx.Request.Cookies["c360tz"] : null;
+                return c != null && !string.IsNullOrEmpty(c.Value) ? HttpUtility.UrlDecode(c.Value) : null;
+            }
+        }
+
         public static void SignIn(AppUser user)
         {
             Ctx.Session[UserKey] = user.UserId;

@@ -44,7 +44,7 @@ namespace OpdProject.templates.portal
             if (IsPostBack) return;
             foreach (var d in UserService.ListActiveDoctors(Hid))
             {
-                var sched = SchedulingService.GetDoctorSchedule(d.UserId, Hid, DateTime.Today);
+                var sched = SchedulingService.GetDoctorSchedule(d.UserId, Hid, TimeZoneService.Today(Hid));
                 var label = d.FullName + (string.IsNullOrEmpty(d.Qualifications) ? "" : " — " + d.Qualifications)
                     + " · " + string.Join(", ", SchedulingService.DoctorSpecialtyIds(d.UserId).Select(HospitalService.SpecialtyName))
                     + " · " + SchedulingService.DaysSummary(sched.WorkingDays);
@@ -53,8 +53,8 @@ namespace OpdProject.templates.portal
             if (DoctorList.Items.Count > 0) DoctorList.SelectedIndex = 0;
             foreach (var t in SchedulingService.ListAppointmentTypes(Hid, false).Where(t => t.Code != "PROC"))
                 VisitType.Items.Add(new ListItem(t.Name + (t.DurationMinutes.HasValue ? " (" + t.DurationMinutes + " min)" : ""), t.Code));
-            VisitDate.Text = IsoDate(DateTime.Today);
-            VisitDate.Attributes["min"] = IsoDate(DateTime.Today);
+            VisitDate.Text = IsoDate(TimeZoneService.Today(Hid));
+            VisitDate.Attributes["min"] = IsoDate(TimeZoneService.Today(Hid));
             var questions = SchedulingService.ListIntakeQuestions(Hid);
             QuestionsRepeater.DataSource = questions;
             QuestionsRepeater.DataBind();
@@ -73,10 +73,10 @@ namespace OpdProject.templates.portal
             SlotMessage.Text = "";
             var date = ParseDate(VisitDate.Text);
             if (string.IsNullOrEmpty(DoctorList.SelectedValue) || !date.HasValue) return;
-            if (date.Value < DateTime.Today) { SlotMessage.Text = "<div class=\"text-xs text-danger\">Choose today or a later date.</div>"; return; }
+            if (date.Value < TimeZoneService.Today(Hid)) { SlotMessage.Text = "<div class=\"text-xs text-danger\">Choose today or a later date.</div>"; return; }
             var type = SchedulingService.GetAppointmentType(Hid, VisitType.SelectedValue);
             var free = SchedulingService.ListAvailableSlots(DoctorList.SelectedValue, Hid, date.Value, type != null ? type.DurationMinutes : null)
-                .Where(s => !s.IsBooked && s.SlotStart > DateTime.Now).ToList();
+                .Where(s => !s.IsBooked && s.SlotStart > TimeZoneService.Now(Hid)).ToList();
             foreach (var s in free) SlotList.Items.Add(new ListItem(" " + FmtTimeH(s.SlotStart), s.Value));
             if (free.Count == 0)
                 SlotMessage.Text = "<div class=\"zone-a-empty\">No free slots — " + HttpUtility.HtmlEncode(SchedulingService.NoSlotReason(SchedulingService.GetDoctorSchedule(DoctorList.SelectedValue, Hid, date.Value))) + ". Try another date.</div>";

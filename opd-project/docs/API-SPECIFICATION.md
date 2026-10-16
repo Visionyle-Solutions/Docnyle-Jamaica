@@ -105,7 +105,7 @@ Role: `patients` feature (ADMIN, DOCTOR, RECEPTIONIST, BILLING, NURSE).
 | POST | `/patients/{id}/medical-history` | `{ hospitalId, conditionName, sinceMonth?, sinceYear?, notes? }` | `PatientMedicalHistory` (created) | `opd.usp_CreatePatientMedicalHistory` — *api.js: `createPatientMedicalHistory`* |
 | PUT | `/patients/{id}/medical-history/save` | `{ hospitalId, conditionName, sinceMonth?, sinceYear?, notes? }` | `PatientMedicalHistory` (upserted by `conditionName`) | `opd.usp_SavePatientMedicalHistory` — *api.js: `savePatientMedicalHistory`* |
 | PUT | `/patients/{id}/medical-history/{conditionName}` | `{ sinceMonth?, sinceYear?, notes? }` | `{ success }` | `opd.usp_UpdatePatientMedicalHistory` — *api.js: `updatePatientMedicalHistory`* |
-| DELETE | `/patients/{id}/medical-history/{conditionName}` | — | `{ success }` | `opd.usp_DeletePatientMedicalHistory` — *api.js: `deletePatientMedicalHistory`*. Soft delete (`IsDeleted=1`). |
+| DELETE | `/patients/{id}/medical-history/{conditionName}` | — | `{ success }` | `opd.usp_DeletePatientMedicalHistory` — *api.js: `deletePatientMedicalHistory`*. Soft delete (`IsActive=0`). |
 
 ### Medical Events
 
@@ -227,7 +227,7 @@ Role: `consultation` feature (ADMIN, DOCTOR).
 | GET | `/phrases?hospitalId=&section=&specialtyId=&doctorId=` | `hospitalId`, `section` (S/O/A/P), `specialtyId?`, `doctorId?` | `[ Phrase ]` — `{phraseBankId, hospitalId, userId, category, triggerCode, phraseText}`, DOCTOR > SPECIALTY > GLOBAL scope priority | `cfg.usp_ListPhrases` — *api.js: `listPhrases`* |
 | GET | `/phrases/search?term=&hospitalId=&section=&specialtyId=&doctorId=` | as above + `term` | `[ Phrase ]`, top 5, trigger/text match | `cfg.usp_SearchPhrases` — *api.js: `searchPhrases`* |
 | POST | `/phrases` | `{ hospitalId, userId, category, triggerCode?, phraseText, isGlobal? }` | `Phrase` (created) | `cfg.usp_CreatePhrase` — *api.js: `createPhrase`* |
-| DELETE | `/phrases/{id}` | — | `{ success }` | `cfg.usp_DeletePhrase` — *api.js: `deletePhrase`*. Soft delete (`IsDeleted=1`); data.js hard-deletes in-memory. |
+| DELETE | `/phrases/{id}` | — | `{ success }` | `cfg.usp_DeletePhrase` — *api.js: `deletePhrase`*. Soft delete (`IsActive=0`); data.js hard-deletes in-memory. |
 
 ### Diagnoses / ICD-10
 
@@ -489,7 +489,7 @@ for visibility:
    approach the schema actually supports.
 6. **Hard deletes** (`bil.usp_DeleteInvoiceLineItem`, `cln.usp_DeleteLabFavorite`)
    are used, not soft deletes, because those two schema tables have no
-   `IsActive`/`IsDeleted` column — this matches `data.js`'s own
+   `IsActive` column — this matches `data.js`'s own
    `Array.splice()` behavior for those two entities and is intentional, not
    a gap.
 

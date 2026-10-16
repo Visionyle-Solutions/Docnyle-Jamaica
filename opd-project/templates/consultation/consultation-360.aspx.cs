@@ -108,7 +108,7 @@ namespace OpdProject.templates.consultation
                 : ConsultationService.Open(Patient.PatientId, UserId, HospitalId);
             ViewState["cid"] = _consultation.ConsultationId;
 
-            var appointments = SchedulingService.ListAppointments(HospitalId, UserId, DateTime.Today)
+            var appointments = SchedulingService.ListAppointments(HospitalId, UserId, Today)
                 .Where(a => a.Status != "CANCELLED").OrderBy(a => a.SlotStart).ToList();
             var todays = appointments.FirstOrDefault(a => a.PatientId == Patient.PatientId);
             VisitBadgeHtml = todays == null ? "<span class=\"c360-badge c360-badge--routine\">🟢 Routine Outpatient</span>"
@@ -142,7 +142,7 @@ namespace OpdProject.templates.consultation
                 Name = a.PatientName,
                 Mrn = a.PatientMrn,
                 AgeSex = a.Patient != null ? FormatAgeSex(a.Patient) : "",
-                Time = FmtTime(a.SlotStart),
+                Time = EventTime(a),
                 StatusLabel = StatusLabel(a.Status),
                 StatusTone = a.Status == "IN_CONSULT" ? "active" : a.Status == "CHECKED_IN" ? "waiting" : a.Status == "COMPLETED" ? "done" : "muted",
                 Url = Urls.Consultation(a.PatientId),
@@ -482,6 +482,8 @@ namespace OpdProject.templates.consultation
             if (MissingMandatory().Count > 0) { args.IsValid = false; AttestValidator.Text = "Complete the required sections first."; return; }
             if (!(AttestS.Checked && AttestO.Checked && AttestA.Checked && AttestP.Checked)) { args.IsValid = false; AttestValidator.Text = "Confirm all four sections have been reviewed."; return; }
             if (MissingPersonal().Count > 0 && !AttestSkipPersonal.Checked) { args.IsValid = false; AttestValidator.Text = "Fill in your personal observations, or confirm you choose to sign off without them."; return; }
+            var shortages = InventoryService.Shortages(_consultation.ConsultationId);
+            if (shortages.Count > 0) { args.IsValid = false; AttestValidator.Text = HttpUtility.HtmlEncode("Not enough stock — reduce or remove in Services & Procedures: " + string.Join("; ", shortages)); return; }
             args.IsValid = true;
         }
 
@@ -491,6 +493,15 @@ namespace OpdProject.templates.consultation
             Validate("SignOff");
             if (!IsValid) { SignOffModal.Visible = true; return; }
             var cid = _consultation.ConsultationId;
+            // Stock is deducted all-or-nothing before the lock; another visit may have used it since the check above.
+            var shortages = InventoryService.ConsumeForConsultation(cid, UserId);
+            if (shortages.Count > 0)
+            {
+                AttestValidator.IsValid = false;
+                AttestValidator.Text = HttpUtility.HtmlEncode("Stock ran out — reduce or remove in Services & Procedures: " + string.Join("; ", shortages));
+                SignOffModal.Visible = true;
+                return;
+            }
             foreach (var c in Contradictions()) Audit("ACKNOWLEDGE_CONTRADICTION", "Contradiction", cid, c.Type + ": " + c.Message);
             ConsultationService.SignOff(cid, UserId);
             Audit("SIGN_OFF", "Consultation", cid, "4-point attestation confirmed");

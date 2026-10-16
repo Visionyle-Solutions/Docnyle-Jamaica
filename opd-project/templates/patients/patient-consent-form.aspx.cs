@@ -21,7 +21,7 @@ namespace OpdProject.templates.patients
         protected string DoctorExample { get; private set; }
         protected string Dob { get; private set; }
         protected string Phone { get; private set; }
-        protected string Today { get; private set; }
+        protected string TodayText { get; private set; }
         protected string Printed { get; private set; }
         protected string FormVersion { get { return PatientService.ConsentFormVersion; } }
 
@@ -53,8 +53,8 @@ namespace OpdProject.templates.patients
             }
             Dob = P.Dob.HasValue ? FmtDate(P.Dob) : "";
             Phone = !string.IsNullOrEmpty(P.Phone) ? P.Phone : P.Mobile;
-            Today = FmtDate(DateTime.Today);
-            Printed = FmtDateTime(DateTime.Now);
+            TodayText = FmtDate(Today);
+            Printed = FmtDateTime(DateTime.UtcNow);
             Audit("PRINT", "PatientConsentForm", P.PatientId, "Consent form " + FormVersion + " printed");
         }
     }

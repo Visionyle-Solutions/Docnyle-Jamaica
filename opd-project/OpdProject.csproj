@@ -69,6 +69,7 @@
     </Compile>
     <Compile Include="Models\Administration.cs" />
     <Compile Include="Models\Billing.cs" />
+    <Compile Include="Models\Inventory.cs" />
     <Compile Include="Models\Clinical.cs" />
     <Compile Include="Models\ConsultationConfig.cs" />
     <Compile Include="Models\Patients.cs" />
@@ -76,6 +77,8 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Services\BillingService.cs" />
     <Compile Include="Services\CatalogService.cs" />
+    <Compile Include="Services\InventoryService.cs" />
+    <Compile Include="Services\TimeZoneService.cs" />
     <Compile Include="Services\ClinicalEngines.cs" />
     <Compile Include="Services\ConsultationService.cs" />
     <Compile Include="Services\ConsultationConfigService.cs" />
@@ -453,6 +456,13 @@
     <Compile Include="templates\settings\formulary-management.aspx.designer.cs">
       <DependentUpon>formulary-management.aspx</DependentUpon>
     </Compile>
+    <Compile Include="templates\settings\inventory-management.aspx.cs">
+      <DependentUpon>inventory-management.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="templates\settings\inventory-management.aspx.designer.cs">
+      <DependentUpon>inventory-management.aspx</DependentUpon>
+    </Compile>
     <Compile Include="templates\settings\hospital-profile.ascx.cs">
       <DependentUpon>hospital-profile.ascx</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -616,6 +626,7 @@
     <Content Include="templates\settings\data-export.aspx" />
     <Content Include="templates\settings\data-import.aspx" />
     <Content Include="templates\settings\formulary-management.aspx" />
+    <Content Include="templates\settings\inventory-management.aspx" />
     <Content Include="templates\settings\hospital-profile.ascx" />
     <Content Include="templates\settings\login.aspx" />
     <Content Include="templates\settings\permissions.aspx" />

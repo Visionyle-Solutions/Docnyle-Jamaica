@@ -119,7 +119,7 @@ namespace OpdProject.templates.consultation
                 tb.Text = "";
             RxTakeInQty.Text = "1";
             RxFreqValue.Text = "3";
-            RxPeriodStart.Text = DateTime.Today.ToString("yyyy-MM-dd");
+            RxPeriodStart.Text = AppPage.Today.ToString("yyyy-MM-dd");
             RxDurationUnit.Value = "days"; RxFreqPeriod.Value = "day"; RxTimingUnit.Value = "minutes"; RxTimingDir.Value = "before"; RxEvent.Value = "meals";
             RxFreqType.SelectedValue = "times";
             RxCategory.SelectedIndex = 0;
@@ -192,7 +192,7 @@ namespace OpdProject.templates.consultation
                 FrequencyMode = RxFreqType.SelectedValue, FrequencyPeriod = RxFreqPeriod.Value,
                 TimingBf = TimingBf.Checked, TimingAn = TimingAn.Checked, TimingNi = TimingNi.Checked, TimingEm = TimingEm.Checked, Prn = RxPrn.Checked,
                 Instructions = FieldOn("instructions") && RxInstructions.Text.Trim().Length > 0 ? RxInstructions.Text.Trim() : instruction, DynamicInstruction = instruction,
-                GenericClass = RxGenericClass.Value, ValidityDays = validity, ValidUntil = DateTime.Today.AddDays(validity),
+                GenericClass = RxGenericClass.Value, ValidityDays = validity, ValidUntil = AppPage.Today.AddDays(validity),
                 TotalDispenseQty = qty * timesPerDay * durationDays,
             };
         }
@@ -281,7 +281,7 @@ namespace OpdProject.templates.consultation
                 AppPage.ToastWarning("No previous prescriptions", "No active prescriptions found from your previous consultations with this patient.");
                 return;
             }
-            RepeatIntro.Text = "Repeat prescriptions from visit " + HttpUtility.HtmlEncode(AppPage.FmtDate(from.VisitDate)) + "?";
+            RepeatIntro.Text = "Repeat prescriptions from visit " + HttpUtility.HtmlEncode(AppPage.FmtDate(from.VisitLocalDate)) + "?";
             RepeatList.Items.Clear();
             foreach (var p in previous)
                 RepeatList.Items.Add(new ListItem(" " + p.MedicineName + " " + p.Strength + " · " + p.TimesPerDay + "x/day · " + p.DurationValue + " " + p.DurationUnit, p.PrescriptionId) { Selected = true });
@@ -312,8 +312,8 @@ namespace OpdProject.templates.consultation
                     Strength = p.Strength, DrugForm = p.DrugForm, DeliveryRoute = p.DeliveryRoute, TakeInUnit = p.TakeInUnit, TakeInQty = p.TakeInQty,
                     TimesPerDay = p.TimesPerDay, DurationValue = p.DurationValue, DurationUnit = p.DurationUnit, FrequencyMode = p.FrequencyMode,
                     FrequencyPeriod = p.FrequencyPeriod, TimingBf = p.TimingBf, TimingAn = p.TimingAn, TimingNi = p.TimingNi, TimingEm = p.TimingEm,
-                    Prn = p.Prn, Instructions = p.Instructions, GenericClass = p.GenericClass, PeriodStart = DateTime.Today, PeriodEnd = DateTime.Today.AddDays(days),
-                    ValidityDays = validity, ValidUntil = DateTime.Today.AddDays(validity), TotalDispenseQty = p.TakeInQty * p.TimesPerDay * days,
+                    Prn = p.Prn, Instructions = p.Instructions, GenericClass = p.GenericClass, PeriodStart = AppPage.Today, PeriodEnd = AppPage.Today.AddDays(days),
+                    ValidityDays = validity, ValidUntil = AppPage.Today.AddDays(validity), TotalDispenseQty = p.TakeInQty * p.TimesPerDay * days,
                     RepeatedFromConsultationId = from.ConsultationId,
                 });
                 added++;

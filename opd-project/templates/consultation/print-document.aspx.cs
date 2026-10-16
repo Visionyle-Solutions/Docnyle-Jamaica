@@ -39,7 +39,7 @@ namespace OpdProject.templates.consultation
                 default: title = "Prescription"; Prescription(sb, c); break;
             }
             sb.Append(Addenda(c));
-            sb.Append("<div class=\"print-footer\"><div>Generated: " + H(FmtDateTime(DateTime.Now)) + " · Printed by " + H(CurrentUser.FullName)
+            sb.Append("<div class=\"print-footer\"><div>Generated: " + H(FmtDateTime(DateTime.UtcNow)) + " · Printed by " + H(CurrentUser.FullName)
                 + "</div><div class=\"print-signature\"><div class=\"sig-line\">" + H(UserService.UserName(c.DoctorId)) + "<br/>Doctor's Signature</div></div></div>");
             DocumentHtml.Text = sb.ToString();
             DocumentTitle.Text = H(title + " · " + patient.FullName);
@@ -64,7 +64,7 @@ namespace OpdProject.templates.consultation
         {
             return "<div class=\"print-patient-info\"><div><strong>Patient:</strong> " + H(p.FullName) + "<br/><strong>" + H(PatientIdLabel) + ":</strong> " + H(p.Mrn)
                 + "<br/><strong>Gender:</strong> " + H(p.Gender) + " · <strong>DOB:</strong> " + H(FmtDate(p.Dob)) + " (" + p.AgeYears + "y)</div>"
-                + "<div style=\"text-align:right;\"><strong>Date:</strong> " + H(FmtDate(c.VisitDate)) + "<br/><strong>Doctor:</strong> " + H(UserService.UserName(c.DoctorId))
+                + "<div style=\"text-align:right;\"><strong>Date:</strong> " + H(FmtDate(c.VisitLocalDate)) + "<br/><strong>Doctor:</strong> " + H(UserService.UserName(c.DoctorId))
                 + (string.IsNullOrEmpty(p.NationalHealthId) ? "" : "<br/><strong>" + H(HealthIdLabel) + ":</strong> " + H(p.NationalHealthId)) + "</div></div>";
         }
 
@@ -79,7 +79,7 @@ namespace OpdProject.templates.consultation
             var dx = ConsultationService.ListDiagnoses(c.ConsultationId);
             if (dx.Count > 0) Section(sb, "Diagnosis", H(string.Join("; ", dx.Select(d => d.Icd10Description + " (" + d.Icd10Code + ")"))));
             Section(sb, "Prescription", MedsTable(meds));
-            var validUntil = meds.Where(m => m.ValidUntil.HasValue).Select(m => m.ValidUntil.Value).DefaultIfEmpty(DateTime.Today.AddDays(Hospital.DefaultRxValidityDays)).Max();
+            var validUntil = meds.Where(m => m.ValidUntil.HasValue).Select(m => m.ValidUntil.Value).DefaultIfEmpty(Today.AddDays(Hospital.DefaultRxValidityDays)).Max();
             sb.Append("<div class=\"print-validity\">FOR SINGLE DISPENSING ONLY · Valid until: " + H(FmtDate(validUntil)) + "</div>");
             if (c.FollowupDate.HasValue) Section(sb, "Follow-Up", H(FmtDate(c.FollowupDate.Value) + (string.IsNullOrEmpty(c.FollowupNotes) ? "" : " — " + c.FollowupNotes)));
         }

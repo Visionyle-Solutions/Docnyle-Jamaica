@@ -32,7 +32,7 @@
           <ItemTemplate>
             <tr>
               <td><%#: FmtDate(Item.SlotStart) %></td>
-              <td><%#: FmtTime(Item.SlotStart) %></td>
+              <td><%#: EventTime(Item) %></td>
               <asp:PlaceHolder runat="server" Visible="<%# ShowDoctor %>"><td><%#: Item.DoctorName %></td></asp:PlaceHolder>
               <td><%#: Item.PatientName %></td>
               <td><%#: Item.PatientMrn %></td>

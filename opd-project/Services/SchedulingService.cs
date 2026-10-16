@@ -147,7 +147,7 @@ namespace OpdProject.Services
         {
             lock (DataStore.Sync)
                 return DataStore.Appointments
-                    .Where(a => a.HospitalId == hospitalId && a.SlotStart.Date == date.Date && (doctorId == null || a.DoctorId == doctorId))
+                    .Where(a => a.HospitalId == hospitalId && a.AppointmentDate == date.Date && (doctorId == null || a.DoctorId == doctorId))
                     .OrderBy(a => a.SlotStart).Select(ToView).ToList();
         }
 
@@ -157,12 +157,18 @@ namespace OpdProject.Services
                 return DataStore.Appointments.Where(a => a.PatientId == patientId).OrderByDescending(a => a.SlotStart).Select(ToView).ToList();
         }
 
+        /// <summary>
+        /// Books a slot. <paramref name="start"/> / <paramref name="end"/> are wall-clock times in the hospital's timezone (a
+        /// TimeSlot, or what the receptionist picked); the appointment stores them as UTC with the hospital's TimeZoneId.
+        /// </summary>
         public static Appointment CreateAppointment(string hospitalId, string patientId, string doctorId, DateTime start, DateTime end, string type, string notes)
         {
+            var zone = TimeZoneService.HospitalZoneId(hospitalId);
             var row = new Appointment
             {
                 AppointmentId = DataStore.NextId("APT"), HospitalId = hospitalId, PatientId = patientId, DoctorId = doctorId,
-                SlotStart = start, SlotEnd = end, Type = type, Status = "BOOKED", Notes = notes ?? ""
+                SlotStart = TimeZoneService.ToUtc(start, zone), SlotEnd = TimeZoneService.ToUtc(end, zone),
+                TimeZoneId = zone, AppointmentDate = start.Date, Type = type, Status = "BOOKED", Notes = notes ?? ""
             };
             lock (DataStore.Sync) DataStore.Appointments.Add(row);
             return row;
@@ -179,10 +185,10 @@ namespace OpdProject.Services
                 string[] allowed;
                 if (!Transitions.TryGetValue(a.Status, out allowed) || !allowed.Contains(status)) return null;
                 a.Status = status;
-                if (status == "CHECKED_IN") { a.CheckedInAt = DateTime.Now; a.CheckedInBy = modifiedBy; }
-                if (status == "IN_CONSULT") a.ConsultStartedAt = DateTime.Now;
-                if (status == "COMPLETED") a.CompletedAt = DateTime.Now;
-                a.ModifiedAt = DateTime.Now;
+                if (status == "CHECKED_IN") { a.CheckedInAt = DateTime.UtcNow; a.CheckedInBy = modifiedBy; }
+                if (status == "IN_CONSULT") a.ConsultStartedAt = DateTime.UtcNow;
+                if (status == "COMPLETED") a.CompletedAt = DateTime.UtcNow;
+                a.ModifiedAt = DateTime.UtcNow;
                 a.ModifiedBy = modifiedBy;
                 return a;
             }
@@ -192,7 +198,7 @@ namespace OpdProject.Services
         public static List<TimeSlot> ListRescheduleSlots(Appointment appt, DateTime date)
         {
             var minutes = (int)(appt.SlotEnd - appt.SlotStart).TotalMinutes;
-            var now = DateTime.Now;
+            var now = TimeZoneService.Now(appt.HospitalId);   // slots are on the clinic's wall clock
             return ListAvailableSlots(appt.DoctorId, appt.HospitalId, date, minutes).Where(s => !s.IsBooked && s.SlotStart > now).ToList();
         }
 
@@ -247,8 +253,9 @@ namespace OpdProject.Services
                 if (windows.Count == 0) return slots;
                 int slot = durationMinutes.HasValue && durationMinutes.Value > 0 ? durationMinutes.Value : SlotMinutes(hospitalId, doctorId);
                 int buffer = BufferMinutes(hospitalId);
-                var taken = DataStore.Appointments.Where(a => a.DoctorId == doctorId && a.SlotStart.Date == day && a.Status != "CANCELLED")
-                    .Select(a => new { Start = (int)a.SlotStart.TimeOfDay.TotalMinutes, End = (int)a.SlotEnd.TimeOfDay.TotalMinutes + buffer }).ToList();
+                // Windows and slots are the clinic's wall clock; booked appointments (UTC) are compared in the same terms.
+                var taken = DataStore.Appointments.Where(a => a.DoctorId == doctorId && a.AppointmentDate == day && a.Status != "CANCELLED")
+                    .Select(a => new { Start = (int)a.SlotStartLocal.TimeOfDay.TotalMinutes, End = (int)a.SlotEndLocal.TimeOfDay.TotalMinutes + buffer }).ToList();
                 foreach (var w in windows)
                 {
                     int wEnd = ToMinutes(w.EndTime);
@@ -436,7 +443,7 @@ namespace OpdProject.Services
                     u = new AppUser { UserId = DataStore.NextId("USR"), HospitalId = hospitalId, Role = "DOCTOR", Password = "demo123", IsActive = true, Phone = "" };
                     DataStore.Users.Add(u);
                     foreach (var cat in new[] { "NEW", "FOLLOWUP" })
-                        DataStore.Fees.Add(new DoctorFee { FeeScheduleId = DataStore.NextId("FEE"), HospitalId = hospitalId, DoctorId = u.UserId, ConsultationType = cat, FeeAmount = 0, Currency = "", EffectiveFrom = DateTime.Today });
+                        DataStore.Fees.Add(new DoctorFee { FeeScheduleId = DataStore.NextId("FEE"), HospitalId = hospitalId, DoctorId = u.UserId, ConsultationType = cat, FeeAmount = 0, Currency = "", EffectiveFrom = TimeZoneService.Today(hospitalId) });
                 }
                 u.Prefix = record.Prefix; u.FirstName = record.FirstName; u.MiddleName = record.MiddleName; u.LastName = record.LastName;
                 u.Qualifications = record.Qualifications; u.DisplayNameOverride = record.DisplayNameOverride; u.LicenseNumber = record.LicenseNumber;
@@ -472,7 +479,7 @@ namespace OpdProject.Services
             return new DoctorCharge
             {
                 Model = ResolveSetting(hospitalId, doctorId, "CHARGE_MODEL").Value ?? "FLAT",
-                NewFee = FlatFee(doctorId, "NEW", DateTime.Today), FollowupFee = FlatFee(doctorId, "FOLLOWUP", DateTime.Today),
+                NewFee = FlatFee(doctorId, "NEW", TimeZoneService.Today(hospitalId)), FollowupFee = FlatFee(doctorId, "FOLLOWUP", TimeZoneService.Today(hospitalId)),
                 UnitMinutes = unit > 0 ? unit : 15, UnitRate = rate,
             };
         }
@@ -489,7 +496,7 @@ namespace OpdProject.Services
             });
             lock (DataStore.Sync)
             {
-                var today = DateTime.Today;
+                var today = TimeZoneService.Today(hospitalId);
                 foreach (var pair in new[] { new KeyValuePair<string, decimal>("NEW", newFee), new KeyValuePair<string, decimal>("FOLLOWUP", followupFee) })
                 {
                     var cur = DataStore.Fees.FirstOrDefault(f => f.DoctorId == doctorId && f.ConsultationType == pair.Key && f.EffectiveFrom <= today && (!f.EffectiveTo.HasValue || f.EffectiveTo >= today));
@@ -533,7 +540,7 @@ namespace OpdProject.Services
             lock (DataStore.Sync)
             {
                 DataStore.IntakeResponses.RemoveAll(r => r.AppointmentId == appointmentId);
-                DataStore.IntakeResponses.Add(new IntakeResponse { ResponseId = DataStore.NextId("IR"), HospitalId = hospitalId, AppointmentId = appointmentId, PatientId = patientId, Answers = answers, SubmittedAt = DateTime.Now });
+                DataStore.IntakeResponses.Add(new IntakeResponse { ResponseId = DataStore.NextId("IR"), HospitalId = hospitalId, AppointmentId = appointmentId, PatientId = patientId, Answers = answers, SubmittedAt = DateTime.UtcNow });
             }
         }
 
@@ -572,7 +579,7 @@ namespace OpdProject.Services
                 }
                 var rank = new Dictionary<string, int> { { "IN_CONSULT", 0 }, { "CHECKED_IN", 1 }, { "BOOKED", 2 }, { "COMPLETED", 3 } };
                 return DataStore.Appointments
-                    .Where(a => a.PatientId == c.PatientId && a.DoctorId == c.DoctorId && a.SlotStart.Date == c.VisitDate.Date && a.Status != "CANCELLED")
+                    .Where(a => a.PatientId == c.PatientId && a.DoctorId == c.DoctorId && a.AppointmentDate == c.VisitLocalDate && a.Status != "CANCELLED")
                     .OrderBy(a => rank.ContainsKey(a.Status) ? rank[a.Status] : 9).FirstOrDefault();
             }
         }
@@ -598,7 +605,7 @@ namespace OpdProject.Services
             {
                 ConsentRecordId = DataStore.NextId("CR"), ConsentFormId = form.ConsentFormId, ConsultationId = c.ConsultationId,
                 AppointmentId = appt != null ? appt.AppointmentId : null, PatientId = c.PatientId, SignedByName = signedByName,
-                Method = "IN_CLINIC", FormVersion = form.Version, TitleSnapshot = form.Title, BodySnapshot = form.BodyText, SignedAt = DateTime.Now
+                Method = "IN_CLINIC", FormVersion = form.Version, TitleSnapshot = form.Title, BodySnapshot = form.BodyText, SignedAt = DateTime.UtcNow
             };
             lock (DataStore.Sync) DataStore.ConsentRecords.Add(row);
             return row;

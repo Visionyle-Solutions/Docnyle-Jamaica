@@ -57,7 +57,7 @@
           <ItemTemplate>
             <tr>
               <td><%# RowOffset + Container.ItemIndex + 1 %></td>
-              <td><%#: FmtTime(Item.SlotStart) %></td>
+              <td><%#: EventTime(Item) %></td>
               <asp:PlaceHolder runat="server" Visible="<%# ShowDoctor %>"><td><%#: Item.DoctorName %><div class="text-xs text-muted"><%#: Item.DoctorRoom %></div></td></asp:PlaceHolder>
               <td><%#: Item.PatientName %></td>
               <td><%#: Item.PatientMrn %></td>

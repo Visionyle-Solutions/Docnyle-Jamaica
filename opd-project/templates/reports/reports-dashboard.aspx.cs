@@ -19,8 +19,8 @@ namespace OpdProject.templates.reports
         protected void Page_Load(object sender, EventArgs e)
         {
             if (IsPostBack) return;
-            ToDate.Text = IsoDate(DateTime.Today);
-            FromDate.Text = IsoDate(DateTime.Today.AddDays(-30));
+            ToDate.Text = IsoDate(Today);
+            FromDate.Text = IsoDate(Today.AddDays(-30));
             Render();
         }
 
@@ -48,8 +48,8 @@ namespace OpdProject.templates.reports
 
         private void Render()
         {
-            var from = ParseDate(FromDate.Text) ?? DateTime.Today.AddDays(-30);
-            var to = ParseDate(ToDate.Text) ?? DateTime.Today;
+            var from = ParseDate(FromDate.Text) ?? Today.AddDays(-30);
+            var to = ParseDate(ToDate.Text) ?? Today;
             RangeText.Text = H(FmtDate(from) + " → " + FmtDate(to));
 
             var volume = ReportService.ConsultationVolume(HospitalId, from, to);

@@ -162,7 +162,7 @@ namespace OpdProject.Services
                     h = new PatientMedicalHistory
                     {
                         PatientMedHistoryId = DataStore.NextId("PMH"), PatientId = patientId, ItemId = item != null ? item.ItemId : null,
-                        ConditionName = conditionName, Status = "ACTIVE", RecordedByUserId = userId, RecordedAt = DateTime.Now
+                        ConditionName = conditionName, Status = "ACTIVE", RecordedByUserId = userId, RecordedAt = DateTime.UtcNow
                     };
                     DataStore.PatientMedicalHistory.Add(h);
                 }
@@ -196,7 +196,7 @@ namespace OpdProject.Services
                     h = new PatientMedicalHistory
                     {
                         PatientMedHistoryId = DataStore.NextId("PMH"), PatientId = record.PatientId, ItemId = item != null ? item.ItemId : null,
-                        RecordedByUserId = record.RecordedByUserId, RecordedAt = DateTime.Now
+                        RecordedByUserId = record.RecordedByUserId, RecordedAt = DateTime.UtcNow
                     };
                     DataStore.PatientMedicalHistory.Add(h);
                 }
@@ -227,7 +227,7 @@ namespace OpdProject.Services
                 var ev = string.IsNullOrEmpty(record.PatientMedEventId) ? null : DataStore.PatientMedicalEvents.FirstOrDefault(e => e.PatientMedEventId == record.PatientMedEventId);
                 if (ev == null)
                 {
-                    ev = new PatientMedicalEvent { PatientMedEventId = DataStore.NextId("PME"), PatientId = record.PatientId, RecordedByUserId = record.RecordedByUserId, RecordedAt = DateTime.Now };
+                    ev = new PatientMedicalEvent { PatientMedEventId = DataStore.NextId("PME"), PatientId = record.PatientId, RecordedByUserId = record.RecordedByUserId, RecordedAt = DateTime.UtcNow };
                     DataStore.PatientMedicalEvents.Add(ev);
                 }
                 var item = DataStore.MedicalEventItems.FirstOrDefault(i => string.Equals(i.EventName, record.EventName, StringComparison.OrdinalIgnoreCase));
@@ -259,7 +259,7 @@ namespace OpdProject.Services
                 DataStore.PatientMedicalEvents.Add(new PatientMedicalEvent
                 {
                     PatientMedEventId = DataStore.NextId("PME"), PatientId = patientId, EventId = eventId, EventName = item.EventName,
-                    EventYear = year, Notes = notes, RecordedByUserId = userId, RecordedAt = DateTime.Now
+                    EventYear = year, Notes = notes, RecordedByUserId = userId, RecordedAt = DateTime.UtcNow
                 });
             }
         }
@@ -275,7 +275,7 @@ namespace OpdProject.Services
                 DataStore.FamilyHistory.Add(new PatientFamilyHistory
                 {
                     FamilyHistoryId = DataStore.NextId("PFH"), PatientId = patientId, RelationshipType = relationship,
-                    ConditionName = condition, Notes = notes, RecordedAt = DateTime.Now
+                    ConditionName = condition, Notes = notes, RecordedAt = DateTime.UtcNow
                 });
         }
 
@@ -326,7 +326,7 @@ namespace OpdProject.Services
             {
                 ConsentDocumentId = DataStore.NextId("PCD"), PatientId = patient.PatientId, HospitalId = patient.HospitalId,
                 FormVersion = ConsentFormVersion, FileName = name, ContentType = LabService.ContentTypeFor(ext), SizeBytes = length,
-                StoredFileName = Guid.NewGuid().ToString("N") + ext, UploadedByUserId = userId, UploadedAt = DateTime.Now,
+                StoredFileName = Guid.NewGuid().ToString("N") + ext, UploadedByUserId = userId, UploadedAt = DateTime.UtcNow,
             };
             var dir = Path.Combine(ConsentStorageRoot, patient.HospitalId);
             Directory.CreateDirectory(dir);

@@ -119,7 +119,7 @@ namespace OpdProject.templates.settings
             return string.Join(", ", SchedulingService.DoctorSpecialtyIds(doctorId).Select(HospitalService.SpecialtyName));
         }
 
-        protected string DaysText(string doctorId) { return SchedulingService.DaysSummary(SchedulingService.GetDoctorSchedule(doctorId, HospitalId, DateTime.Today).WorkingDays); }
+        protected string DaysText(string doctorId) { return SchedulingService.DaysSummary(SchedulingService.GetDoctorSchedule(doctorId, HospitalId, Today).WorkingDays); }
 
         protected string SlotText(string doctorId)
         {
@@ -323,7 +323,7 @@ namespace OpdProject.templates.settings
             Validate("Leave");
             if (!IsValid) return;
             var date = ParseDate(LeaveDate.Text);
-            if (!date.HasValue || date.Value < DateTime.Today) { ToastWarning("Leave date must be today or later"); return; }
+            if (!date.HasValue || date.Value < Today) { ToastWarning("Leave date must be today or later"); return; }
             if (!SchedulingService.AddLeave(SelectedDoctorId, HospitalId, date.Value, LeaveReason.Text.Trim())) { ToastWarning("Leave already recorded for that date"); return; }
             var booked = SchedulingService.ListAppointments(HospitalId, SelectedDoctorId, date.Value).Count(a => a.Status == "BOOKED" || a.Status == "CHECKED_IN");
             Audit("CREATE", "DoctorLeave", SelectedDoctorId, date.Value.ToString("yyyy-MM-dd") + " " + LeaveReason.Text.Trim());

@@ -34,12 +34,12 @@ namespace OpdProject.templates.consultation
         {
             base.OnPreRender(e);
             // Date picker: grey out every date before the earliest allowed follow-up (tomorrow)
-            FollowupDate.Attributes["min"] = DateTime.Today.AddDays(1).ToString("yyyy-MM-dd");
+            FollowupDate.Attributes["min"] = AppPage.Today.AddDays(1).ToString("yyyy-MM-dd");
         }
         protected void FollowupDate_ServerValidate(object source, ServerValidateEventArgs args)
         {
             DateTime d;
-            args.IsValid = DateTime.TryParse(args.Value, out d) && d.Date > DateTime.Today;
+            args.IsValid = DateTime.TryParse(args.Value, out d) && d.Date > AppPage.Today;
         }
 
         protected void SaveFollowupButton_Click(object sender, EventArgs e)
@@ -60,7 +60,7 @@ namespace OpdProject.templates.consultation
                 {
                     SchedulingService.CreateAppointment(HospitalId, Visit.PatientId, Host.DoctorId, slot.SlotStart, slot.SlotEnd, "FOLLOWUP",
                         string.IsNullOrEmpty(notes) ? "Auto-booked from follow-up" : notes);
-                    AppPage.ToastSuccess("Follow-Up saved & appointment booked", AppPage.FmtDate(date) + " at " + AppPage.FmtTime(slot.SlotStart));
+                    AppPage.ToastSuccess("Follow-Up saved & appointment booked", AppPage.FmtDate(date) + " at " + AppPage.EventTime(slot.SlotStart, null));
                 }
                 else
                 {
