@@ -10,6 +10,7 @@
 namespace OpdProject.templates.billing
 {
 
+
     public partial class billing_checkout
     {
 
@@ -589,7 +590,13 @@ namespace OpdProject.templates.billing
         /// </remarks>
         protected global::System.Web.UI.WebControls.Panel AddCoverageModal;
 
-        /// <summary>CoverageFields control.</summary>
+        /// <summary>
+        /// CoverageFields control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
         protected global::OpdProject.templates.billing.coverage_form CoverageFields;
 
         /// <summary>

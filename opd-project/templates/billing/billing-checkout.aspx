@@ -64,7 +64,7 @@
               <asp:LinkButton ID="CapturePaymentButton" runat="server" CssClass="btn btn--sm btn--primary" OnClick="CapturePaymentButton_Click" CausesValidation="false"><i class="ti ti-cash"></i> Capture Payment</asp:LinkButton>
             </div>
           </asp:PlaceHolder>
-          <asp:HyperLink ID="PrintLink" runat="server" CssClass="btn btn--sm btn--ghost mt-2" Target="_blank" style="width:100%; justify-content:center;"><i class="ti ti-printer"></i> Print Invoice</asp:HyperLink>
+<%--          <asp:HyperLink ID="PrintLink" runat="server" CssClass="btn btn--sm btn--ghost mt-2" Target="_blank" style="width:100%; justify-content:center;"><i class="ti ti-printer"></i> Print Invoice</asp:HyperLink>--%>
           <asp:Literal ID="CreditNoteText" runat="server" />
         </asp:PlaceHolder>
       </div>
