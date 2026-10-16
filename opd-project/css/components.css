@@ -62,8 +62,13 @@
 .reg-form > div:first-child + .reg-section-title { border-top: 0; padding-top: 0; margin-top: 4px; }
 .reg-fields {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  grid-template-columns: repeat(4, minmax(170px, 1fr));
   gap: 0 var(--space-3);
+}
+.reg-fieldss {
+    display: grid;
+    grid-template-columns: repeat(auto, minmax(170px, 1fr));
+    gap: 0 var(--space-3);
 }
 .reg-fields .form-group { min-width: 0; }
 

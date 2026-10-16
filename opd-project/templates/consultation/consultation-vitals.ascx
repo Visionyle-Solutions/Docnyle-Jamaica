@@ -3,6 +3,10 @@
      The previous / range columns, the unit switch and calculated values follow the consultation configuration;
      each vital is entered in its default unit or any other enabled unit and stored in its base unit. --%>
 <div class="consult-section" id="sectionVitals" data-section="vitals">
+    <style>
+  .vitals-table input.vital-ok  { border: 2px solid #16a34a !important; box-shadow: 0 0 0 2px rgba(22,163,74,.15) !important; }
+  .vitals-table input.vital-bad { border: 2px solid #dc2626 !important; box-shadow: 0 0 0 2px rgba(220,38,38,.15) !important; }
+</style>
   <asp:Panel ID="VitalsPanel" runat="server" CssClass="vitals-table" DefaultButton="SaveVitalsButton">
     <table style="width:100%; border-collapse:collapse; font-size:12px;">
       <thead>
@@ -43,4 +47,59 @@
       <i class="ti ti-device-floppy" aria-hidden="true"></i> Save Vitals
     </asp:LinkButton>
   </asp:Panel>
+    <script>
+        (function () {
+            if (window.__vitalsRangeColor) return;
+            window.__vitalsRangeColor = true;
+
+            function parseRange(text) {
+                if (!text || text.indexOf("'") >= 0) return null;
+                var nums = text.match(/\d+(\.\d+)?/g);
+                if (!nums || nums.length < 2) return null;
+                return { min: parseFloat(nums[0]), max: parseFloat(nums[1]) };
+            }
+
+            function evaluate(tr) {
+                var input = tr.querySelector("input[type=text]");
+                if (!input) return;
+                input.classList.remove("vital-ok", "vital-bad");
+
+                var raw = input.value.trim();
+                if (raw === "") return;
+
+                var unit = tr.querySelector("select.vital-unit");
+                if (unit) {
+                    if (!unit.getAttribute("data-def")) unit.setAttribute("data-def", unit.value);
+                    if (unit.value !== unit.getAttribute("data-def")) return;
+                }
+
+                var rangeCell = tr.querySelector("td.vt-range");
+                var range = rangeCell ? parseRange(rangeCell.textContent.trim()) : null;
+                if (!range) return;
+
+                if (!/^\d+(\.\d+)?$/.test(raw)) { input.classList.add("vital-bad"); return; }
+                var v = parseFloat(raw);
+                input.classList.add(v >= range.min && v <= range.max ? "vital-ok" : "vital-bad");
+            }
+
+            function initAll() {
+                document.querySelectorAll(".vitals-table tbody tr").forEach(function (tr) {
+                    var unit = tr.querySelector("select.vital-unit");
+                    if (unit && !unit.getAttribute("data-def")) unit.setAttribute("data-def", unit.value);
+                    evaluate(tr);
+                });
+            }
+
+            document.addEventListener("input", function (e) {
+                if (e.target.closest(".vitals-table") && e.target.matches("input[type=text]")) evaluate(e.target.closest("tr"));
+            });
+            document.addEventListener("change", function (e) {
+                if (e.target.closest(".vitals-table") && e.target.matches("select.vital-unit")) evaluate(e.target.closest("tr"));
+            });
+
+            if (window.Sys && Sys.Application) Sys.Application.add_load(initAll);
+            else if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initAll);
+            else initAll();
+        })();
+    </script>
 </div>

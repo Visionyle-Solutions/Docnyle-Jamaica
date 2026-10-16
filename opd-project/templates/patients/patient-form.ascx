@@ -98,7 +98,7 @@
 </div>
 
 <div class="reg-section-title">Address</div>
-<div class="reg-fields">
+<div class="reg-fields" style="grid-template-columns: repeat(2, minmax(170px, 1fr));">
   <div class="form-group">
     <label class="form-label" for="<%= AddrLine1Input.ClientID %>">Line 1</label>
     <asp:TextBox ID="AddrLine1Input" runat="server" CssClass="form-control" MaxLength="150" />
