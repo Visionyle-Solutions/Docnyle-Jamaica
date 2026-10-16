@@ -4,6 +4,7 @@
 <asp:Content ContentPlaceHolderID="MainContent" runat="server">
 <div class="page-container--narrow" style="padding:24px 16px;">
   <div class="card mb-3" style="text-align:center;">
+      <asp:Literal ID="LogoHtml" runat="server" />
     <h3 style="margin:4px 0;"><%: PortalHospital.Name %></h3>
     <div class="text-xs text-muted"><%: PortalHospital.LegalAddress %> · <%: PortalHospital.ContactNumber %></div>
     <div class="text-sm text-secondary mt-2">Book an appointment online</div>

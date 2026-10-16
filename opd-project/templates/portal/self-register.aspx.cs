@@ -37,7 +37,7 @@ namespace OpdProject.templates.portal
             HealthIdRequired.Enabled = HealthIdMark.Visible = PortalHospital.NationalHealthIdMandatory;
             HealthIdRequired.ErrorMessage = HealthIdLabelText + " is required";
             LogoHtml.Text = string.IsNullOrEmpty(PortalHospital.LogoBase64)
-                ? "<img src=\"" + ResolveUrl("~/assets/logo.png") + "\" alt=\"Consult360\" style=\"max-height:70px;\" />"
+                ? "<img src=\"" + ResolveUrl("~/assets/Medcity.png") + "\" alt=\"Medcity Orthopaedic & Medical Centre\" style=\"max-height:70px;\" />"
                 : "<img src=\"" + HttpUtility.HtmlAttributeEncode(PortalHospital.LogoBase64) + "\" alt=\"\" style=\"max-height:50px;\" />";
         }
 
