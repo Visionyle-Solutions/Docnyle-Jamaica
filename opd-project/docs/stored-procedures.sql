@@ -1849,7 +1849,7 @@ AS BEGIN
     BEGIN TRAN;
     -- Stocked items from Services & Procedures are deducted first, earliest-expiry batch first. If any ran out
     -- since they were added, this raises 50040 and the whole sign-off rolls back (stock never goes negative).
-    EXEC inv.usp_ConsumeStockForConsultation @ConsultationId = @ConsultationId, @UserId = @DoctorId;
+    EXEC inv.usp_RecordStockConsumption @ConsultationId = @ConsultationId, @UserId = @DoctorId;
 
     UPDATE cln.Consultation
     SET Status = 'LOCKED', IsLocked = 1, ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @DoctorId
@@ -3962,7 +3962,7 @@ END;
 GO
 
 -- Replaces the item's "Used with" list. @ServiceChargeIds: comma-separated ids (empty = linked to nothing).
-CREATE OR ALTER PROCEDURE inv.usp_SetItemServices
+CREATE OR ALTER PROCEDURE inv.usp_SaveItemServices
     @InventoryItemId  UNIQUEIDENTIFIER,
     @ServiceChargeIds NVARCHAR(MAX),
     @UserId           UNIQUEIDENTIFIER = NULL
@@ -3997,13 +3997,15 @@ AS BEGIN
 END;
 GO
 
-CREATE OR ALTER PROCEDURE inv.usp_ToggleInventoryItem
+-- Activate / deactivate an item: the new value is passed explicitly (DATA-LAYER-ARCHITECTURE §2: no toggle).
+CREATE OR ALTER PROCEDURE inv.usp_UpdateInventoryItemActive
     @InventoryItemId UNIQUEIDENTIFIER,
+    @IsActive        BIT,
     @UserId          UNIQUEIDENTIFIER = NULL
 AS BEGIN
     SET NOCOUNT ON;
     DECLARE @Out TABLE (InventoryItemId UNIQUEIDENTIFIER, IsActive BIT);
-    UPDATE inv.InventoryItem SET IsActive = 1 - IsActive, ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @UserId
+    UPDATE inv.InventoryItem SET IsActive = @IsActive, ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @UserId
     OUTPUT inserted.InventoryItemId, inserted.IsActive
     INTO @Out
     WHERE InventoryItemId = @InventoryItemId;
@@ -4039,7 +4041,7 @@ END;
 GO
 
 -- A BatchNo already on file for the item is topped up, provided the expiry matches.
-CREATE OR ALTER PROCEDURE inv.usp_ReceiveStock
+CREATE OR ALTER PROCEDURE inv.usp_RecordStockReceipt
     @HospitalId      UNIQUEIDENTIFIER,
     @InventoryItemId UNIQUEIDENTIFIER,
     @BatchNo         NVARCHAR(40),
@@ -4089,7 +4091,7 @@ END;
 GO
 
 -- Signed correction of one batch (count correction, damage, expiry write-off). Refuses to go below zero.
-CREATE OR ALTER PROCEDURE inv.usp_AdjustStock
+CREATE OR ALTER PROCEDURE inv.usp_RecordStockAdjustment
     @StockBatchId UNIQUEIDENTIFIER,
     @Delta        INT,
     @Reason       NVARCHAR(200),
@@ -4123,8 +4125,8 @@ GO
 
 -- A service / procedure, optionally with a stocked item linked to it (inv.InventoryItemService) and its own quantity.
 -- The item is only checked here (available, less what this consultation already lists); it is deducted at sign-off
--- by inv.usp_ConsumeStockForConsultation.
-CREATE OR ALTER PROCEDURE cln.usp_AddConsultationServiceItem
+-- by inv.usp_RecordStockConsumption.
+CREATE OR ALTER PROCEDURE cln.usp_CreateConsultationServiceItem
     @ConsultationId  UNIQUEIDENTIFIER,
     @ServiceChargeId UNIQUEIDENTIFIER,
     @Qty             INT = 1,
@@ -4176,7 +4178,7 @@ END;
 GO
 
 -- Before sign-off only; nothing has been deducted yet, so removal needs no stock reversal.
-CREATE OR ALTER PROCEDURE cln.usp_RemoveConsultationServiceItem
+CREATE OR ALTER PROCEDURE cln.usp_DeleteConsultationServiceItem
     @ConsultationId        UNIQUEIDENTIFIER,
     @ConsultationServiceId UNIQUEIDENTIFIER
 AS BEGIN
@@ -4204,7 +4206,7 @@ GO
 
 -- Deducts the consultation's stocked items earliest-expiry first. All or nothing: if any item is short, raises
 -- 50040 listing the shortages and deducts nothing. Called once, by cln.usp_ConfirmSignOff; a second call is a no-op.
-CREATE OR ALTER PROCEDURE inv.usp_ConsumeStockForConsultation
+CREATE OR ALTER PROCEDURE inv.usp_RecordStockConsumption
     @ConsultationId UNIQUEIDENTIFIER,
     @UserId         UNIQUEIDENTIFIER = NULL
 AS BEGIN
@@ -4285,6 +4287,13 @@ GO
 -- (cfg.ConsultationFormConfig, sec.UserNotification,
 -- opd.PatientConsentDocument,
 -- cln.ConsultationCustomValue) and cln.LabResultAttachment.
+--
+-- v3.4: procedures added in v3.1 renamed to the DATA-LAYER-ARCHITECTURE verbs:
+-- inv.usp_UpdateInventoryItemActive (was ToggleInventoryItem; takes @IsActive),
+-- inv.usp_RecordStockReceipt / RecordStockAdjustment / RecordStockConsumption
+-- (were ReceiveStock / AdjustStock / ConsumeStockForConsultation),
+-- inv.usp_SaveItemServices (was SetItemServices), cln.usp_CreateConsultationServiceItem /
+-- DeleteConsultationServiceItem (were Add / RemoveConsultationServiceItem).
 --
 -- v3.3: sec.usp_SaveDoctorProfile and cfg.usp_UpdateHospital (the two endpoints
 -- the API spec had no procedure for); cfg.fn_RenderDoctorName renders doctor

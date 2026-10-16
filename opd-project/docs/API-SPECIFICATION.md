@@ -326,8 +326,8 @@ Role: ordering requires `consultation`; lab portal endpoints require `lab_portal
 | Verb | Endpoint | Body / Params | Returns | SP |
 |------|----------|---------------|---------|-----|
 | GET | `/consultations/{id}/services` | — | `[ ServiceItem ]` — `{consultationServiceId, consultationId, patientId, serviceChargeId, serviceName, category, qty, inventoryItemId, itemName, itemUnit, itemQty, notes, addedByUserId, createdAt}` | `cln.usp_ListConsultationServiceItems` |
-| POST | `/consultations/{id}/services` | `{ serviceChargeId, qty?, inventoryItemId?, itemQty?, notes? }` — the item is optional and must be linked to the service (`GET /service-charges/{id}/items`); `itemQty` may not exceed what is available less what this visit already lists | `{ consultationServiceId, serviceName, qty, itemName, itemQty }` | `cln.usp_AddConsultationServiceItem`. Stock is only checked here; it is deducted at sign-off. Errors 50030 consultation not found or signed off, 50031 not enough stock, 50032 service not found, 50033 item not used with this service. At sign-off the service and the item are billed on separate invoice lines. |
-| DELETE | `/consultations/{id}/services/{serviceId}` | — | `{ success }` (before sign-off only; nothing to reverse) | `cln.usp_RemoveConsultationServiceItem` |
+| POST | `/consultations/{id}/services` | `{ serviceChargeId, qty?, inventoryItemId?, itemQty?, notes? }` — the item is optional and must be linked to the service (`GET /service-charges/{id}/items`); `itemQty` may not exceed what is available less what this visit already lists | `{ consultationServiceId, serviceName, qty, itemName, itemQty }` | `cln.usp_CreateConsultationServiceItem`. Stock is only checked here; it is deducted at sign-off. Errors 50030 consultation not found or signed off, 50031 not enough stock, 50032 service not found, 50033 item not used with this service. At sign-off the service and the item are billed on separate invoice lines. |
+| DELETE | `/consultations/{id}/services/{serviceId}` | — | `{ success }` (before sign-off only; nothing to reverse) | `cln.usp_DeleteConsultationServiceItem` |
 | GET | `/consultations/{id}/stock-shortages` | — | `[ { inventoryItemId, itemName, unit, needed, available } ]` — stocked items the visit lists more of than is in stock; empty = sign-off can proceed | `inv.usp_ListStockShortages` |
 
 ---
@@ -479,15 +479,15 @@ calendar date) and used earliest-expiry first. Every change is a row in the stoc
 | GET | `/inventory/items?hospitalId=&includeInactive=` | `hospitalId`, optional `includeInactive` | `[ InventoryItem ]` — `{inventoryItemId, itemCode, itemName, category, unit, unitPrice, taxPercent, reorderLevel, isActive, available, expired, nextExpiry}`; `available` counts unexpired batches only | `inv.usp_ListInventoryItems` |
 | GET | `/inventory/items/{id}` | — | `InventoryItem` — `{inventoryItemId, hospitalId, itemCode, itemName, category, unit, unitPrice, taxPercent, reorderLevel, isActive}` | `inv.usp_GetInventoryItem` |
 | POST / PUT | `/inventory/items` · `/inventory/items/{id}` | `{ hospitalId, itemCode, itemName, category, unit, unitPrice, taxPercent?, reorderLevel? }` — `category` MEDICATION / INJECTION / CONSUMABLE / OTHER; `itemCode` unique per hospital | `{ inventoryItemId, itemName }` | `inv.usp_SaveInventoryItem` (inserts when `@InventoryItemId` is null) |
-| PUT | `/inventory/items/{id}/toggle-active` | — | `{ inventoryItemId, isActive }` | `inv.usp_ToggleInventoryItem` |
+| PUT | `/inventory/items/{id}/active` | `{ isActive }` | `{ inventoryItemId, isActive }` | `inv.usp_UpdateInventoryItemActive` |
 | GET | `/inventory/items/{id}/services` | — | `[ { serviceChargeId, serviceName } ]` — the services the item is used with | `inv.usp_ListItemServices` |
-| PUT | `/inventory/items/{id}/services` | `{ serviceChargeIds: [ … ] }` (sent comma-separated as `@ServiceChargeIds`; replaces the list; empty = linked to nothing) | same as GET | `inv.usp_SetItemServices` |
+| PUT | `/inventory/items/{id}/services` | `{ serviceChargeIds: [ … ] }` (sent comma-separated as `@ServiceChargeIds`; replaces the list; empty = linked to nothing) | same as GET | `inv.usp_SaveItemServices` |
 | GET | `/service-charges/{id}/items?hospitalId=` | `hospitalId` | `[ { inventoryItemId, itemName, category, unit, available } ]` — active items linked to the service: the Item field in Services & Procedures | `inv.usp_ListItemsForService` |
 | GET | `/inventory/items/{id}/batches?includeEmpty=` | optional `includeEmpty` | `[ StockBatch ]` — `{stockBatchId, inventoryItemId, batchNo, expiryDate, qtyReceived, qtyOnHand, unitCost, supplier, receivedByUserId, receivedAt, isExpired}`, earliest expiry first | `inv.usp_ListStockBatches` |
-| POST | `/inventory/items/{id}/receipts` | `{ hospitalId, batchNo, expiryDate, qty, unitCost?, supplier? }` — a batch number already on file is topped up (same expiry only) | `[ StockBatch ]` (the item's batches) | `inv.usp_ReceiveStock`. Errors 50020 qty < 1, 50021 item not found, 50022 batch on file with another expiry |
-| POST | `/inventory/batches/{id}/adjustments` | `{ delta, reason }` — signed quantity (negative for expiry write-off, damage, count short) | `{ success }` | `inv.usp_AdjustStock`. Errors 50023 delta 0, 50024 would go below zero |
+| POST | `/inventory/items/{id}/receipts` | `{ hospitalId, batchNo, expiryDate, qty, unitCost?, supplier? }` — a batch number already on file is topped up (same expiry only) | `[ StockBatch ]` (the item's batches) | `inv.usp_RecordStockReceipt`. Errors 50020 qty < 1, 50021 item not found, 50022 batch on file with another expiry |
+| POST | `/inventory/batches/{id}/adjustments` | `{ delta, reason }` — signed quantity (negative for expiry write-off, damage, count short) | `{ success }` | `inv.usp_RecordStockAdjustment`. Errors 50023 delta 0, 50024 would go below zero |
 | GET | `/inventory/items/{id}/movements?take=` | optional `take` (default 50) | `[ StockMovement ]` — `{stockMovementId, movementType, qty, reason, consultationId, userId, createdAt, stockBatchId, batchNo}`, newest first; `movementType` RECEIPT / CONSUMPTION / ADJUSTMENT, `qty` signed | `inv.usp_ListStockMovements` |
-| — | *(internal, not an endpoint)* | — | Deducts a consultation's stocked items earliest-expiry first, all or nothing; error 50040 lists the shortages; a second call is a no-op | `inv.usp_ConsumeStockForConsultation` — called by `cln.usp_ConfirmSignOff` |
+| — | *(internal, not an endpoint)* | — | Deducts a consultation's stocked items earliest-expiry first, all or nothing; error 50040 lists the shortages; a second call is a no-op | `inv.usp_RecordStockConsumption` — called by `cln.usp_ConfirmSignOff` |
 
 ---
 
@@ -526,10 +526,10 @@ resolved by schema v4.0 and its procedures; v2.3 added the two missing procedure
 (`sec.usp_SaveDoctorProfile`, `cfg.usp_UpdateHospital`). Notes:
 
 1. **Hard deletes** (`bil.usp_DeleteInvoiceLineItem`, `cln.usp_DeleteLabFavorite`,
-   `cln.usp_RemoveConsultationServiceItem` before sign-off) are intentional: those rows have no
+   `cln.usp_DeleteConsultationServiceItem` before sign-off) are intentional: those rows have no
    `IsActive` column, or nothing has happened to them yet.
 
-Every procedure in `stored-procedures.sql` is listed above, except the internal helpers (`cfg.fn_*`, `bil.usp_RecalculateInvoiceSplit`, `inv.usp_ConsumeStockForConsultation`, noted where used).
+Every procedure in `stored-procedures.sql` is listed above, except the internal helpers (`cfg.fn_*`, `bil.usp_RecalculateInvoiceSplit`, `inv.usp_RecordStockConsumption`, noted where used).
 
 ---
 
