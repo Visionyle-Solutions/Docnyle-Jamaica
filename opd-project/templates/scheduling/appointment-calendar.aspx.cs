@@ -17,7 +17,7 @@ namespace OpdProject.templates.scheduling
     {
         protected override string RequiredPermission { get { return "scheduling"; } }
         public override string PageTitle { get { return "Appointment Calendar"; } }
-
+        private bool IsPastDate { get { return SelectedDate.Date < Today.Date; } }
         private string DoctorId { get { return DoctorFilter.SelectedValue; } }
         private DateTime SelectedDate { get { return ParseDate(DateFilter.Text) ?? Today; } }
 
@@ -44,6 +44,7 @@ namespace OpdProject.templates.scheduling
 
         private void Bind()
         {
+            BookButton.Visible = !IsPastDate;
             if (string.IsNullOrEmpty(DoctorId))
             {
                 NoAppointments.Visible = true;
