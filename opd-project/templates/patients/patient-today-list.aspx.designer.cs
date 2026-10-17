@@ -105,5 +105,7 @@ namespace OpdProject.templates.patients
         protected global::System.Web.UI.WebControls.Literal PageInfo;
         protected global::System.Web.UI.WebControls.LinkButton PrevPageButton;
         protected global::System.Web.UI.WebControls.LinkButton NextPageButton;
+        protected global::System.Web.UI.WebControls.LinkButton ExportExcelButton;
+        protected global::System.Web.UI.WebControls.LinkButton ExportPdfButton;
     }
 }

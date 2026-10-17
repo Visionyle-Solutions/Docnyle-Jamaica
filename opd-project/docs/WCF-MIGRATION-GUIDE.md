@@ -8,8 +8,8 @@ store inside the Web Forms application (`Services/DataStore.cs` and the static
 2019, using the schema, stored procedures and service contract already designed for it.
 **Audience:** Engineers doing the migration; reviewers checking the plan before work starts.
 **Companion documents:** `API-SPECIFICATION.md` (the WCF contract: one service,
-`IDOCNyleUnifiedAPI`, 207 operations), `DATA-LAYER-ARCHITECTURE.md` (naming and schema rules),
-`schema.sql` (80 tables), `stored-procedures.sql` (212 procedures, 3 views, 4 functions),
+`IDOCNyleUnifiedAPI`, 261 operations), `DATA-LAYER-ARCHITECTURE.md` (naming and schema rules),
+`schema.sql` (81 tables), `stored-procedures.sql` (266 procedures, 3 views, 7 functions),
 `audit-log.sql`, `PRODUCT-GUIDE.md`, `testing-guide.md`, `API-INTEGRATION-GUIDE.md` (the
 Web Forms side of §9 in detail: static-data inventory, facade → operation map, cut-over order).
 
@@ -82,7 +82,7 @@ module by module, without rewriting the pages.
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  DOCNyleUnifiedAPI — WCF Service Application, .NET 4.8, IIS              │
 │  DOCNyleUnifiedAPI.svc → class DOCNyleUnifiedAPI : IDOCNyleUnifiedAPI    │
-│  IDOCNyleUnifiedAPI.cs — one [ServiceContract], 207 operations in 13     │
+│  IDOCNyleUnifiedAPI.cs — one [ServiceContract], 261 operations in 13     │
 │    regions, all [DataContract]s, ServiceFault                            │
 │  Each operation: Authorize(feature) → validate → DataRepository → map    │
 │    → audit, inside Run(…) which turns exceptions into ServiceFault       │
@@ -98,7 +98,7 @@ module by module, without rewriting the pages.
                                 ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  SQL Server 2019 — ALREADY DESIGNED, NOT REDESIGNED HERE                 │
-│  schema.sql — 80 tables in opd/cln/bil/cfg/sec/msg/inv                   │
+│  schema.sql — 81 tables in opd/cln/bil/cfg/sec/msg/inv                   │
 │  stored-procedures.sql — the only read/write surface (no ad-hoc SQL)     │
 │  audit-log.sql · Row-Level Security on SESSION_CONTEXT('HospitalId')     │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -152,7 +152,7 @@ Solution 'DOCNyleUnifiedAPI'
 ├── DOCNyleUnifiedAPI                     WCF Service Application (.NET 4.8, IIS)
 │   ├── DOCNyleUnifiedAPI.svc             the one endpoint
 │   │   └── DOCNyleUnifiedAPI.svc.cs      class DOCNyleUnifiedAPI : IDOCNyleUnifiedAPI
-│   │                                     — all 207 operations (#regions as in the spec), plus the
+│   │                                     — all 261 operations (#regions as in the spec), plus the
 │   │                                       private Run / Authorize / Audit / mapping helpers
 │   ├── IDOCNyleUnifiedAPI.cs             [ServiceContract] interface, [DataContract]s, ServiceFault
 │   ├── Web.config                        system.serviceModel, DOCNyle connection string
@@ -501,15 +501,15 @@ shortages. The facade drops its separate `ConsumeForConsultation` call.
 |---|---|---|
 | `HospitalService` | `GetHospital`, `SaveSettings`, `ListVitalsConfig`, `SaveHospitalCompliance` | 1 |
 | `UserService` | `Authenticate`, `CreateUser`, `TogglePermission`, `GetPermissionMatrix` | 2 — password hashing, matrix pivot |
-| `PatientService` | `Search`, `Create` (MRN), `SaveAllergy`, `SaveMedicalHistory`, `AddCoverage` | 1; `FindDuplicate` has no procedure yet (Known Gaps) |
+| `PatientService` | `Search`, `Create` (MRN), `SaveAllergy`, `SaveMedicalHistory`, `AddCoverage` | 1; `FindDuplicate` → `opd.usp_CheckDuplicatePatient` (v3.5) |
 | `SchedulingService` | `ListAvailableSlots`, `UpdateStatus`, `SaveDoctorProfile`, `SaveDoctorCharge` | 1, parity-critical; status moves → `Conflict` fault |
 | `ConsultationService` | `GetOrCreate`, `SaveVitals`, `CycleSymptom`, `AddPrescription`, `SignOff` | 1 / 3 / 4 — see §5.2, 5.4, 5.5 |
 | `CatalogService`, `PhraseService` | `SearchFormulary`, `ToggleFavorite`, `ListVisiblePhrases` | 1; `ToggleFavorite` becomes Create/Delete in the facade |
-| `LabService` | `SubmitResult`, `MarkReviewed`, `ClaimOrder`, attachments | 1; claim-by-mobile and attachments need procedures (Known Gaps) |
+| `LabService` | `SubmitResult`, `MarkReviewed`, `ClaimOrder`, attachments | 1; claim-by-mobile (lockout in `sec.LabClaimAttempt`) and attachments added in v3.5 |
 | `BillingService` | `GenerateInvoiceForConsultation`, `RecalculateTotals`, `ApplyCoverage`, `RecordPayment` | 1 for each procedure; 2 for invoice generation, which orchestrates charge + lines + recalc |
 | `InventoryService` | `ReceiveStock`, `AdjustStock`, `Shortages` | 1 |
 | `ReportService`, `NotificationService`, `ExportService`, `AuditService` | reports, queue, CSV export, audit | 1; 2 for audit IP / user agent (taken from the request, not the caller) |
-| `ConsultationConfigService`, `UserNotificationService` | form designer, in-app notifications | Not migrated yet — no procedures (Known Gaps); stay on `DataStore` until they exist |
+| `ConsultationConfigService`, `UserNotificationService` | form designer, in-app notifications | 2 — the designer's edits stay in C# on the whole form document, which the procedures (v3.5) store as JSON; notifications are created inside `SubmitLabResult` |
 
 ---
 
@@ -673,10 +673,13 @@ Seed users today hold plain passwords (`demo123`, `admin123`) in `DataStore`. Th
 with PBKDF2 (`Rfc2898DeriveBytes`, SHA-256, per-user salt, ≥ 100,000 iterations). A salted hash
 cannot be recomputed from the password alone, so `sec.usp_AuthenticateUser`'s "compare
 `@PasswordHash`" contract needs a companion procedure that returns the stored hash for an email
-(proposed `sec.usp_GetUserCredential`, with a `DataRepository.GetUserCredential` method); the
-service verifies in C#, then calls `AuthenticateUser` and audits `LOGIN` or `LOGIN_FAIL`. Add that
-procedure in P1. The seed script stores real hashes of the documented demo passwords (§11). Lock
-an account for 15 minutes after 5 failed attempts.
+(`sec.usp_GetUserCredential`, procedures v3.6, with a `DataRepository.GetUserCredential` method). It
+returns `UserId, PasswordHash, RecentFailures, LockedUntil`. The service: refuses at once while
+`LockedUntil` is in the future; verifies the password in C# (a dummy verification for an unknown
+e-mail); records the attempt with `sec.usp_RecordLoginAttempt` (`sec.LoginAttempt`); on success
+calls `sec.usp_AuthenticateUser` with the stored hash; audits `LOGIN` or `LOGIN_FAIL`. Hash format:
+`PBKDF2$SHA256${iterations}${salt base64}${hash base64}`. The seed script stores real hashes of the
+documented demo passwords (§11). 5 failed attempts lock the e-mail for 15 minutes.
 
 ---
 
@@ -870,7 +873,7 @@ documented demo passwords, generated by the same hasher the service uses — nev
 | Phase | Scope | Exit gate |
 |---|---|---|
 | **P0 — Frozen inputs** | `schema.sql`, `stored-procedures.sql`, `audit-log.sql`, `API-SPECIFICATION.md`, `DATA-LAYER-ARCHITECTURE.md`. | Signed off as the contract; later changes go in as explicit addenda. |
-| **P1 — Skeleton** | `IDOCNyleUnifiedAPI.cs` with every operation and data contract; `DOCNyleUnifiedAPI.svc.cs` with `Run`, `Authorize`, `Audit`; `Helper.cs` with `Open` (+ SESSION_CONTEXT), parameters and retry; DbMigrator building a dev database; `sec.usp_GetUserCredential` (§7.5). Auth region working end to end; service reference added to `OpdProject`. | Both projects build; the site signs in through the service against SQL Server; a call without a token is rejected; DbUp applies to an empty database cleanly. |
+| **P1 — Skeleton** | `IDOCNyleUnifiedAPI.cs` with every operation and data contract; `DOCNyleUnifiedAPI.svc.cs` with `Run`, `Authorize`, `Audit`; `Helper.cs` with `Open` (+ SESSION_CONTEXT), parameters and retry; DbMigrator building a dev database; sign-in through `sec.usp_GetUserCredential` (§7.5). Auth region working end to end; service reference added to `OpdProject`. | Both projects build; the site signs in through the service against SQL Server; a call without a token is rejected; DbUp applies to an empty database cleanly. |
 | **P2 — Operations, region by region** | In the order of §5: `DataRepository` methods → operations → unit tests → integration tests, one region at a time. | Every operation in the spec is implemented and has an integration test; fault codes match spec §0.6. |
 | **P3 — Facade switch, module by module** | Turn `DataSource:{Module}` to `Wcf` in a test environment, fix mapping and page error handling (§9). | Each switched module passes its `testing-guide.md` section with no behavior change; parity tests for that module green. |
 | **P4 — Parity run** | All modules on `Wcf` in staging; full `testing-guide.md` walkthrough with every seeded role; all parity tests. | Zero open differences between in-memory and WCF behavior. |
@@ -884,7 +887,7 @@ documented demo passwords, generated by the same hasher the service uses — nev
 | Risk | Why it is real here | Mitigation |
 |---|---|---|
 | Business-logic differences between the C# services and the procedures | Boundary rules (fee dates, slot windows, coverage capping, expiry-first stock) were written twice, once in C# and once in T-SQL | Bucket classification (§5) and mandatory parity tests (§12) for every parity-critical method |
-| Procedure parameter / type mismatches | 212 procedures, many with 10+ optional parameters; ADO.NET binds by name at run time | One `DataRepository` method per procedure with parameter names copied from `stored-procedures.sql`; integration test per method on LocalDB |
+| Procedure parameter / type mismatches | 266 procedures, many with 10+ optional parameters; ADO.NET binds by name at run time | One `DataRepository` method per procedure with parameter names copied from `stored-procedures.sql`; integration test per method on LocalDB |
 | One very large contract file | ≈ 200 operations and their data contracts in `IDOCNyleUnifiedAPI.cs`; merge conflicts when several people work on regions | Strict region order matching the spec; one region per pull request; data contracts can move to partial files without changing the contract |
 | Stale service reference in the site | The site's types come from WSDL, not a shared assembly | Update Service Reference is part of every contract change; CI fails if the generated `Reference.cs` differs from the live WSDL |
 | Chattier pages after the switch | Every facade call becomes a SOAP round trip; Consultation 360 loads many cards | Per-request and per-hospital caching (§9.5) before adding combined operations; measure page load in P3 |
@@ -893,7 +896,7 @@ documented demo passwords, generated by the same hasher the service uses — nev
 | Client misuse in the site | `using` on a faulted client, headers not added | `Web/DocNyle.cs` is the only way pages reach the service (§9.3); code review checklist |
 | Large payloads | Logos, sketches, card images and CSV exports travel as `byte[]` | MTOM, 50 MB quotas matching IIS limits; a streamed endpoint for file transfers once those procedures exist |
 | Credentials carried over from the demo | `DataStore` holds plain passwords | PBKDF2 hashes in the seed, generated by the runtime hasher; a test signs in with the demo logins through the service |
-| Features with no procedures yet | Form designer, in-app notifications, lab attachments, consent documents, lab claim, duplicate check | Those modules stay `InProc` until their procedures and operations are added (spec Known Gaps); P6 cannot finish until they are |
+| Gap procedures are new and less proven | Section 22 of `stored-procedures.sql` (v3.5) was written after the rest, from the in-memory code; it is compiled and smoke-tested, not parity-tested | Give the v3.2 operations the same parity tests (§12) — especially `UpdateAppointmentSlot`, `CreateRecurringAppointments`, the lab-claim lockout, form publish and MRN numbering (v3.6); spec Known Gap #8 must close before encryption is turned on |
 
 ---
 
@@ -926,7 +929,7 @@ The operation and its `DataRepository` method share a name.
 | `ExportService.ToCsv(key, hid)` | `ListExportData(key)` | `sec.usp_ListExportData_{Table}` |
 | `AuditService.Record(…)` | `RecordAuditEntry(request)` | `sec.usp_RecordAuditEntry` |
 
-The full list is `API-SPECIFICATION.md` (207 operations, each naming its procedure).
+The full list is `API-SPECIFICATION.md` (261 operations, each naming its procedure).
 
 ### 15.2 Phase checklist
 

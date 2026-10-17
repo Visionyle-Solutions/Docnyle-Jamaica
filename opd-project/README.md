@@ -154,5 +154,5 @@ for every domain, whether built yet or not.
 | `schema.md` | How to read the schema — append-only tables, server-populated fields, confidential-notes handling |
 | `api-contract.md` | Every `API.xxx()` method and its Phase 4 HTTP destination |
 | `WCF-MIGRATION-GUIDE.md` | Phase 4 plan: in-memory services → DOCNyleUnifiedAPI WCF service + SQL Server |
-| `API-SPECIFICATION.md` | The WCF contract `IDOCNyleUnifiedAPI` (one `.svc`, 207 operations) |
+| `API-SPECIFICATION.md` | The WCF contract `IDOCNyleUnifiedAPI` (one `.svc`, 261 operations) |
 | `PROJECT_ARCHITECTURE_RULES_V3_0.md` | The governing architecture rules (as provided) |

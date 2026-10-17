@@ -36,6 +36,11 @@
         <span><span class="badge badge--warning"><asp:Literal ID="CountInConsult" runat="server" /> <%: StatusLabel("IN_CONSULT") %> </span> </span>
         <span><span class="badge badge--success"><asp:Literal ID="CountCompleted" runat="server" /> <%: StatusLabel("COMPLETED") %> </span> </span>
       </div>
+      <%-- downloads every record matching the filters, not just the page shown --%>
+      <div style="display:flex; gap:6px;">
+        <asp:LinkButton ID="ExportExcelButton" runat="server" CssClass="btn btn--sm btn--ghost" OnCommand="Export_Command" CommandArgument="xlsx" CausesValidation="false" title="Download as Excel"><i class="ti ti-file-spreadsheet" aria-hidden="true"></i> Excel</asp:LinkButton>
+        <asp:LinkButton ID="ExportPdfButton" runat="server" CssClass="btn btn--sm btn--ghost" OnCommand="Export_Command" CommandArgument="pdf" CausesValidation="false" title="Download as PDF"><i class="ti ti-file-type-pdf" aria-hidden="true"></i> PDF</asp:LinkButton>
+      </div>
     </div>
   </div>
   <div class="card">

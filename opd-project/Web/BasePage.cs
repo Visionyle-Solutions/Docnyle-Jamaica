@@ -97,6 +97,24 @@ namespace OpdProject.Web
             AuditService.Record(HospitalId, UserId, action, entityType, entityId, details);
         }
 
+        /// <summary>
+        /// Sends a list as an Excel (<paramref name="format"/> "xlsx") or PDF ("pdf") download named
+        /// <paramref name="fileBase"/> plus the extension, stamped with the hospital and who generated it, and audits the export.
+        /// </summary>
+        protected void DownloadTable(string format, string fileBase, TableExport.Table table)
+        {
+            var pdf = format == "pdf";
+            table.Organisation = Hospital != null ? Hospital.Name : null;
+            table.Footer = "Generated " + FmtDateTime(HospitalNow) + (CurrentUser != null ? " by " + CurrentUser.FullName : "");
+            var data = pdf ? TableExport.ToPdf(table) : TableExport.ToXlsx(table);
+            Audit("EXPORT", "DataExport", fileBase, "Exported " + table.Rows.Count + " " + table.Title + " rows to " + (pdf ? "PDF" : "Excel"));
+            Response.Clear();
+            Response.ContentType = pdf ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            Response.AddHeader("Content-Disposition", "attachment; filename=" + fileBase + (pdf ? ".pdf" : ".xlsx"));
+            Response.BinaryWrite(data);
+            Response.End();
+        }
+
         /* ── Formatting helpers (follow Settings → Hospital & Practice → Formats) ── */
 
         public string FmtDate(object value)

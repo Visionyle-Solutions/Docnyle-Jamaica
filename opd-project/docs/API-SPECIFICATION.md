@@ -1,6 +1,6 @@
 # Consult360 — WCF Service Specification (DOCNyleUnifiedAPI)
 
-**Version:** 3.1
+**Version:** 3.3
 **Platform:** .NET Framework 4.8 · Windows Communication Foundation (WCF) hosted in IIS ·
 SQL Server 2019 (`docs/schema.sql`, `docs/stored-procedures.sql`)
 **Service:** `DOCNyleUnifiedAPI` — one `.svc`, one service contract (`IDOCNyleUnifiedAPI`)
@@ -11,6 +11,20 @@ one `[OperationContract]` on the single WCF contract `IDOCNyleUnifiedAPI`, and e
 names the stored procedure in `docs/stored-procedures.sql` that backs it. Consult360 does not
 use ASP.NET MVC or Web API: the pages are Web Forms, and the data layer is the
 `DOCNyleUnifiedAPI` WCF service.
+
+**v3.3 change note:** closes v3.2 Known Gaps #4–#7 (procedures v3.6). `CreatePatient` /
+`UpdatePatient` carry every registration field and `RegisteredVia`, and MRNs follow the
+hospital's MRN settings; sign-in verifies the salted hash through `sec.usp_GetUserCredential` with
+a 5-failure lockout; `CreateAppointment` re-checks the slot (new `Conflict` 50214); slot lists
+reject lengths that never end. Operation count unchanged (261). Data contracts only gained
+members.
+
+**v3.2 change note:** 54 operations for the features the Web Forms app ran only in memory
+(v3.1 Known Gaps #1; `API-INTEGRATION-GUIDE.md` §8, gaps G-1 … G-17), backed by section 22 of
+`stored-procedures.sql` (v3.5) and one new table, `sec.LabClaimAttempt` (`schema.sql` v4.1).
+New rows are tagged *v3.2*. Also: the patient-portal operations (§5), the first operations that
+run without a session other than sign-in; file content for consent documents and lab
+attachments travels as MTOM `byte[]`; new error numbers 50200–50249 (§0.6).
 
 **v3.1 change note:** matched to the `DOCNyleUnifiedAPI` solution — a single service
 (`DOCNyleUnifiedAPI.svc` / `.svc.cs`), a single interface file (`IDOCNyleUnifiedAPI.cs`), and
@@ -202,7 +216,7 @@ Each operation body runs inside one wrapper in `DOCNyleUnifiedAPI.svc.cs`
 |--------|-------------|
 | Request fails validation (missing required member, bad enum value, string too long) | `Validation` |
 | Procedure returns no row for the id given, or the row belongs to another hospital | `NotFound` |
-| A state change the record's current state does not allow — appointment status moves (v2.3's "null / HTTP 409"), invoice cancelled (50121), payer already settled (50122), removing a settled coverage line | `Conflict` |
+| A state change the record's current state does not allow — appointment status moves (v2.3's "null / HTTP 409"), invoice cancelled (50121), payer already settled (50122), removing a settled coverage line; v3.2: appointment not BOOKED (50213), slot just taken (50214), schedule locked by another booking (50220), form draft changed by someone else (50241) | `Conflict` |
 | Any other `SqlException` with `Number` 50000–59999 (the `THROW`s in `stored-procedures.sql`) | `BusinessRule`, with `ErrorNumber` and the procedure's message |
 | `SessionToken` missing / invalid / expired | `Unauthenticated` |
 | Feature not granted to any of the caller's roles; confidential note requested by a non-author | `Forbidden` |
@@ -210,7 +224,11 @@ Each operation body runs inside one wrapper in `DOCNyleUnifiedAPI.svc.cs`
 
 Error numbers in use: 50020–50024 (stock receipts/adjustments), 50030–50033 (consultation
 services), 50040 (not enough stock at sign-off), 50050 (hospital has no timezone), 50060–50065
-(doctor profiles), 50070–50073 (hospital profile), 50120–50122 (payments / coverage).
+(doctor profiles), 50070–50073 (hospital profile), 50120–50122 (payments / coverage);
+v3.2: 50200–50204 (patient records, import), v3.3: 50205–50206 (MRN format), 50210–50212 (payers), 50213–50216 and 50220
+(booking), 50217–50219 (outside medicines, orders, drugs), 50230–50236 (lab claim, partners,
+attachments), 50240–50246 (consultation form, custom values). `Run` maps 50213, 50214, 50220
+and 50241 to `Conflict` beside 50121 / 50122.
 
 ### 0.7 Audit
 
@@ -370,7 +388,7 @@ the same name), followed by notes.
 
 | Operation | Input | Returns | Procedure / notes |
 |-----------|-------|---------|-------------------|
-| `AuthenticateUser(AuthenticateRequest request)` | `Email, Password` — the service verifies `Password` against the stored hash (Known Gaps #4) | `AuthenticatedUser` — `UserId, HospitalId, FullName, Email, Phone, Roles, SpecialtyId, LicenseNumber, LabPartnerId, IsActive` — or `null` when the email/password do not match | `sec.usp_AuthenticateUser`. `[AnonymousOperation]`. **Audited: LOGIN / LOGIN_FAIL** |
+| `AuthenticateUser(AuthenticateRequest request)` | `Email, Password` | `AuthenticatedUser` — `UserId, HospitalId, FullName, Email, Phone, Roles, SpecialtyId, LicenseNumber, LabPartnerId, IsActive` — or `null` when the email/password do not match | v3.3: `sec.usp_GetUserCredential` (stored hash `PBKDF2$SHA256${iterations}${salt}${hash}`, `RecentFailures`, `LockedUntil`) → the service verifies the password in C# (a dummy verification for an unknown e-mail, so timing does not reveal it) → `sec.usp_RecordLoginAttempt` → on success `sec.usp_AuthenticateUser` with the stored hash. 5 failures in 15 minutes: `BusinessRule` fault "Too many attempts — try again at {LockedUntil}" without checking the password. `[AnonymousOperation]`. **Audited: LOGIN / LOGIN_FAIL** |
 | `CreateUserSession(CreateSessionRequest request)` | `UserId, SessionToken, Browser?, IpAddress?, ExpiresAt` | `UserSession` — `UserSessionId, SessionToken, CreatedAt, ExpiresAt` | `sec.usp_CreateUserSession`. `[AnonymousOperation]`; only accepted for a `UserId` returned by `AuthenticateUser` in the same sign-in |
 | `CheckSessionValid()` | — (the `SessionToken` header) | `SessionStatus` — `Valid, UserId, ExpiresAt` | `sec.usp_CheckSessionValid`. Used by `BasePage` to confirm the session on postback |
 
@@ -436,6 +454,22 @@ Reads: any signed-in user. Writes: `admin_hospital` (ADMIN) unless stated.
 | `UpdateVitalEnabled(string vitalCode, bool isEnabled)` | — | `void` | `cfg.usp_UpdateVitalEnabled` |
 | `CreateVitalConfig(CreateVitalConfigRequest request)` | `VitalCode, DisplayLabel, AllowedUnits, MinValue?, MaxValue?, SortOrder?` | `VitalDefinition` | `cfg.usp_CreateVitalConfig` |
 
+### Consultation form designer (v3.2)
+
+Feature: reads any signed-in user (the consultation renders the published form); writes
+`admin_consultation`. The designer's editing rules (toggle, move, add sections / fields /
+options / units, presets, `ListPublishProblems`, `ListDraftChanges`, restore defaults) stay in
+`ConsultationConfigService` and work on the whole `ConsultFormConfig` document; the service stores
+that document. `Sections` and `VitalUnits` are the JSON of `List<ConsultFormSection>` and
+`List<VitalUnitSetting>`. A hospital with no published row uses the built-in default form.
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `GetConsultationFormConfig(string configState)` | `PUBLISHED` (default) or `DRAFT` | `ConsultFormDocument` — `ConfigState, Version, PublishedAt, PublishedBy, Sections, VitalUnits, ModifiedAt`, or `null` | `cfg.usp_GetConsultationFormConfig` |
+| `SaveConsultationFormDraft(SaveFormDraftRequest request)` | `Sections, VitalUnits?, ExpectedModifiedAt?` — the draft's `ModifiedAt` as last read (`null` for the first save) | `ConsultFormDocument` (the draft) | `cfg.usp_SaveConsultationFormDraft`. 50240 invalid JSON; 50241 (`Conflict`) someone else saved the draft since it was read |
+| `ConfirmConsultationFormPublish()` | — | `FormPublishResult` — `Version, PublishedAt` | `cfg.usp_ConfirmConsultationFormPublish`. Before calling the procedure the service rejects a draft with problems (`Validation`), returns the current version when nothing changed, creates pending custom vitals (`cfg.usp_CreateVitalConfig`) and re-saves the draft without the pending flags; the procedure copies draft → published (version + 1) and sets `cfg.VitalDefinition.IsEnabled` from `VitalUnits`. 50242 no draft. **Audited: UPDATE** (`EntityType = ConsultationForm`) |
+| `CancelConsultationFormDraft()` | — | `void` — the draft becomes a copy of the published form (or is removed when nothing is published) | `cfg.usp_CancelConsultationFormDraft` |
+
 ### Compliance
 
 | Operation | Input | Returns | Procedure / notes |
@@ -456,8 +490,11 @@ Feature: `patients` (ADMIN, DOCTOR, RECEPTIONIST, BILLING, NURSE).
 |-----------|-------|---------|-------------------|
 | `SearchPatients(string term)` | `term` under 2 characters returns the hospital's list unfiltered | `List<PatientSummary>` — `PatientId, Mrn, FullName, Gender, Dob, Phone, Email, IsActive` | `opd.usp_SearchPatients` |
 | `GetPatient(string patientId)` | — | `Patient` — summary members plus `Address, NationalHealthId, InsuranceProvider, InsurancePolicyNo, Photo (byte[]), EmergencyContactName, EmergencyContactPhone` | `opd.usp_GetPatient`. **Audited: READ** |
-| `CreatePatient(CreatePatientRequest request)` | `FullName, Gender, Dob, Phone, Email?, Address?, NationalHealthId?, InsuranceProvider?, InsurancePolicyNo?, EmergencyContactName?, EmergencyContactPhone?` | `Patient` (server generates `Mrn`) | `opd.usp_CreatePatient`. **Audited: CREATE** |
-| `UpdatePatient(string patientId, UpdatePatientRequest request)` | `FullName?, Phone?, Email?, Address?, NationalHealthId?, InsuranceProvider?, InsurancePolicyNo?, EmergencyContactName?, EmergencyContactPhone?` | `Patient` | `opd.usp_UpdatePatient`. **Audited: UPDATE** |
+| `CreatePatient(CreatePatientRequest request)` | `FullName, Gender, Dob, Phone, Email?, Address?, NationalHealthId?, InsuranceProvider?, InsurancePolicyNo?, EmergencyContactName?, EmergencyContactPhone?`; v3.3: `Prefix?, FirstName?, MiddleName?, LastName?, Trn?, CountryCode?, Mobile?, PreferredLanguage?, AddrLine1?, AddrLine2?, City?, Region?, Country?, MaritalStatus?, ReferralSource?, PreferredDoctorId?, BloodGroup?, Occupation?` (`RegisteredVia` is set by the operation: `FRONT_DESK` here) | `Patient` — `PatientId, Mrn, FullName, CreatedAt` (the service reads the rest with `GetPatient` when a page needs it) | `opd.usp_CreatePatient`. v3.3: `Mrn` = `MRN_FORMAT` (`{prefix}`, `{year}`, `{seq:N}`, `{seq}`; default `{prefix}-{seq:5}`) with the next `MRN_SEQ`, allocated under a lock (`cfg.fn_FormatMrn`); a number already in use is skipped. 50205 the format makes MRNs longer than 20 characters, 50206 no free number. **Audited: CREATE** |
+| `UpdatePatient(string patientId, UpdatePatientRequest request)` | `FullName?, Phone?, Email?, Address?, NationalHealthId?, InsuranceProvider?, InsurancePolicyNo?, EmergencyContactName?, EmergencyContactPhone?`; v3.3: `Gender?, Dob?` and every structured field of `CreatePatientRequest`. `null` keeps the stored value; `""` clears an optional text field | `Patient` (v3.3: the full record, `GetPatient`'s shape) | `opd.usp_UpdatePatient`. **Audited: UPDATE** |
+| `CheckDuplicatePatient(CheckDuplicateRequest request)` *v3.2* | `PatientId?` (the patient being edited), `NationalHealthId?, Trn?, Mobile?` | `PatientDuplicate` — `Field` (`NationalHealthId` / `Trn` / `Mobile`), `Value, PatientId, Mrn, FullName` — or `null` | `opd.usp_CheckDuplicatePatient`. Checked in that order; ids compared without spaces / hyphens; mobile by digits (≥ 7, one may end with the other) |
+| `UpdatePatientSocialHistory(string patientId, SocialHistoryRequest request)` *v3.2* | `SmokingStatus?, SmokingPackYears?, AlcoholUse?, Occupation?, PhysicalActivity?, Diet?` — all six replaced, `null` clears | `SocialHistory` | `opd.usp_UpdatePatientSocialHistory`. **Audited: UPDATE** |
+| `CreatePatientsBatch(List<ImportPatientRow> rows)` *v3.2* | `ImportPatientRow` = `FullName, Gender, Dob, Phone, Email?, Address?, NationalHealthId?`; sent as `@PatientsJson` | `List<Patient>` — `PatientId, Mrn, FullName, CreatedAt` | `opd.usp_CreatePatientsBatch` — all rows or none; `RegisteredVia = CSV_IMPORT`. 50203 unreadable, 50204 names the first invalid row. Feature `data_import`. **Audited: IMPORT** (one entry, row count) |
 
 ### Allergies
 
@@ -487,6 +524,25 @@ Feature: `patients` (ADMIN, DOCTOR, RECEPTIONIST, BILLING, NURSE).
 | `CreatePatientMedicalEvent(string patientId, CreateMedicalEventRequest request)` | `EventId?, EventName, EventMonth?, EventYear?, Notes?` | `PatientMedicalEvent` | `opd.usp_CreatePatientMedicalEvent`. **Audited: CREATE** |
 | `ListPatientFamilyHistory(string patientId)` | — | `List<FamilyHistory>` — `PatientFamilyHistoryId, PatientId, Relation, Condition, Notes, CreatedAt` | `opd.usp_ListPatientFamilyHistory` |
 | `CreatePatientFamilyHistory(string patientId, CreateFamilyHistoryRequest request)` | `RelationshipType, ConditionName, Notes?` | `FamilyHistory` | `opd.usp_CreatePatientFamilyHistory`. **Audited: CREATE** |
+| `GetPatientMedicalEvent(string patientMedEventId)` *v3.2* | — | `PatientMedicalEvent` — `PatientMedEventId, PatientId, EventId, EventName, EventMonth, EventYear, Notes, RecordedAt, RecordedByUserId` | `opd.usp_GetPatientMedicalEvent` |
+| `UpdatePatientMedicalEvent(string patientMedEventId, UpdateMedicalEventRequest request)` *v3.2* | `EventName, EventMonth?, EventYear?, Notes?` — `EventId` is re-resolved from the name against the hospital's event list | `PatientMedicalEvent` | `opd.usp_UpdatePatientMedicalEvent`. 50200 blank name. **Audited: UPDATE** |
+| `DeletePatientMedicalEvent(string patientMedEventId)` *v3.2* | — | `void` | `opd.usp_DeletePatientMedicalEvent` — soft delete. **Audited: DELETE** |
+| `GetPatientFamilyHistory(string familyHistoryId)` *v3.2* | — | `FamilyHistory` — `FamilyHistoryId, PatientId, RelationshipType, ConditionName, Notes, RecordedAt` | `opd.usp_GetPatientFamilyHistory` |
+| `UpdatePatientFamilyHistory(string familyHistoryId, UpdateFamilyHistoryRequest request)` *v3.2* | `RelationshipType, ConditionName, Notes?` | `FamilyHistory` | `opd.usp_UpdatePatientFamilyHistory`. 50201 blank relative / condition. **Audited: UPDATE** |
+| `DeletePatientFamilyHistory(string familyHistoryId)` *v3.2* | — | `void` | `opd.usp_DeletePatientFamilyHistory` — soft delete. **Audited: DELETE** |
+
+### Consent documents (v3.2)
+
+Signed consent forms uploaded on the patient's record. The file is kept in the service's file
+store (`{FileStoreRoot}/consent-forms/{HospitalId}/{StoredFileName}`, today
+`App_Data/consent-forms`), never in the database; the procedures hold its metadata.
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListPatientConsentDocuments(string patientId)` | — | `List<ConsentDocument>` — `ConsentDocumentId, PatientId, FormVersion, FileName, ContentType, SizeBytes, UploadedByUserId, UploadedAt`; newest first | `opd.usp_ListPatientConsentDocuments` |
+| `GetPatientConsentDocument(string consentDocumentId)` | — | `ConsentDocument` | `opd.usp_GetPatientConsentDocument` |
+| `GetPatientConsentDocumentContent(string consentDocumentId)` | — | `FileContent` — `FileName, ContentType, Content (byte[])` | `opd.usp_GetPatientConsentDocument` + file store. **Audited: READ** |
+| `CreatePatientConsentDocument(string patientId, UploadFileRequest request)` | `FileName, Content (byte[], ≤ 50 MB, PDF / image — `LabService.FileTypes`), FormVersion?` | `ConsentDocument` | Service writes the file (`StoredFileName` = new GUID + extension), then `opd.usp_CreatePatientConsentDocument`; deletes the file if the procedure fails. 50202 patient not found. **Audited: CREATE** |
 
 ### Coverage (insurance / government scheme)
 
@@ -498,6 +554,16 @@ Feature: `patients` to manage a patient's coverages; `billing` also reaches thes
 | `ListPatientCoverages(string patientId, bool includeInactive)` | — | `List<Coverage>` — `CoverageId, CoverageType, PayerId, PayerName, PlanName, MemberId, PolicyNumber, GroupNumber, PolicyHolderName, Relationship, ClaimMode, GovtCardNumber, CardImageUrl, EffectiveDate, ExpiryDate, Status, Priority, IsActive, LastVerificationStatus`; empty = Self-Pay | `opd.usp_ListPatientCoverages` |
 | `SavePatientCoverage(string patientId, SaveCoverageRequest request)` | `CoverageId?` (null = new), `CoverageType` (`PRIVATE_INSURANCE` / `GOVT_SCHEME`), `PayerId, PlanName?, MemberId?, PolicyNumber?, GroupNumber?, PolicyHolderName?, Relationship?, ClaimMode?` (`CASHLESS` / `REIMBURSEMENT`), `GovtCardNumber?, CardImage? (byte[]), EffectiveDate?, ExpiryDate?, Status?` | `Coverage` | `opd.usp_SavePatientCoverage` |
 | `DeactivatePatientCoverage(string coverageId)` | — | `void` | `opd.usp_DeactivatePatientCoverage` |
+
+Payer administration (v3.2) — feature `admin_hospital` (Settings → Billing → Payers). `cfg.Payer` is
+per **country**, not per hospital: every hospital in the country shares the list.
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListAllPayers(string category)` | country = the caller's hospital's; `category` or `null` | `List<Payer>` incl. inactive — `PayerId, Name, Category, Country, IsActive` | `cfg.usp_ListAllPayers` |
+| `GetPayer(string payerId)` | — | `Payer` | `cfg.usp_GetPayer` |
+| `SavePayer(string name, string category)` | country = the caller's hospital's | `Payer` — new, or a re-enabled inactive payer of that name | `cfg.usp_SavePayer`. 50210 already on the list, 50211 name used under the other category, 50212 blank name / bad category. **Audited: CREATE** |
+| `UpdatePayerActive(string payerId, bool? isActive)` | `null` toggles | `Payer` | `cfg.usp_UpdatePayerActive`; only payers of the caller's country. **Audited: UPDATE** |
 
 ---
 
@@ -516,8 +582,19 @@ Settings (tabs Hospital Defaults · Doctors · Appointment Types · Intake & Con
 | `ListTodayAppointmentsForDoctor(string doctorId)` | — | `List<Appointment>` — the hospital's today (its timezone), by `SlotStart` | `opd.usp_ListTodayAppointmentsForDoctor` |
 | `ListAppointmentsForDate(string doctorId, DateTime date)` | `date` = hospital-local date → `@AppointmentDate` | `List<Appointment>` incl. the check-in / consult / completed stamps | `opd.usp_ListAppointmentsForDate` |
 | `ListAppointmentsForHospitalDate(DateTime date)` | as above | `List<Appointment>` — every doctor's, with `DoctorId, DoctorName, DoctorRoom`; by `SlotStart`. Front-desk view on Today's Patients | `opd.usp_ListAppointmentsForHospitalDate` |
-| `CreateAppointment(CreateAppointmentRequest request)` | `PatientId, DoctorId, SlotStartLocal, SlotEndLocal` (wall-clock `DateTime`, a slot from `ListAvailableSlots`), `Type?, Notes?` | `Appointment` — `AppointmentId, AppointmentDate, SlotStart, SlotEnd, TimeZoneId, SlotStartLocal, SlotEndLocal, Status = BOOKED` | `opd.usp_CreateAppointment`. Stored as UTC + the hospital's `TimeZoneId`. Error 50050: hospital has no timezone |
+| `CreateAppointment(CreateAppointmentRequest request)` | `PatientId, DoctorId, SlotStartLocal, SlotEndLocal` (wall-clock `DateTime`, a slot from `ListAvailableSlots`), `Type?, Notes?` | `Appointment` — `AppointmentId, AppointmentDate, SlotStart, SlotEnd, TimeZoneId, SlotStartLocal, SlotEndLocal, Status = BOOKED` | `opd.usp_CreateAppointment`. Stored as UTC + the hospital's `TimeZoneId`. Error 50050: hospital has no timezone. v3.3: re-checks under the per-doctor-day lock that the slot is still one of the doctor's free slots (a slot that already started today is allowed — walk-ins); 50214 taken (`Conflict`), 50220 schedule locked (`Conflict`) |
 | `UpdateAppointmentStatus(string appointmentId, string status)` | — | `Appointment` — `AppointmentId, Status, CheckedInAt, ConsultStartedAt, CompletedAt` | `opd.usp_UpdateAppointmentStatus`. Lifecycle `BOOKED → CHECKED_IN` (front desk) `→ IN_CONSULT` (doctor opens the consultation) `→ COMPLETED` (sign-off); `CANCELLED` / `NO_SHOW` only from `BOOKED` or `CHECKED_IN`. A move the current status does not allow (procedure returns no row) is a `Conflict` fault. Stamps `CheckedInAt` (+ `@CheckedInBy`), `ConsultStartedAt`, `CompletedAt` |
+| `GetAppointment(string appointmentId)` *v3.2* | — | `Appointment` (all members, incl. the check-in / consult / completed stamps and `CreatedAt`) | `opd.usp_GetAppointment` |
+| `ListAppointmentsForPatient(string patientId)` *v3.2* | — | `List<Appointment>` — every status, newest first | `opd.usp_ListAppointmentsForPatient`. Feature `patients` also reaches this |
+| `ListAppointmentsForRange(AppointmentRangeQuery query)` *v3.2* | `FromDate, ToDate` (hospital-local, inclusive), `DoctorId?, Kind?` (`consultations` = CHECKED_IN / IN_CONSULT / COMPLETED, `appointments` = not cancelled, `cancelled`), `Status?` | `List<Appointment>` by `SlotStart` | `opd.usp_ListAppointmentsForRange` — Today's Patients and the dashboard drill-down. A doctor-only caller (`AppUser.SeesOwnPatientsOnly`) always gets their own `DoctorId`. Feature `patients` |
+| `GetAppointmentDashboard(DateTime? today)` *v3.2* | `today` default = hospital's today | `AppointmentDashboard` — `Counts` (`Kind, TodayCount, WeekCount, MonthCount` for the three kinds; week = Monday–Sunday) and `TodayByStatus` (`Status, Count`) | `opd.usp_GetAppointmentDashboard` (two result sets). Doctor-only callers see their own. Feature `patients` |
+| `UpdateAppointmentSlot(string appointmentId, DateTime newSlotStartLocal)` *v3.2* | a `SlotStart` from `ListAvailableSlots` for the same doctor, unchanged | `Appointment` — the **new** appointment; the original becomes `CANCELLED` (as `SchedulingService.Reschedule`) | `opd.usp_UpdateAppointmentSlot` — one transaction, under a per-doctor-day lock. 50213 not BOOKED, 50214 slot not free (`Conflict`). **Audited: UPDATE** |
+| `CreateRecurringAppointments(RecurringBookingRequest request)` *v3.2* | `PatientId, DoctorId, StartDate, EveryDays` (1–365), `Count` (1–52), `Type?` | `List<Appointment>` — those booked; a day with no free slot is skipped | `opd.usp_CreateRecurringAppointments` — first free future slot of the type's length each day. 50215 bad range. **Audited: CREATE** (one entry per appointment) |
+
+Every booking operation — `CreateAppointment` (v3.3), `UpdateAppointmentSlot`,
+`CreateRecurringAppointments` and `CreatePortalAppointment` — re-checks the slot under one
+per-doctor-day application lock (`opd.usp_CheckSlotAvailable`, internal), so two users cannot book
+the same time.
 
 ### Availability
 
@@ -525,7 +602,7 @@ Settings (tabs Hospital Defaults · Doctors · Appointment Types · Intake & Con
 |-----------|-------|---------|-------------------|
 | `ListDoctorSlotConfig(string doctorId)` | — | `List<SlotConfig>` — `SlotConfigId, DoctorId, DayOfWeek, StartTime, EndTime`; several windows per weekday allowed, none = closed | `opd.usp_ListDoctorSlotConfig` |
 | `SaveDoctorSlotConfig(string doctorId, List<SlotWindow> windows)` ⚙ | `SlotWindow` = `DayOfWeek, StartTime, EndTime` (`HH:mm`, hospital wall clock); replaces all windows; sent as `@WindowsJson` | `List<SlotConfig>` | `opd.usp_SaveDoctorSlotConfig` |
-| `ListAvailableSlots(string doctorId, DateTime date, int? durationMinutes)` | `date` hospital-local; `durationMinutes` = the appointment type's | `List<AvailableSlot>` — `SlotStart, SlotEnd` (wall clock, no offset — pass unchanged to `CreateAppointment`), `IsBooked, TimeZoneId` | `opd.usp_ListAvailableSlots`. None on leave days or weekdays without windows; slot = `durationMinutes` or `APPT_SLOT_MINS` (doctor → hospital); step = slot + `APPT_BUFFER_MINS`; `IsBooked` = overlaps a non-cancelled appointment (+ buffer) |
+| `ListAvailableSlots(string doctorId, DateTime date, int? durationMinutes)` | `date` hospital-local; `durationMinutes` = the appointment type's | `List<AvailableSlot>` — `SlotStart, SlotEnd` (wall clock, no offset — pass unchanged to `CreateAppointment`), `IsBooked, TimeZoneId` | `opd.usp_ListAvailableSlots`. None on leave days or weekdays without windows; slot = `durationMinutes` or `APPT_SLOT_MINS` (doctor → hospital); step = slot + `APPT_BUFFER_MINS`; `IsBooked` = overlaps a non-cancelled appointment (+ buffer). v3.3: a slot length under 5 or over 720 minutes returns no slots; a negative buffer counts as 0 |
 | `GetDoctorScheduleForDate(string doctorId, DateTime date)` | — | `DoctorSchedule` — `DayOfWeek, Windows (List<SlotWindow>), WorkingDays, SlotMinutes, BufferMinutes, OnLeave, LeaveReason` | `opd.usp_GetDoctorScheduleForDate` |
 | `ListDoctorLeave(string doctorId)` | — | `List<DoctorLeave>` — `LeaveId, LeaveDate, Reason` | `opd.usp_ListDoctorLeave` |
 | `CreateDoctorLeave(string doctorId, DateTime leaveDate, string reason)` ⚙ | — | `DoctorLeave` (the existing row if that date is already leave) | `opd.usp_CreateDoctorLeave` |
@@ -570,6 +647,26 @@ Settings (tabs Hospital Defaults · Doctors · Appointment Types · Intake & Con
 
 Clinical conditions drive condition-linked phrases (§7 `ListPhrases` / `SearchPhrases`).
 
+### Patient portal (v3.2, anonymous)
+
+Used by `portal/self-register.aspx` and `portal/self-book.aspx`. These are `[AnonymousOperation]`s:
+no `SessionToken`. The hospital is **not** taken from the message: the service resolves it from
+its own configuration (`appSettings["PortalHospitalId"]`, or a host-name → hospital map when
+several hospitals share one deployment). Each is rate-limited per client IP (`ClientIp` header,
+e.g. 30 calls / minute), and returns only what the pages show.
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `GetPortalBookingOptions()` | — | `PortalOptions` — hospital `Name, PatientIdLabel, Country, TimeZoneId`; `Doctors` (`DoctorId, DisplayName, Specialties, WorkingDays`); `AppointmentTypes` (active); `IntakeQuestions` | Existing procedures: `cfg.usp_GetHospital`, `sec.usp_ListDoctorProfiles` (active doctors only), `cfg.usp_ListAppointmentTypes`, `cfg.usp_ListIntakeQuestions` |
+| `ListPortalAvailableSlots(string doctorId, DateTime date, int? durationMinutes)` | as `ListAvailableSlots` | free, future slots only | `opd.usp_ListAvailableSlots` |
+| `CreatePortalPatient(CreatePatientRequest request)` | as `CreatePatient` | `PortalPatient` — `PatientId, Mrn, DisplayName` | `opd.usp_CheckDuplicatePatient` first (a match is a `Validation` fault that does not reveal the other patient), then `opd.usp_CreatePatient` with `@RegisteredVia = PATIENT_PORTAL`. **Audited: CREATE** |
+| `GetPortalPatient(string mrn, string phone)` | one of them; phone needs ≥ 7 digits | `PortalPatient` — `PatientId, Mrn, DisplayName` ("Ravi K.") or `null` | `opd.usp_GetPortalPatient`. Never returns the full name, phone or date of birth |
+| `CreatePortalAppointment(PortalBookingRequest request)` | `PatientId, DoctorId, SlotStartLocal, SlotEndLocal, Type, Answers?` (`IntakeAnswer` list) | `Appointment` — `AppointmentId, SlotStartLocal, SlotEndLocal, DoctorName` | `opd.usp_CreatePortalAppointment` (re-checks the slot under the doctor-day lock; `Notes = Booked online`), then `opd.usp_SubmitIntakeResponse` when there are answers. 50214 slot taken (`Conflict`), 50216 unknown doctor / visit type. **Audited: CREATE** |
+
+**Identity:** as today, an MRN or a phone number alone finds the patient. Asking for a second
+factor (date of birth or an SMS code) is a product decision; `opd.usp_GetPortalPatient` is the
+place to add it.
+
 ---
 
 ## 6. Consultation — the consultation workspace
@@ -585,10 +682,13 @@ Feature: `consultation` (ADMIN, DOCTOR).
 | `GetOrCreateConsultation(string patientId, string doctorId, string appointmentId)` | `appointmentId` optional | `Consultation` — the existing IN_PROGRESS one, or a new one with `VisitDate` = now (UTC), the hospital's `TimeZoneId` and its `VisitLocalDate` | `cln.usp_GetOrCreateConsultation` |
 | `GetConsultationById(string consultationId)` | — | `Consultation` (full) | `cln.usp_GetConsultationById`. **Audited: READ** |
 | `ListConsultationsForDate(DateTime visitDate)` | hospital-local date, matched on `VisitLocalDate` | `List<Consultation>` — `ConsultationId, PatientId, DoctorId, AppointmentId, VisitDate, Status` | `cln.usp_ListConsultationsForDate` |
-| `SaveSoapNotes(string consultationId, SoapNotes notes)` | `SubjectiveText?, ObjectiveText?, PlanText?, SubjectivePersonal?, ObjectivePersonal?, PlanPersonal?, SkippedSteps?` | `void` (no change once `IsLocked`) | `cln.usp_SaveSoapNotes` |
+| `SaveSoapNotes(string consultationId, SoapNotes notes)` | `SubjectiveText?, ObjectiveText?, PlanText?, SubjectivePersonal?, ObjectivePersonal?, PlanPersonal?, SkippedSteps?` | `void` (no change once `IsLocked`) | `cln.usp_SaveSoapNotes`. `SkippedSteps` (JSON array) also carries `ConsultationService.SkipStep`: the facade reads the list from `GetConsultationById`, adds the step and saves it |
 | `SaveFollowup(string consultationId, DateTime? followUpDate, string followUpNotes)` | — | `void` | `cln.usp_SaveFollowup` |
 | `ConfirmSignOff(string consultationId)` | — (doctor = caller; the service computes `@SignatureHash` over the signed content) | `Attestation` — `AttestationId, SignedAt` | `cln.usp_ConfirmSignOff`. In one transaction: deducts the stocked items listed under Services & Procedures (earliest-expiry batch first, `inv.usp_RecordStockConsumption`), locks the consultation (`Status = LOCKED`) and completes its appointment (`IN_CONSULT → COMPLETED`). Error 50040 ("Not enough stock: …") rolls everything back — call `ListStockShortages` first. **Audited: SIGNOFF** |
 | `ListPatientPastVisits(string patientId)` | — | `List<PastVisit>` — `ConsultationId, VisitDate, DoctorName, ChiefComplaint, PrimaryDiagnosis`; LOCKED only, newest first | `opd.usp_ListPatientPastVisits` |
+| `GetInProgressConsultation(string patientId, string doctorId)` *v3.2* | — | `Consultation` or `null` — the doctor's IN_PROGRESS consultation, without creating one (`ConsultationService.FindInProgress`) | `cln.usp_GetInProgressConsultation` |
+| `SaveConsultationCustomValues(string consultationId, string sectionKey, List<CustomFieldValue> values)` *v3.2* | `CustomFieldValue` = `FieldKey, Value` — an empty `Value` removes the field; the service adds `SectionLabel, FieldLabel, InputType, DisplayValue` from the published form | `void` | `cln.usp_SaveConsultationCustomValues` (`@ValuesJson`). 50245 consultation not found or signed, 50246 unreadable |
+| `ListConsultationCustomValues(string consultationId)` *v3.2* | — | `List<CustomFieldValue>` — `SectionKey, FieldKey, Value, SectionLabel, FieldLabel, InputType, DisplayValue, UpdatedAt, UpdatedBy`, in the published form's section / field order (sorted by the service) | `cln.usp_ListConsultationCustomValues` |
 
 ### Vitals
 
@@ -629,6 +729,8 @@ Vitals configuration is in the Hospital & configuration region (§3).
 | `CreatePrescription(string consultationId, CreatePrescriptionRequest request)` | `PatientId, Source?, SourceDetail?, MedicineName, Strength?, GenericClass?, TherapeuticClass?, DrugForm?, DeliveryRoute?, Category?, TakeInQty, TimesPerDay?, DurationValue?, DurationUnit?, Instructions?, Prn?, TimingBf?, TimingAn?, TimingNi?, TimingEm?, ValidityDays?, RepeatedFromConsultationId?` | `Prescription` | `cln.usp_CreatePrescription`. **Audited: CREATE** |
 | `CancelPrescription(string prescriptionId)` | — | `void` (`Status = DISCONTINUED`) | `cln.usp_CancelPrescription` |
 | `CheckDrugAllergyConflicts(string patientId, string medicineName, string composition)` | `composition` optional | `List<DrugAllergyAlert>` — `Severity, AllergyName, AllergySeverity, Message` | `cln.usp_CheckDrugAllergyConflicts`. When the doctor overrides an alert, the page calls `RecordAuditEntry` (Action `OVERRIDE`) |
+| `ListPatientMedicationHistory(string patientId)` *v3.2* | — | `List<Prescription>` — every prescription and outside medicine, all statuses, newest first by period start; with `Source, SourceDetail, DoctorId, DoctorName` | `cln.usp_ListPatientMedicationHistory`. Feature `patients` also reaches this (Health Record → Medications) |
+| `SaveOutsideMedication(string patientId, OutsideMedicationRequest request)` *v3.2* | `PrescriptionId?` (null = new), `MedicineName, Strength?, DrugForm?, TakeInQty?, TakeInUnit?, TimesPerDay?, TimingNi?, Prn?, FrequencyMode?, DynamicInstruction?, Instructions?, PeriodStart?, SourceDetail?` (who prescribed it) | `Prescription` (`Source = OUTSIDE`, no consultation; a new one copies generic / therapeutic class from the formulary) | `cln.usp_SaveOutsideMedication`. 50217 blank name. Feature `patients` also reaches this. **Audited: CREATE / UPDATE** |
 
 ### Investigation orders and referrals
 
@@ -636,6 +738,7 @@ Vitals configuration is in the Hospital & configuration region (§3).
 |-----------|-------|---------|-------------------|
 | `CreateInvestigationOrder(string consultationId, CreateOrderRequest request)` | `PatientId, TestId?, TestName, TestType?` | `InvestigationOrder` (`Status = ORDERED`) | `cln.usp_CreateInvestigationOrder` |
 | `ListInvestigationOrders(string consultationId)` | — | `List<InvestigationOrder>` | `cln.usp_ListInvestigationOrders` |
+| `DeleteInvestigationOrder(string orderId)` *v3.2* | — | `void` | `cln.usp_DeleteInvestigationOrder` — soft delete, only while `ORDERED` and the consultation is not signed (50218) |
 | `CreateReferral(string consultationId, CreateReferralRequest request)` | `PatientId, Specialty, DoctorName?, Urgency?, Reason?` | `Referral` | `cln.usp_CreateReferral` |
 | `ListReferrals(string consultationId)` | — | `List<Referral>` | `cln.usp_ListReferrals` |
 
@@ -677,6 +780,7 @@ Feature: `consultation`. Formulary changes (`CreateDrug`, `UpdateDrugStatus`) ne
 | `GetDrugByName(string name)` | — | `Drug` or `null` | `cfg.usp_GetDrugByName` |
 | `CreateDrug(CreateDrugRequest request)` | `BrandName, GenericName?, Composition?, TherapeuticClass?, GenericClass?, DrugForm?, DefaultRoute?, DefaultDosage?, DefaultFrequency?, DefaultDurationDays?, DefaultInstructions?, IsControlledSubstance?` | `Drug` | `cfg.usp_CreateDrug` |
 | `UpdateDrugStatus(string drugFormularyId)` | — (toggles) | `Drug` | `cfg.usp_UpdateDrugStatus` |
+| `UpdateDrug(string drugId, UpdateDrugRequest request)` *v3.2* | `BrandName, GenericName?, Composition?, TherapeuticClass?, GenericClass?, DrugForm?, DefaultDosage?, DefaultFrequency?, DefaultDurationDays?, DefaultInstructions?, IsControlledSubstance` — all replaced; `DefaultRoute` kept | `Drug` | `cfg.usp_UpdateDrug`. 50219 blank brand. Feature `admin_formulary`. **Audited: UPDATE** |
 
 ### Lab tests and favorites
 
@@ -713,6 +817,25 @@ results review (marked 🩺).
 | `ListPendingReviewResults()` 🩺 | — | `List<LabResult>` incl. `PatientName, PatientMrn`; `Status = UPLOADED` | `cln.usp_ListPendingReviewResults` |
 | `UpdateLabResultStatus(string labResultId, string reviewNotes)` 🩺 | `reviewNotes` optional | `void` (`Status = REVIEWED`) | `cln.usp_UpdateLabResultStatus`. **Audited: APPROVE** |
 
+`SubmitLabResult` also notifies the ordering doctor in-app (`sec.usp_CreateUserNotification`, *v3.2*,
+replacing the page's `UserNotificationService.Notify` call), and `UpdateLabResultStatus` clears
+everyone's notifications about that result (`sec.usp_UpdateUserNotificationReadForEntity`). Both
+procedures are internal to those operations.
+
+Lab partners, claim by mobile number and attachments (v3.2):
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListLabPartners()` | — | `List<LabPartner>` — `LabPartnerId, Name, IsActive`; active only | `cfg.usp_ListLabPartners`. Feature `admin_users` (linking a lab login to its lab) |
+| `GetLabPartner(string labPartnerId)` | — | `LabPartner` | `cfg.usp_GetLabPartner` |
+| `SaveLabPartner(string name)` | — | `LabPartner` — the existing one of that name (re-enabled) or a new one | `cfg.usp_SaveLabPartner`. 50232 blank name. Feature `admin_users` |
+| `SearchLabOrdersByMobile(string mobile)` | the patient's full mobile number (≥ 10 digits) | `List<InvestigationOrder>` — open orders (ORDERED / SENT) not yet taken by a lab, for every patient of the hospital with that number; with `PatientName, PatientMrn` | `cln.usp_SearchLabOrdersByMobile` — lab partner callers only, with their own `LabPartnerId`. Every lookup is logged in `sec.LabClaimAttempt`; 5 lookups with no match in 15 minutes lock the user out (50231). 50230 not a full number |
+| `ConfirmLabOrderClaim(string orderId, string mobile)` | — | `InvestigationOrder` — `LabPartnerId` = the caller's lab, `Status = SENT` — or `null` when no longer claimable | `cln.usp_ConfirmLabOrderClaim`; the first of two competing claims wins. **Audited: UPDATE** |
+| `CreateLabResultAttachment(string resultId, UploadFileRequest request)` | `FileName, Content (byte[], ≤ 50 MB, `LabService.FileTypes`)` | `LabAttachment` — `AttachmentId, ResultId, OrderId, LabPartnerId, FileName, ContentType, SizeBytes, UploadedByUserId, UploadedAt` | Service writes the file (`{FileStoreRoot}/lab-reports/{HospitalId}/…`), then `cln.usp_CreateLabResultAttachment` (order and lab taken from the result). 50235 result not found. **Audited: CREATE** |
+| `ListLabResultAttachments(string resultId, string orderId)` | one of them | `List<LabAttachment>` | `cln.usp_ListLabResultAttachments`. 50236 neither given. Lab partners see only their own lab's files |
+| `GetLabResultAttachment(string attachmentId)` | — | `LabAttachment` | `cln.usp_GetLabResultAttachment` |
+| `GetLabResultAttachmentContent(string attachmentId)` | — | `FileContent` — `FileName, ContentType, Content (byte[])` | `cln.usp_GetLabResultAttachment` + file store; `LabService.CanViewAttachment` rules (a lab partner only its own lab's; others need `consultation` or `lab_portal`). **Audited: READ** |
+
 ---
 
 ## 9. Billing — charges, invoices, payments, coverage
@@ -728,6 +851,8 @@ Feature: `billing` (ADMIN, RECEPTIONIST, BILLING).
 | `GetServiceCharge(string serviceChargeId)` | — | `ServiceCharge` | `bil.usp_GetServiceCharge` |
 | `SearchServiceCharges(string term)` | — | `List<ServiceCharge>` | `bil.usp_SearchServiceCharges` |
 | `CreateServiceCharge(CreateServiceChargeRequest request)` | `ServiceCode, ServiceName, Category, DefaultAmount, TaxPercent` | `ServiceCharge` | `bil.usp_CreateServiceCharge` |
+| `ListAllServiceCharges()` *v3.2* | — | `List<ServiceCharge>` incl. inactive, with `IsActive`; by category, name | `bil.usp_ListAllServiceCharges` (Settings → Services) |
+| `UpdateServiceChargeActive(string serviceChargeId, bool? isActive)` *v3.2* | `null` toggles | `ServiceCharge` — `ServiceChargeId, ServiceName, IsActive` | `bil.usp_UpdateServiceChargeActive`. **Audited: UPDATE** |
 
 ### Invoices and line items
 
@@ -850,6 +975,16 @@ Feature: `admin_hospital` (ADMIN) for templates and channel config. `CreateQueue
 | `ListMessageLog()` | — | `List<QueuedMessage>`, newest first | `msg.usp_ListMessageLog` |
 | `GetMessageStats()` | — | `MessageStats` — `Total, Sent, Simulated, Failed` | `msg.usp_GetMessageStats` |
 
+In-app notifications for staff (the top-bar bell, `notifications.ashx`) — *v3.2*. Feature: any
+signed-in user; each user reaches only their own.
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListUserNotifications(int take)` | default 15 | `List<UserNotification>` — `NotificationId, Kind, Title, Message, Url, IsCritical, EntityId, ReadAt, CreatedAt`; unread critical first, then newest | `sec.usp_ListUserNotifications` |
+| `GetUserNotificationUnreadCount()` | — | `int` | `sec.usp_GetUserNotificationUnreadCount`. Polled by every page (`Site.Master`) — cache per user for a few seconds |
+| `UpdateUserNotificationRead(string notificationId)` | — | `UserNotification` or `null` (not the caller's) | `sec.usp_UpdateUserNotificationRead` |
+| `UpdateUserNotificationsReadAll()` | — | `int` — how many were marked | `sec.usp_UpdateUserNotificationsReadAll` |
+
 ---
 
 ## 13. Audit & export — audit log and data export
@@ -871,40 +1006,43 @@ Features: `audit_log` for reading the log, `data_export` for exports (ADMIN only
 
 All operations are on the one contract `IDOCNyleUnifiedAPI` (`DOCNyleUnifiedAPI.svc`).
 
-| § | Region | Operations |
-|---|--------|-----------|
-| 1 | Auth | 3 |
-| 2 | Users & permissions | 8 |
-| 3 | Hospital & configuration | 22 |
-| 4 | Patients | 22 |
-| 5 | Scheduling | 34 |
-| 6 | Consultation | 40 |
-| 7 | Catalog | 13 |
-| 8 | Lab | 6 |
-| 9 | Billing | 27 |
-| 10 | Inventory | 11 |
-| 11 | Reports | 7 |
-| 12 | Notifications | 9 |
-| 13 | Audit & export | 5 |
-| | **Total** | **207** |
+| § | Region | v3.1 | v3.2 added | Operations |
+|---|--------|-----:|-----------:|-----------:|
+| 1 | Auth | 3 | — | 3 |
+| 2 | Users & permissions | 8 | — | 8 |
+| 3 | Hospital & configuration | 22 | 4 | 26 |
+| 4 | Patients | 22 | 17 | 39 |
+| 5 | Scheduling (incl. patient portal) | 34 | 11 | 45 |
+| 6 | Consultation | 40 | 6 | 46 |
+| 7 | Catalog | 13 | 1 | 14 |
+| 8 | Lab | 6 | 9 | 15 |
+| 9 | Billing | 27 | 2 | 29 |
+| 10 | Inventory | 11 | — | 11 |
+| 11 | Reports | 7 | — | 7 |
+| 12 | Notifications | 9 | 4 | 13 |
+| 13 | Audit & export | 5 | — | 5 |
+| | **Total** | **207** | **54** | **261** |
 
 Every procedure and view in `stored-procedures.sql` backs an operation above, except the
 internal helpers (`cfg.fn_*`, `bil.usp_RecalculateInvoiceSplit`,
-`inv.usp_RecordStockConsumption`), noted where they run.
+`inv.usp_RecordStockConsumption`, and v3.2's `opd.usp_CheckSlotAvailable`,
+`sec.usp_CreateUserNotification`, `sec.usp_UpdateUserNotificationReadForEntity`, and v3.3's
+`sec.usp_GetUserCredential`, `sec.usp_RecordLoginAttempt`, both inside `AuthenticateUser`), noted
+where they run. Five v3.2 operations reuse existing procedures (`GetPatientConsentDocumentContent`,
+`GetLabResultAttachmentContent`, `GetPortalBookingOptions`, `ListPortalAvailableSlots`,
+`CreatePortalPatient`).
 
 ---
 
 ## Known Gaps / TODOs
 
-1. **No procedures yet** for features the Web Forms app already has in memory, so they have no
-   operations here: the consultation form designer (`ConsultationConfigService` — sections,
-   fields, units, draft/publish, custom values), in-app user notifications
-   (`UserNotificationService` / `notifications.ashx`), lab result attachments and patient
-   consent documents (file upload/download in `LabService` / `PatientService`), lab partners,
-   payer administration, social history, outside medications, appointment reschedule /
-   recurring booking, and the patient CSV import. Each needs its procedure(s) in
-   `stored-procedures.sql` before it gets an operation; file transfers should then use a
-   streamed (`transferMode="Streamed"`) endpoint with a `Stream`-based message contract.
+1. **Closed in v3.2: features that had no procedures.** The consultation form designer, in-app
+   notifications, consent documents and lab attachments, lab partners, payer administration,
+   social history, outside medicines, reschedule / recurring booking, the CSV import, and the
+   other in-memory-only methods found while mapping the facade (`API-INTEGRATION-GUIDE.md` §8)
+   now have procedures (section 22 of `stored-procedures.sql`) and operations above. Files travel
+   as MTOM `byte[]` within the 50 MB quota; a streamed (`transferMode="Streamed"`) endpoint is an
+   optimization for later, not a requirement.
 2. **Pure logic stays in-process.** `ContradictionEngine`, `RxReconciler`, `SoapComposer`,
    `BranchedFlowEngine`, `VitalUnitService`, `PhoneService` and `TimeZoneService` formatting
    helpers have no data access and are not services; the Web Forms app keeps calling them
@@ -912,15 +1050,29 @@ internal helpers (`cfg.fn_*`, `bil.usp_RecalculateInvoiceSplit`,
 3. **Hard deletes** (`bil.usp_DeleteInvoiceLineItem`, `cln.usp_DeleteLabFavorite`,
    `cln.usp_DeleteConsultationServiceItem` before sign-off) are intentional: those rows have no
    `IsActive` column, or nothing has happened to them yet.
-4. **Password hashing.** `AuthenticateUser`, `CreateUser` and `SaveDoctorProfile` take the
-   plain `Password` over HTTPS; the service hashes it (PBKDF2, per-user salt) into the
-   procedures' `@PasswordHash`. Because a salted hash cannot be recomputed from the password
-   alone, sign-in needs a procedure that returns the stored hash for an email (proposed
-   `sec.usp_GetUserCredential`) so the service can verify it before calling
-   `sec.usp_AuthenticateUser` — see `WCF-MIGRATION-GUIDE.md` §7.5. The password is never
-   logged, audited or returned.
+4. **Password hashing — closed in v3.3.** `AuthenticateUser`, `CreateUser` and `SaveDoctorProfile`
+   take the plain `Password` over HTTPS; the service hashes it (PBKDF2-SHA256, per-user salt,
+   ≥ 100,000 iterations) into `@PasswordHash`. Sign-in reads the stored hash with
+   `sec.usp_GetUserCredential`, verifies in C#, logs the attempt with `sec.usp_RecordLoginAttempt`
+   (`sec.LoginAttempt`, no longer reserved) and only then calls `sec.usp_AuthenticateUser`. The
+   password is never logged, audited or returned.
+5. **Patient registration fields and MRN — closed in v3.3.** `opd.usp_CreatePatient` and
+   `opd.usp_UpdatePatient` take every field of the registration form and `RegisteredVia`
+   (`CreatePortalPatient` and `CreatePatientsBatch` set it); MRNs follow the hospital's
+   `MRN_PREFIX` / `MRN_FORMAT` / `MRN_SEQ`, allocated under a lock instead of `MAX(Id) + 1`.
+6. **Front-desk double booking — closed in v3.3.** `opd.usp_CreateAppointment` re-checks the
+   slot under the per-doctor-day lock. It can therefore not be wrapped in `INSERT … EXEC`; the
+   SQL callers that capture its result pass `@SkipSlotCheck = 1` after checking themselves.
+7. **Slot list loop — closed in v3.3.** `opd.usp_ListAvailableSlots` returns no slots for a length
+   under 5 or over 720 minutes and treats a negative buffer as 0.
+8. **Searching on encrypted columns.** `opd.usp_CheckDuplicatePatient`,
+   `cln.usp_SearchLabOrdersByMobile` and `opd.usp_GetPortalPatient` strip digits from
+   `opd.Patient.Phone` / `Mobile` on the server. Once Always Encrypted is applied to those columns
+   (schema comments: DETERMINISTIC) that is impossible; add a `MobileKey` column written by the
+   service (last 10 digits) and index it first.
 
 ---
 
-*Version 3.1 (WCF, DOCNyleUnifiedAPI) — checked against docs/stored-procedures.sql v3.3 (212 procedures, 3 views,
-4 functions) and docs/schema.sql. Supersedes v2.3 (REST endpoints).*
+*Version 3.3 (WCF, DOCNyleUnifiedAPI) — 261 operations, checked against docs/stored-procedures.sql v3.6 (266
+procedures, 3 views, 7 functions; compiled and smoke-tested on SQL Server LocalDB at compatibility level 150) and
+docs/schema.sql v4.1. Supersedes v3.2, v3.1 (207 operations) and v2.3 (REST endpoints).*

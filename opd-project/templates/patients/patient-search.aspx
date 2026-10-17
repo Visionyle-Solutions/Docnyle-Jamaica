@@ -5,6 +5,8 @@
     <div style="display:flex; gap:8px; align-items:center;">
       <asp:TextBox ID="SearchInput" runat="server" CssClass="form-control" style="flex:1;" placeholder="Search By Name, MRN, Phone, Or Health ID..." autocomplete="off" />
       <asp:LinkButton ID="SearchButton" runat="server" CssClass="btn btn--ghost" OnClick="SearchButton_Click"><i class="ti ti-search" aria-hidden="true"></i> Search</asp:LinkButton>
+      <asp:LinkButton ID="ExportExcelButton" runat="server" CssClass="btn btn--ghost" OnCommand="Export_Command" CommandArgument="xlsx" CausesValidation="false" title="Download results as Excel"><i class="ti ti-file-spreadsheet" aria-hidden="true"></i> Excel</asp:LinkButton>
+      <asp:LinkButton ID="ExportPdfButton" runat="server" CssClass="btn btn--ghost" OnCommand="Export_Command" CommandArgument="pdf" CausesValidation="false" title="Download results as PDF"><i class="ti ti-file-type-pdf" aria-hidden="true"></i> PDF</asp:LinkButton>
       <a class="btn btn--primary" href="<%: Urls.PatientRegister %>"><i class="ti ti-plus" aria-hidden="true"></i> New Patient</a>
     </div>
     <div class="text-xs text-muted mt-1"><asp:Literal ID="ResultCount" runat="server" /></div>

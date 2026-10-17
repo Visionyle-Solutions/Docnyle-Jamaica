@@ -158,8 +158,8 @@ OpdProject.sln (this repository)
 db/ (DbUp migrator), tests/      Phase 4 additions
 ```
 
-- **Contract:** `opd-project/docs/API-SPECIFICATION.md` v3.1 — one contract,
-  `IDOCNyleUnifiedAPI`, 207 operations in 13 regions, each naming its stored
+- **Contract:** `opd-project/docs/API-SPECIFICATION.md` v3.3 — one contract,
+  `IDOCNyleUnifiedAPI`, 261 operations in 13 regions, each naming its stored
   procedure (and the `DataRepository` method of the same name); data-contract
   conventions, faults, audit rules.
 - **Binding:** `basicHttpBinding` over HTTPS with MTOM (50 MB quotas, matching
@@ -180,8 +180,8 @@ db/ (DbUp migrator), tests/      Phase 4 additions
   side; `DataStore` is deleted at the end.
 
 **The schema and procedures already exist and are not being redesigned** —
-`schema.sql` (80 tables), `stored-procedures.sql` (212 procedures, 3 views,
-4 functions) and `audit-log.sql`. Read `WCF-MIGRATION-GUIDE.md` in full before
+`schema.sql` (81 tables), `stored-procedures.sql` (266 procedures, 3 views,
+7 functions) and `audit-log.sql`. Read `WCF-MIGRATION-GUIDE.md` in full before
 starting Phase 4 work: it has the project layout, worked examples taken from
 the current C# services, phase gates P0–P6 and the risk table.
 
@@ -202,7 +202,7 @@ the current C# services, phase gates P0–P6 and the risk table.
 | `Services/ClinicalEngines.cs`, `VitalUnitService.cs`, `PhoneService.cs`, `TimeZoneService.cs` | **Stay in-process** (§2.4). |
 | `Services/DataStore.cs` | **Deleted** at the end (P6). Its seed becomes `db/Scripts/0005_SeedDemoData.sql`. |
 | `Models/*.cs` | **Kept during the migration**; replaced by the contracts' data types once nothing maps between them. |
-| `notifications.ashx` | **Unchanged** until in-app notifications get procedures (spec Known Gaps). |
+| `notifications.ashx` | **Small change:** reads through the in-app notification operations (spec v3.2 §12) once `UserNotificationService` switches. |
 | `App_Data/consent-forms/**`, `App_Data/lab-reports/**` | **Move** to the services' file store once attachment/consent-document procedures and a streamed endpoint exist. |
 | `docs/schema.sql`, `docs/audit-log.sql` | **Become the deployed database**, versioned with DbUp. |
 | `docs/stored-procedures.sql` | **Become the deployed procedures** ("always run" DbUp scripts), called only from `DOCNyleUnifiedAPI.DAL/DataRepository.cs`. |
@@ -278,12 +278,12 @@ Paths are relative to `opd-project/`.
 
 | Doc (`opd-project/docs/`) | Status | What it's for |
 |---|---|---|
-| `API-SPECIFICATION.md` | **Authoritative, current (v3.1)** | The WCF contract `IDOCNyleUnifiedAPI` (`DOCNyleUnifiedAPI.svc`): 207 operations in 13 regions, data-contract and fault conventions, each operation's stored procedure. |
+| `API-SPECIFICATION.md` | **Authoritative, current (v3.3)** | The WCF contract `IDOCNyleUnifiedAPI` (`DOCNyleUnifiedAPI.svc`): 261 operations in 13 regions, data-contract and fault conventions, each operation's stored procedure. |
 | `WCF-MIGRATION-GUIDE.md` | **Authoritative, current (v2.1)** | The Phase 4 execution plan. Replaces `ASPNETCORE-MIGRATION-GUIDE.md` (renamed and rewritten). |
-| `API-INTEGRATION-GUIDE.md` | **Authoritative, current (v1.0)** | The client side of Phase 4: where static data lives in `OpdProject` (`DataStore`, facade bodies, bypasses, hard-coded lists), what stays static, the facade → operation map per service class, cut-over order, and facade methods that still have no operation. |
+| `API-INTEGRATION-GUIDE.md` | **Authoritative, current (v1.2)** | The client side of Phase 4: where static data lives in `OpdProject` (`DataStore`, facade bodies, bypasses, hard-coded lists), what stays static, the facade → operation map per service class, cut-over order, and facade methods that still have no operation. |
 | `DATA-LAYER-ARCHITECTURE.md` | **Authoritative** for naming, schema and tenancy rules | Its examples are written for the JS era; read `data.js` as `DataStore`/services and `api.js` as the WCF operations (its own header note says so). |
-| `schema.sql` | **Authoritative, deploy-ready** | SQL Server 2019 DDL, 80 tables in `opd/cln/bil/cfg/sec/msg/inv`. |
-| `stored-procedures.sql` | **Authoritative, deploy-ready** | 212 procedures, 3 views, 4 functions; every one backs a WCF operation or is a noted internal helper. |
+| `schema.sql` | **Authoritative, deploy-ready** | SQL Server 2019 DDL (v4.1), 81 tables in `opd/cln/bil/cfg/sec/msg/inv`. |
+| `stored-procedures.sql` | **Authoritative, deploy-ready** | v3.6: 266 procedures, 3 views, 7 functions; every one backs a WCF operation or is a noted internal helper. |
 | `audit-log.sql` | **Authoritative** | Audit log table and procedures. |
 | `PRODUCT-GUIDE.md` | **Current for behavior** | What each screen does. Its "Phase 4" paragraph predates the WCF decision. |
 | `testing-guide.md` | **Current for behavior** | Manual QA scenarios with the seeded data; the parity contract for Phase 4. |
@@ -339,6 +339,21 @@ instead of HTTP status codes, and audit entries written by the operations
 themselves. `ASPNETCORE-MIGRATION-GUIDE.md` was replaced by
 `WCF-MIGRATION-GUIDE.md` (v2.0), and this handoff was updated to match.
 
+
+### 7.10 Static-data inventory and gap procedures (October 2026)
+
+`API-INTEGRATION-GUIDE.md` was written: where static data lives in `OpdProject` (the
+`DataStore`, the facade bodies, page bypasses such as the WhatsApp/Email settings edited in place,
+hard-coded lists that have tables), what stays static, the facade → operation map per service
+class and the cut-over waves. Mapping the facade found 17 groups of in-memory-only methods; all
+got procedures (`stored-procedures.sql` v3.5, section 22: 52 procedures, 2 functions) and
+operations (`API-SPECIFICATION.md` v3.2: 54 operations, incl. anonymous patient-portal ones),
+plus one table (`sec.LabClaimAttempt`, `schema.sql` v4.1). The SQL was compiled and smoke-tested
+on LocalDB; it has not been run through the WCF service yet. Procedures v3.6 / spec v3.3 then
+closed four follow-ups: full registration fields and settings-driven MRNs in
+`opd.usp_CreatePatient` / `UpdatePatient`, the salted sign-in check (`sec.usp_GetUserCredential`,
+`sec.usp_RecordLoginAttempt`, lockout), the front-desk slot re-check in `opd.usp_CreateAppointment`,
+and a loop guard in `opd.usp_ListAvailableSlots`.
 ---
 
 ## 8. Current State Snapshot
@@ -348,13 +363,13 @@ themselves. `ASPNETCORE-MIGRATION-GUIDE.md` was replaced by
 | Front end | ASP.NET Web Forms, .NET Framework 4.8, IIS Express port 8095 |
 | Data layer today | In-memory (`DataStore`), re-seeded on every app-domain start |
 | Friendly routes (`Web/RouteConfig.cs`) | 43 |
-| `schema.sql` tables | 80 (7 schemas) |
-| `stored-procedures.sql` | 212 procedures, 3 views, 4 functions |
-| WCF contract (`API-SPECIFICATION.md`) | `IDOCNyleUnifiedAPI` — 1 service, 207 operations — designed, not built |
+| `schema.sql` tables | 81 (7 schemas) |
+| `stored-procedures.sql` | 266 procedures, 3 views, 7 functions |
+| WCF contract (`API-SPECIFICATION.md`) | `IDOCNyleUnifiedAPI` — 1 service, 261 operations — designed, not built |
 | Seeded demo hospitals | 2 (`HOSP-001` India / INR, `HOSP-002` Jamaica / JMD) |
 | Seeded demo patients | 5 (`PAT-001`…`PAT-005`) |
 | Roles | ADMIN, DOCTOR, RECEPTIONIST, BILLING, NURSE, LAB_PARTNER |
-| Features with no procedures yet | Consultation form designer, in-app notifications, lab attachments, consent documents, lab claim-by-mobile, duplicate-patient check, payer admin, patient import (spec Known Gaps #1) |
+| Features with no procedures yet | None. Open: a `MobileKey` column before encrypting phone numbers; portal identity check (product decision) — spec Known Gap #8 and the §5 portal note |
 
 ---
 

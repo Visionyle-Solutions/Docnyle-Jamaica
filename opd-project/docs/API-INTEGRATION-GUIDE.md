@@ -1,19 +1,28 @@
 # Consult360 — OPD Consultation Module
 ## API Integration Guide: Removing Static Data from the Web Forms App
 
-**Document version:** 1.0 — October 2026
+**Document version:** 1.2 — October 2026
 **Scope:** The **client side** of Phase 4 — where static (in-memory and hard-coded) data lives
 in `OpdProject` today, and how to replace each piece with calls to the `DOCNyleUnifiedAPI` WCF
 service, file by file, until `Services/DataStore.cs` can be deleted.
 **Audience:** Engineers switching the Web Forms site from `DataStore` to the service.
 **Companion documents:** `WCF-MIGRATION-GUIDE.md` (the **service side**: building
-`DOCNyleUnifiedAPI`, its DAL, the database, phase gates P0–P6), `API-SPECIFICATION.md` v3.1 (the
-207 operations this guide calls), `testing-guide.md` (the behavior that must not change).
+`DOCNyleUnifiedAPI`, its DAL, the database, phase gates P0–P6), `API-SPECIFICATION.md` v3.3 (the
+261 operations this guide calls), `testing-guide.md` (the behavior that must not change).
 
 > **Read this with `WCF-MIGRATION-GUIDE.md`, not instead of it.** That guide builds the service
 > and owns the phase gates. This guide is the work list for `opd-project/` during P1 (auth) and
 > P3–P6 (facade switch → decommission). Where they overlap (§9 of that guide), this guide is the
 > more detailed one; where they differ, §6 below says why.
+
+**v1.1:** the gaps listed in v1.0 §8 now have procedures (`stored-procedures.sql` v3.5, section
+22) and operations (`API-SPECIFICATION.md` v3.2). §7 names them; §8 is now the record of what was
+added and what is still open. `SkipStep` (v1.0 gap G-9) turned out to be covered already by
+`SaveSoapNotes`' `SkippedSteps` member.
+
+**v1.2:** four of the six open items in §8.2 are closed (`stored-procedures.sql` v3.6, spec v3.3):
+patient registration fields and MRN format, the salted sign-in check, the front-desk slot re-check
+and the slot-list loop guard.
 
 ---
 
@@ -110,13 +119,13 @@ breaks silently (no compile error) once the data comes from the service.
 | `templates/settings/settings-hub.aspx.cs:193–198`, `208–214` | `lock (DataStore.Sync)` and sets properties on `NotificationService.WhatsApp` / `.Email` — the live `DataStore` object — with no save call | Over WCF the object is a copy; the change is lost | Add `NotificationService.SaveChannelConfig(channel, request)` → `SaveNotificationConfig`; the page builds a request from the form and calls it. Remove the `lock` |
 | `templates/settings/settings-hub.aspx.cs:183`, `186` | Shows `"••••" + last 4 chars of ApiKey` | `GetNotificationConfig` never returns the key (spec §12) | Show "Key configured" / "Enter API key" from a boolean; leave the field blank = keep the key |
 | `Services/ConsultationService.cs:77` (`Open`) and other facade methods | `c.AppointmentId = …` on the object returned by `GetOrCreate` | Same — mutation of a returned object is not persisted | Pass the appointment id into `GetOrCreateConsultation(patientId, doctorId, appointmentId)` |
-| `Web/BasePage.cs:42` | `HospitalId` falls back to `"HOSP-001"` for anonymous pages (login, `portal/self-register`, `portal/self-book`) | The service never accepts a hospital from the client, and `HOSP-001` is not a GUID | Anonymous portal pages need the hospital from the URL or site config (e.g. `appSettings["PortalHospitalId"]`) **and** anonymous portal operations on the service — see §8 gap G-12. Signed-in pages use only the session's hospital |
+| `Web/BasePage.cs:42` | `HospitalId` falls back to `"HOSP-001"` for anonymous pages (login, `portal/self-register`, `portal/self-book`) | The service never accepts a hospital from the client, and `HOSP-001` is not a GUID | Anonymous portal pages need the hospital from the URL or site config (e.g. `appSettings["PortalHospitalId"]`) **and** the anonymous portal operations in spec §5 *Patient portal* (`GetPortalBookingOptions`, `ListPortalAvailableSlots`, `CreatePortalPatient`, `GetPortalPatient`, `CreatePortalAppointment`), which take the hospital from the **service's** configuration — so `Hid` on those pages is only used for display formatting. Signed-in pages use only the session's hospital |
 | `Web/AppSession.cs:28–38` (`CurrentUser`) | Re-reads the user with `UserService.GetUser(id)` on every request | There is no `GetUser` operation; one SOAP call per property access is too chatty | Store the `AuthenticatedUser` returned at sign-in in session; confirm the session with `CheckSessionValid` (cache 60 s in `HttpContext.Items`/`MemoryCache`). A disabled account is cut off by revoking its `sec.UserSession` |
 | `Web/AppSession.cs:52–60` (`SignIn` / `SignOut`) | Keeps only `UserId` | The service needs a session token | Keep `ServiceToken` too (§5 Step 2) |
 | `Web/AppSession.cs:62`, `Web/BasePage.cs:56`, `Web/Navigation.cs` | `UserService.HasPermission(user, feature)` reads `DataStore.Permissions` | Must be the same matrix the service enforces | Load `GetPermissionMatrix()` once per session (or per hospital, 5 min cache); `HasPermission` checks the cached grid |
 | `Services/UserService.cs:89`, `Services/SchedulingService.cs:443` | New users / doctors default to the password `demo123` | Production users would share a known password | Require a password (or a generated one shown once); remove the default |
 | `templates/settings/login.aspx:27–33`, `templates/settings/schedule-settings.aspx:98` | Demo account list and "`demo123`" hint on screen | Must not ship to production | Render only when `appSettings["ShowDemoLogins"] == "true"` (dev/test) |
-| `Services/LabService.cs:67–69` (`ClaimFailures`) | Claim-by-mobile lockout counter in a static `Dictionary` | Lost on app-pool recycle; not shared across servers | Moves into the service with the claim operation (§8 gap G-6), persisted (e.g. `sec.LoginAttempt`-style table) |
+| `Services/LabService.cs:67–69` (`ClaimFailures`) | Claim-by-mobile lockout counter in a static `Dictionary` | Lost on app-pool recycle; not shared across servers | Moves into the service: `SearchLabOrdersByMobile` logs each lookup in `sec.LabClaimAttempt` and enforces the lockout (fault 50231). Delete `ClaimFailures` and `IsClaimLocked` when Lab switches |
 | `Services/DataStore.cs` `NextId` used by pages via facade results | Pages display ids such as `PAT-1001` and put them in URLs | After the switch ids are GUID strings | Pages already treat ids as opaque strings — verify nothing parses them (`grep -rn "Split('-')\|Substring" templates`); show the **MRN**, never the id, to users |
 
 ### 2.4 (D) Hard-coded reference data that has a table — replace with an operation
@@ -356,8 +365,9 @@ For each module, in the order of §6:
 
 ### Step 5 — Modules with gaps
 
-Methods in §8 keep their `InProc` body until the procedure and operation exist. Track them as
-work items for the service team; a module is "done" only when it has none left.
+Every facade method now has an operation (§7), and nothing in §8.2 blocks a module from
+switching. The two items left there are needed before encryption is turned on and are a product
+decision, respectively.
 
 ### Step 6 — All `Wcf` in staging (P4) and production (P5)
 
@@ -390,7 +400,7 @@ Order, derived from §2.2:
 | 4 | `Consultation`, `Catalog`, `Lab`, `Inventory` — **switch together** (Consultation ↔ Catalog share Diagnoses; Inventory consumes ConsultationServiceItems at sign-off; Lab reads Orders) | 1–3 |
 | 5 | `Billing` | 1–4 |
 | 6 | `Operations` (reports, message templates/queue, export, audit log reads) | all |
-| — | `ConsultationConfig`, `UserNotifications` | stay `InProc` until their procedures exist (§8) |
+| 4 (with Consultation) | `ConsultationConfig` (custom values belong to consultations; publish updates `cfg.VitalDefinition`) and `UserNotifications` (created by `SubmitLabResult`) | 1–3 |
 
 **Seed data in mixed mode.** While waves are split, `InProc` modules still hold *seed* rows that
 point at seed ids (`PAT-001`), while SQL holds the same patients under GUIDs. Do mixed-mode
@@ -404,7 +414,7 @@ there is no mixed mode — every key is `Wcf` (Step 6).
 
 `=` same name. "local" = stays in the facade or page (no call). "cache" = served from
 `HospitalCache` after one call. "from list" = no single-record operation; take it from the cached
-list call. Gaps (no operation) are marked **G-n** and listed in §8.
+list call. Operations added in spec v3.2 are listed with their procedures in §8.1.
 
 ### `UserService` / `AuditService` — key `Users`
 
@@ -453,7 +463,7 @@ list call. Gaps (no operation) are marked **G-n** and listed in §8.
 | `Get` | `GetPatient` |
 | `Search` | `SearchPatients` |
 | `Create`, `Update` | `CreatePatient`, `UpdatePatient` |
-| `FindDuplicate` | **G-1** |
+| `FindDuplicate` | `CheckDuplicatePatient` |
 | `ListAllergies` | `=` |
 | `GetAllergy` | from `ListAllergies` |
 | `SaveAllergy` | `CreateAllergy` (new) / `UpdateAllergy` (existing) |
@@ -464,13 +474,14 @@ list call. Gaps (no operation) are marked **G-n** and listed in §8.
 | `SaveMedicalHistoryRecord` | `UpdatePatientMedicalHistory` |
 | `DeleteMedicalHistory`, `DeleteMedicalHistoryRecord` | `DeletePatientMedicalHistory` |
 | `ListMedicalEvents`, `AddMedicalEvent` | `ListPatientMedicalEvents`, `CreatePatientMedicalEvent` |
-| `GetMedicalEvent`, `SaveMedicalEventRecord`, `DeleteMedicalEvent` | **G-2** |
+| `GetMedicalEvent`, `SaveMedicalEventRecord`, `DeleteMedicalEvent` | `GetPatientMedicalEvent`; `SaveMedicalEventRecord` → `CreatePatientMedicalEvent` (new) / `UpdatePatientMedicalEvent` (existing); `DeletePatientMedicalEvent` |
 | `ListFamilyHistory`, `AddFamilyHistory` | `ListPatientFamilyHistory`, `CreatePatientFamilyHistory` |
-| `GetFamilyHistory`, `UpdateFamilyHistory`, `DeleteFamilyHistory` | **G-2** |
-| `UpdateSocialHistory` | **G-3** |
-| `ListConsentDocuments`, `GetConsentDocument`, `SaveConsentDocument`, `ConsentDocumentPath` | **G-4** |
+| `GetFamilyHistory`, `UpdateFamilyHistory`, `DeleteFamilyHistory` | `GetPatientFamilyHistory`, `UpdatePatientFamilyHistory`, `DeletePatientFamilyHistory` |
+| `UpdateSocialHistory` | `UpdatePatientSocialHistory` |
+| `ListConsentDocuments`, `GetConsentDocument`, `SaveConsentDocument` | `ListPatientConsentDocuments`, `GetPatientConsentDocument`, `CreatePatientConsentDocument` (file bytes in the request) |
+| `ConsentDocumentPath` + `patient-consent-file.aspx` streaming the file from disk | `GetPatientConsentDocumentContent` — the page writes the returned bytes; the site no longer reads `App_Data/consent-forms` |
 | `ListPayers` | `=` |
-| `GetPayer`, `ListAllPayers`, `AddPayer`, `TogglePayer` | **G-5** |
+| `GetPayer`, `ListAllPayers`, `AddPayer`, `TogglePayer` | `GetPayer`, `ListAllPayers`, `SavePayer` (fault 50210 where memory returned `null`), `UpdatePayerActive(id, null)` |
 | `ListCoverages` | `ListPatientCoverages` |
 | `GetCoverage` | from `ListPatientCoverages` |
 | `AddCoverage` | `SavePatientCoverage` |
@@ -485,13 +496,13 @@ list call. Gaps (no operation) are marked **G-n** and listed in §8.
 | `RefreshDoctorNames` | delete (done by `SaveHospitalSettings`) |
 | `ResolveSetting`, `SlotMinutes`, `BufferMinutes` | local over `GetDoctorSettings` + cached `GetHospitalSettings` |
 | `GetDoctorSettings`, `SaveDoctorSettings` | `=` |
-| `GetAppointment` | **G-7** |
+| `GetAppointment` | `=` |
 | `ListAppointments` | `ListAppointmentsForDate` (one doctor) / `ListAppointmentsForHospitalDate` (front desk) / `ListTodayAppointmentsForDoctor` |
-| `ListAppointmentsForPatient` | **G-7** |
+| `ListAppointmentsForPatient` | `=` |
 | `CreateAppointment` | `=` |
 | `UpdateStatus` | `UpdateAppointmentStatus` (invalid move → `Conflict` fault) |
 | `ListAvailableSlots`, `ListRescheduleSlots` | `ListAvailableSlots` |
-| `Reschedule`, `BookRecurring` | **G-8** |
+| `Reschedule`, `BookRecurring` | `UpdateAppointmentSlot` (returns the new appointment; slot taken → `Conflict` where memory returned `null`), `CreateRecurringAppointments` (count = rows returned) |
 | `GetDoctorSchedule` | `GetDoctorScheduleForDate` |
 | `ListSlotConfig` | `ListDoctorSlotConfig` |
 | `AddSlotWindow`, `RemoveSlotWindow` | `SaveDoctorSlotConfig` (send the full window list) |
@@ -509,7 +520,7 @@ list call. Gaps (no operation) are marked **G-n** and listed in §8.
 | `SubmitIntake` | `SubmitIntakeResponse` |
 | `GetConsentForm`, `SaveConsentForm`, `RecordConsent` | `=` |
 | `GetIntakeForAppointment`, `GetConsentRecord` | `GetVisitIntakeAndConsent` |
-| `AppointmentForConsultation` | the consultation's `AppointmentId` → **G-7** (`GetAppointment`) |
+| `AppointmentForConsultation` | the consultation's `AppointmentId` → `GetAppointment` |
 
 ### `ConsultationService` — key `Consultation`
 
@@ -518,10 +529,10 @@ list call. Gaps (no operation) are marked **G-n** and listed in §8.
 | `Get` | `GetConsultationById` |
 | `GetOrCreate` | `GetOrCreateConsultation(patientId, doctorId, null)` |
 | `Open` | `GetOrCreateConsultation(patientId, doctorId, appointmentId)` + `UpdateAppointmentStatus(…, "IN_CONSULT")` — no in-place `AppointmentId` assignment (§2.3) |
-| `FindInProgress` | `GetOrCreateConsultation` returns the in-progress one; if a page needs "find without creating" → **G-9** |
+| `FindInProgress` | `GetInProgressConsultation` |
 | `ListForDate` | `ListConsultationsForDate` |
 | `ListPastVisits` | `ListPatientPastVisits` |
-| `SkipStep` | **G-9** (`SkippedSteps` has no operation) |
+| `SkipStep` | `GetConsultationById` → add the step to `SkippedSteps` → `SaveSoapNotes(…, SkippedSteps)` |
 | `GetVitals`, `GetVital`, `HasAnyVital` | `GetConsultationVitals` (request cache) |
 | `RangeFor`, `ValidateVitals` | local over cached `ListVitalsConfig` (§2.4) |
 | `SaveVitals` | `=` (BMI computed in the procedure) |
@@ -535,13 +546,13 @@ list call. Gaps (no operation) are marked **G-n** and listed in §8.
 | `SaveSoap` | `SaveSoapNotes` |
 | `ListPrescriptions` | `=` |
 | `ListActiveMedications`, `IsCurrent` | `ListActiveMedicationsForPatient`; `IsCurrent` local |
-| `ListMedicationHistory`, `SaveOutsideMedication` | **G-10** |
+| `ListMedicationHistory`, `SaveOutsideMedication` | `ListPatientMedicationHistory`, `SaveOutsideMedication` |
 | `GetPrescription` | from `ListPrescriptions` |
 | `AddPrescription` | `CreatePrescription` (allergy check runs inside — `WCF-MIGRATION-GUIDE.md` §5.4) |
 | `DiscontinuePrescription` | `CancelPrescription` |
 | `ListPreviousPrescriptionsByDoctor`, `CheckDrugAllergyConflicts` | `=` |
 | `ListOrders`, `AddOrder` | `ListInvestigationOrders`, `CreateInvestigationOrder` |
-| `RemoveOrder` | **G-11** |
+| `RemoveOrder` | `DeleteInvestigationOrder` (`false` → fault 50218 now) |
 | `ListReferrals`, `AddReferral` | `ListReferrals`, `CreateReferral` |
 | `ListServiceItems`, `AddServiceItem`, `RemoveServiceItem` | `ListConsultationServiceItems`, `CreateConsultationServiceItem`, `DeleteConsultationServiceItem` |
 | `ServiceItemLabel`, `ItemLabel` | local |
@@ -556,7 +567,7 @@ list call. Gaps (no operation) are marked **G-n** and listed in §8.
 | `SearchFormulary`, `GetDrugByName` | `=` |
 | `GetDrug` | `GetDrugByName` / from search |
 | `BrandExists` | `CreateDrug` fault |
-| `SaveDrug` | `CreateDrug` (edit of an existing drug → **G-13**) |
+| `SaveDrug` | `CreateDrug` (new) / `UpdateDrug` (existing) |
 | `ToggleDrug` | `UpdateDrugStatus` |
 | `SearchLabTests` | `=` |
 | `GetLabTest` | from `SearchLabTests` |
@@ -575,16 +586,17 @@ list call. Gaps (no operation) are marked **G-n** and listed in §8.
 | Facade | Operation |
 |---|---|
 | `ContentTypeFor`, `IsValidMobile`, `CanHandle`, `FormatSize`, `CheckFile` | local (the service re-checks `CanHandle` via `Authorize`) |
-| `ListLabPartners`, `GetLabPartner`, `LabPartnerName`, `SaveLabPartner` | **G-5** (lab partners) |
+| `ListLabPartners`, `GetLabPartner`, `SaveLabPartner` | `=`; `LabPartnerName` local over cached `ListLabPartners` |
 | `ListPortalOrders` | `ListPendingLabOrders` |
 | `GetOrder` | from `ListPendingLabOrders` / `ListInvestigationOrders` |
-| `IsClaimLocked`, `FindOrdersByMobile`, `ClaimOrder` | **G-6** |
+| `IsClaimLocked`, `FindOrdersByMobile`, `ClaimOrder` | lockout is inside `SearchLabOrdersByMobile` (fault 50231 → show "try again in 15 minutes"); `ConfirmLabOrderClaim` |
 | `MarkSent` | `UpdateOrderStatus(orderId, "SENT")` |
 | `SubmitResult` | `SubmitLabResult` |
 | `ListPendingReview`, `ListForPatient` | `ListPendingReviewResults`, `ListLabResultsForPatient` |
 | `GetResult` | from those lists |
 | `MarkReviewed` | `UpdateLabResultStatus` |
-| `SaveAttachment`, `ListAttachments`, `CountAttachmentsForOrder`, `GetAttachment`, `StoredPath`, `CanViewAttachment` | **G-4** (files) |
+| `SaveAttachment`, `ListAttachments`, `CountAttachmentsForOrder`, `GetAttachment` | `CreateLabResultAttachment` (file bytes in the request), `ListLabResultAttachments(resultId, null)`, `ListLabResultAttachments(null, orderId)` + count, `GetLabResultAttachment` |
+| `StoredPath`, `CanViewAttachment` + `lab-report-file.aspx` | `GetLabResultAttachmentContent` (the service applies `CanViewAttachment`); the site no longer reads `App_Data/lab-reports` |
 
 ### `InventoryService` — key `Inventory`
 
@@ -611,9 +623,9 @@ list call. Gaps (no operation) are marked **G-n** and listed in §8.
 | `GetLatestInvoiceForConsultation` | `GetInvoiceForConsultation` |
 | `GenerateInvoiceForConsultation` | `CreateInvoice` + `CreateInvoiceLineItem` per line + `RecalculateInvoiceTotals` (or one combined operation if round trips hurt — `WCF-MIGRATION-GUIDE.md` §5 bucket 2) |
 | `ListServiceCharges`, `GetServiceCharge` | `=` |
-| `ListAllServiceCharges` | `SearchServiceCharges` |
+| `ListAllServiceCharges` | `=` (inactive included; `SearchServiceCharges` is active only) |
 | `AddServiceCharge` | `CreateServiceCharge` |
-| `ToggleServiceCharge` | **G-13** |
+| `ToggleServiceCharge` | `UpdateServiceChargeActive(id, null)` |
 | `ListLineItems`, `AddLineItem`, `RemoveLineItem` | `ListInvoiceLineItems`, `CreateInvoiceLineItem`, `DeleteInvoiceLineItem` |
 | `RecalculateTotals` | `RecalculateInvoiceTotals` |
 | `GetBillingSplit` | `GetInvoiceBillingSplit` |
@@ -631,7 +643,8 @@ list call. Gaps (no operation) are marked **G-n** and listed in §8.
 | Facade | Operation |
 |---|---|
 | `ReportService.IsDashboardKind`, `PeriodRange` | local |
-| `ReportService.Dashboard`, `DashboardList`, `AppointmentList` | compose from `ListAppointmentsForHospitalDate` / `ListConsultationsForDate` for "today"; ranges → **G-14** |
+| `ReportService.Dashboard` | `GetAppointmentDashboard` |
+| `ReportService.DashboardList`, `AppointmentList` | `ListAppointmentsForRange` (`DashboardList` computes the period with `PeriodRange`, locally) |
 | `ReportService.ConsultationVolume`, `DiagnosisFrequency`, `Prescribing`, `Revenue` | `ListConsultationVolumeReport`, `ListDiagnosisFrequencyReport`, `ListPrescribingReport`, `ListRevenueReport` |
 | `ReportService.AppointmentStatus` | `ListNoShowReport` (2 result sets: totals + by status) |
 | day-end page | `GetDayEndSummary` |
@@ -645,53 +658,90 @@ list call. Gaps (no operation) are marked **G-n** and listed in §8.
 | `ExportService.ListTables`, `TableLabel` | `ListExportTables`; label local |
 | `ExportService.ToCsv` | `ListExportData(key)`; CSV formatting stays local |
 | `ExportService.SplitCsvLine`, `ParseCsv` | local |
-| `ExportService.ImportPatients` | **G-15** (or loop `CreatePatient` as an interim) |
+| `ExportService.ImportPatients` | `CreatePatientsBatch` (all or nothing) |
 
 ### `ConsultationConfigService`, `UserNotificationService` — keys `ConsultationConfig`, `UserNotifications`
 
-No operations yet (spec Known Gaps #1). **Stay `InProc`** — but note that `InProc` means the form
-designer's custom fields and in-app notifications are still lost on every app-pool recycle and
-are not shared between servers. They are the first gaps to close (§8 G-16, G-17).
+| Facade | Operation |
+|---|---|
+| `GetPublished`, `GetDraft`, `GetView` | `GetConsultationFormConfig("PUBLISHED" / "DRAFT")`, deserialize `Sections` / `VitalUnits`; `null` → the built-in `Catalog()` default (and for the draft, a copy of the published form). Cache the published form per hospital; clear it on publish |
+| every designer edit (`ToggleSection` … `ApplyUnitPreset`, `RestoreDefaults`) | local on the draft document, then `SaveConsultationFormDraft` with the `ModifiedAt` read with it (fault 50241 → "reload") |
+| `ListDraftChanges`, `ListPublishProblems`, `InputTypeLabel`, `AllowsCustomFields`, `IsMovableField`, `DisplayValue` | local |
+| `Publish` | the service checks problems / changes and creates pending vitals, then `ConfirmConsultationFormPublish` (returns the version; `-1` / `0` cases come back as `Validation` fault / unchanged version) |
+| `DiscardDraft` | `CancelConsultationFormDraft` |
+| `SaveCustomValues` | `SaveConsultationCustomValues` (the facade fills labels, input type and display value from the published form) |
+| `GetCustomValues`, `ListCustomValues` | `ListConsultationCustomValues`; `ListCustomValues` sorts by the published form's order locally |
+| `UserNotificationService.Notify` | none from the site: `SubmitLabResult` notifies the ordering doctor itself — remove the call in `lab-portal.aspx.cs:248` |
+| `UserNotificationService.MarkReadForEntity` | none from the site: `UpdateLabResultStatus` does it — remove the call in `lab-results.aspx.cs:61` |
+| `UserNotificationService.ListRecent`, `UnreadCount`, `MarkRead`, `MarkAllRead` | `ListUserNotifications`, `GetUserNotificationUnreadCount` (cache a few seconds — `Site.Master` calls it on every page), `UpdateUserNotificationRead`, `UpdateUserNotificationsReadAll` |
+| `UserNotificationService.Ago` | local |
 
 ---
 
-## 8. Gaps — facade methods with no operation yet
+## 8. Gaps — closed and still open
 
-Each needs a procedure in `stored-procedures.sql`, an operation in `API-SPECIFICATION.md`, then
-`IDOCNyleUnifiedAPI.cs` / `DataRepository.cs`, in that order. Until then the method keeps its
-`InProc` body. "Known Gap" = already listed in spec Known Gaps #1; the others were found while
-mapping and should be added to that list.
+### 8.1 Closed in `API-SPECIFICATION.md` v3.2 / `stored-procedures.sql` v3.5
 
-| # | Facade method(s) | Proposed operation(s) | Listed in spec? |
+v1.0 of this guide listed 17 groups of facade methods with no operation. All now have one. The
+procedures are in section 22 of `stored-procedures.sql`; one table was added
+(`sec.LabClaimAttempt`, `schema.sql` v4.1). They compile on SQL Server (LocalDB, compatibility
+level 150) and passed a 57-check smoke test of the behavior below; they have not yet been
+exercised through the WCF service or the parity tests (`WCF-MIGRATION-GUIDE.md` §12).
+
+| # | Facade method(s) | Operation(s) | Procedure(s) |
 |---|---|---|---|
-| G-1 | `PatientService.FindDuplicate` | `CheckDuplicatePatient(FullName, Dob, Phone)` | Known Gap |
-| G-2 | `GetMedicalEvent`, `SaveMedicalEventRecord`, `DeleteMedicalEvent`, `GetFamilyHistory`, `UpdateFamilyHistory`, `DeleteFamilyHistory` | `UpdatePatientMedicalEvent`, `DeletePatientMedicalEvent`, `UpdatePatientFamilyHistory`, `DeletePatientFamilyHistory` | **New** |
-| G-3 | `UpdateSocialHistory` | `SavePatientSocialHistory` | Known Gap |
-| G-4 | consent documents, lab attachments (all file methods) | streamed upload/download contract | Known Gap |
-| G-5 | payer admin; lab partner admin | `ListAllPayers`, `SavePayer`, `UpdatePayerActive`; `ListLabPartners`, `SaveLabPartner` | Known Gap |
-| G-6 | `IsClaimLocked`, `FindOrdersByMobile`, `ClaimOrder` | `SearchLabOrdersByMobile`, `ConfirmLabOrderClaim` (with persisted lockout) | Known Gap |
-| G-7 | `GetAppointment`, `ListAppointmentsForPatient`, `AppointmentForConsultation` | `GetAppointment`, `ListAppointmentsForPatient` | **New** |
-| G-8 | `Reschedule`, `BookRecurring` | `UpdateAppointmentSlot`, `CreateRecurringAppointments` | Known Gap |
-| G-9 | `SkipStep`, `FindInProgress` (without create) | `SaveConsultationSkippedSteps`; `GetInProgressConsultation` | **New** |
-| G-10 | `ListMedicationHistory`, `SaveOutsideMedication` | `ListPatientMedicationHistory`, `CreateOutsideMedication` | Known Gap (outside medications); history **new** |
-| G-11 | `ConsultationService.RemoveOrder` | `DeleteInvestigationOrder` (only while `ORDERED`) | **New** |
-| G-12 | anonymous portal pages (`self-register`, `self-book`) | anonymous operations scoped by a portal hospital key | **New** |
-| G-13 | edit an existing drug; `ToggleServiceCharge` | `UpdateDrug`; `UpdateServiceChargeActive` | **New** |
-| G-14 | dashboard lists over a period | `ListAppointmentsForRange` | **New** |
-| G-15 | `ExportService.ImportPatients` | `CreatePatientsBatch` | Known Gap |
-| G-16 | `ConsultationConfigService` (all) | form-designer operations | Known Gap |
-| G-17 | `UserNotificationService` (all), `notifications.ashx` | `ListUserNotifications`, `UpdateUserNotificationRead`, `CreateUserNotification` | Known Gap |
+| G-1 | `FindDuplicate` | `CheckDuplicatePatient` | `opd.usp_CheckDuplicatePatient` |
+| G-2 | medical event / family history get, edit, delete | `Get/Update/DeletePatientMedicalEvent`, `Get/Update/DeletePatientFamilyHistory` | `opd.usp_` same names (soft delete) |
+| G-3 | `UpdateSocialHistory` | `UpdatePatientSocialHistory` | `opd.usp_UpdatePatientSocialHistory` |
+| G-4 | consent documents, lab attachments | `List/Get/CreatePatientConsentDocument`, `GetPatientConsentDocumentContent`; `Create/List/GetLabResultAttachment`, `GetLabResultAttachmentContent` | `opd.usp_*PatientConsentDocument*`, `cln.usp_*LabResultAttachment*` (metadata; files in the service's file store) |
+| G-5 | payer and lab partner admin | `ListAllPayers`, `GetPayer`, `SavePayer`, `UpdatePayerActive`; `ListLabPartners`, `GetLabPartner`, `SaveLabPartner` | `cfg.usp_` same names |
+| G-6 | claim by mobile | `SearchLabOrdersByMobile`, `ConfirmLabOrderClaim` | `cln.usp_` same names + `sec.LabClaimAttempt` |
+| G-7 | single appointment, patient's appointments | `GetAppointment`, `ListAppointmentsForPatient` | `opd.usp_` same names |
+| G-8 | reschedule, recurring | `UpdateAppointmentSlot`, `CreateRecurringAppointments` | `opd.usp_` same names, with `opd.usp_CheckSlotAvailable` (internal) |
+| G-9 | `FindInProgress` (`SkipStep` needed nothing new) | `GetInProgressConsultation` | `cln.usp_GetInProgressConsultation` |
+| G-10 | medication history, outside medicines | `ListPatientMedicationHistory`, `SaveOutsideMedication` | `cln.usp_` same names |
+| G-11 | `RemoveOrder` | `DeleteInvestigationOrder` | `cln.usp_DeleteInvestigationOrder` |
+| G-12 | patient portal pages | `GetPortalBookingOptions`, `ListPortalAvailableSlots`, `CreatePortalPatient`, `GetPortalPatient`, `CreatePortalAppointment` (anonymous) | `opd.usp_GetPortalPatient`, `opd.usp_CreatePortalAppointment` + existing procedures |
+| G-13 | edit a drug, service charge on/off | `UpdateDrug`; `ListAllServiceCharges`, `UpdateServiceChargeActive` | `cfg.usp_UpdateDrug`, `bil.usp_` same names |
+| G-14 | dashboard and range lists | `GetAppointmentDashboard`, `ListAppointmentsForRange` | `opd.usp_` same names |
+| G-15 | CSV import | `CreatePatientsBatch` | `opd.usp_CreatePatientsBatch` |
+| G-16 | consultation form designer, custom values | `GetConsultationFormConfig`, `SaveConsultationFormDraft`, `ConfirmConsultationFormPublish`, `CancelConsultationFormDraft`, `SaveConsultationCustomValues`, `ListConsultationCustomValues` | `cfg.usp_` / `cln.usp_` same names |
+| G-17 | in-app notifications | `ListUserNotifications`, `GetUserNotificationUnreadCount`, `UpdateUserNotificationRead`, `UpdateUserNotificationsReadAll` | `sec.usp_` same names; `sec.usp_CreateUserNotification` / `sec.usp_UpdateUserNotificationReadForEntity` run inside `SubmitLabResult` / `UpdateLabResultStatus` |
 
-Verify each "New" row against `stored-procedures.sql` before writing a procedure — a procedure
-may exist without an operation in the spec.
+**Behavior that differs from the in-memory code** (each is commented `v3.5:` in the procedure):
+deletes of medical events, family history and orders are soft; removing an order or saving
+custom values is refused once the consultation is signed; recurring booking uses only future
+slots; reschedule / portal booking re-check the slot under a lock and fail with a `Conflict`
+fault instead of returning `null`; a payer name already used under the other category is
+rejected; the portal lookup returns "Ravi K." instead of the full name; CSV import is all or
+nothing. Check each against `testing-guide.md` when its module switches.
 
----
+### 8.2 Closed in `stored-procedures.sql` v3.6 / spec v3.3
+
+| Item | What changed | Facade impact |
+|---|---|---|
+| Patient registration fields and MRN | `opd.usp_CreatePatient` / `opd.usp_UpdatePatient` take every registration field, `Gender`, `Dob` and `RegisteredVia`; MRNs follow `MRN_PREFIX` / `MRN_FORMAT` / `MRN_SEQ` (`cfg.fn_FormatMrn`), allocated under a lock, used numbers skipped | `PatientMap.ToCreateRequest` / `ToUpdateRequest` send all of `patient-form.ascx`'s fields; `HospitalService.IssueMrnUnlocked` is no longer called on the `Wcf` path |
+| Salted sign-in check | `sec.usp_GetUserCredential` + `sec.usp_RecordLoginAttempt` (5 failures in 15 minutes lock the e-mail) | none — inside the `AuthenticateUser` operation; `login.aspx` shows the lockout message from the fault |
+| Front-desk double booking | `opd.usp_CreateAppointment` re-checks the slot under the per-doctor-day lock (walk-ins in a slot that already started today are allowed) | the calendar's own `stillFree` check can stay as a fast pre-check; handle fault 50214 the same way (toast "That slot was just taken") |
+| Slot-list loop | `opd.usp_ListAvailableSlots` returns nothing for a length under 5 / over 720 minutes; a negative buffer counts as 0 | none |
+
+Tested on LocalDB (compatibility 150): the 57 checks of v1.1 plus 21 new ones (MRN tokens, padding,
+skipping, default format, too-long format; structured fields; NULL-keeps / ''-clears updates; CSV
+import; credential read, lockout and reset; double booking, off-grid and walk-in slots;
+recurring and reschedule after the change; slot guard).
+
+### 8.3 Still open (spec Known Gaps #8 and the portal note)
+
+| Item | Blocks | Action |
+|---|---|---|
+| Phone / mobile matching on columns planned for Always Encrypted | turning encryption on | Add a service-written `MobileKey` column first |
+| Portal identity: MRN or phone alone finds the patient | — (as today) | Product decision: date of birth or SMS code |
 
 ## 9. Verification checklist per module
 
 Before flipping a module's key to `Wcf` in the shared test environment:
 
-- [ ] Every public facade method has a `Wcf` branch or is listed in §8.
+- [ ] Every public facade method has a `Wcf` branch (§7).
 - [ ] `grep -n "DataStore\." Services/XService.cs` matches only the `InProc` branches.
 - [ ] No `lock (DataStore.Sync)` in the `Wcf` branches; no page mutates a returned object
       expecting it to persist.
@@ -708,7 +758,7 @@ Before flipping a module's key to `Wcf` in the shared test environment:
 
 ## 10. Final clean-up (P6)
 
-When every key is `Wcf` in production and §8 is empty:
+When every key is `Wcf` in production:
 
 1. Delete `Services/DataStore.cs` and the `DataStore.Seed()` line in `Global.asax.cs`.
 2. Delete every `InProc` branch and `Web/DataSource.cs`; remove the `DataSource:*` keys from

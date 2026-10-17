@@ -1,6 +1,6 @@
 /* ============================================================
    Consult360 — SQL Server 2019 Schema
-   Version: 4.0 (in sync with the application models, 2026-10-15)
+   Version: 4.1 (2026-10-17: + sec.LabClaimAttempt; 4.0 in sync with the application models, 2026-10-15)
 
    Source of truth: the C# models in the Models folder, held today by the in-memory
    Services/DataStore.cs (one list per table). Column names follow the model
@@ -24,7 +24,7 @@
    Tenancy: every hospital-owned row carries HospitalId, even where the model reaches it through a parent
    List / nested model properties are stored as JSON (ISJSON-checked) or in a child table — noted per column
 
-   Schemas: cfg(23), sec(6), opd(13), cln(18), bil(9), inv(4), msg(2) = 75 application tables
+   Schemas: cfg(23), sec(7), opd(13), cln(18), bil(9), inv(4), msg(2) = 76 application tables
             + 5 reserved tables (section G) for planned features the application does not use yet
    ============================================================ */
 
@@ -526,7 +526,7 @@ CREATE TABLE cfg.ConsultationFormConfig (
 );
 
 -- ============================================================
--- B. sec — SECURITY (6 tables)
+-- B. sec — SECURITY (7 tables)
 -- ============================================================
 
 -- Model: AppUser. Roles live in sec.UserRole (AppUser.Roles; a user may hold several); permissions are the
@@ -641,6 +641,24 @@ CREATE TABLE sec.UserNotification (
     CONSTRAINT FK_sec_UN_UserId FOREIGN KEY (UserId) REFERENCES sec.ApplicationUser(UserId),
     INDEX IX_sec_UN_User_Unread NONCLUSTERED (UserId, ReadAt, CreatedAt DESC),
     INDEX IX_sec_UN_EntityId NONCLUSTERED (EntityId)
+);
+
+-- Model: none (v4.1). One row per lab-partner lookup of a requisition by mobile number (cln.usp_SearchLabOrdersByMobile):
+-- 5 lookups that find nothing within 15 minutes lock the user out of looking up. Replaces LabService.ClaimFailures,
+-- which lived in process memory. Append-only.
+CREATE TABLE sec.LabClaimAttempt (
+    Id BIGINT IDENTITY(1,1) NOT NULL,
+    LabClaimAttemptId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_sec_LCA_Id DEFAULT NEWSEQUENTIALID(),
+    HospitalId UNIQUEIDENTIFIER NOT NULL, UserId UNIQUEIDENTIFIER NOT NULL,
+    IsSuccess BIT NOT NULL,
+    CreatedAt DATETIMEOFFSET(3) NOT NULL CONSTRAINT DF_sec_LCA_CreatedAt DEFAULT SYSUTCDATETIME(),
+    CreatedBy UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_sec_LCA_CreatedBy DEFAULT '00000000-0000-0000-0000-000000000000',
+    ModifiedAt DATETIMEOFFSET(3) NULL, ModifiedBy UNIQUEIDENTIFIER NULL,
+    CONSTRAINT PK_sec_LCA PRIMARY KEY CLUSTERED (Id),
+    CONSTRAINT UQ_sec_LCA_Id UNIQUE NONCLUSTERED (LabClaimAttemptId),
+    CONSTRAINT FK_sec_LCA_HospitalId FOREIGN KEY (HospitalId) REFERENCES cfg.Hospital(HospitalId),
+    CONSTRAINT FK_sec_LCA_UserId FOREIGN KEY (UserId) REFERENCES sec.ApplicationUser(UserId),
+    INDEX IX_sec_LCA_User_CreatedAt NONCLUSTERED (UserId, CreatedAt DESC) INCLUDE (IsSuccess)
 );
 
 ALTER TABLE cfg.PhraseBank ADD CONSTRAINT FK_cfg_PB_DoctorId FOREIGN KEY (DoctorId) REFERENCES sec.ApplicationUser(UserId);
@@ -1807,7 +1825,7 @@ CREATE TABLE msg.MessageQueue (
 GO
 
 -- ============================================================
--- G. RESERVED — designed for planned features; NOT used by the application yet (5 tables)
+-- G. RESERVED — designed for planned features (5 tables; sec.LoginAttempt is in use since procedures v3.6)
 --    Nothing in Models/ or Services/ reads or writes these. Create them only when the feature is built.
 -- ============================================================
 
@@ -1859,7 +1877,8 @@ CREATE TABLE sec.UserSession (
     INDEX IX_sec_Ses_UserId NONCLUSTERED (UserId)
 );
 
--- Planned: brute-force lockout (today failed logins are only audited).
+-- In use since procedures v3.6: sign-in lockout (sec.usp_RecordLoginAttempt / sec.usp_GetUserCredential —
+-- 5 failures in 15 minutes). Kept in section G for numbering; no longer reserved.
 CREATE TABLE sec.LoginAttempt (  -- append-only
     Id BIGINT IDENTITY(1,1) NOT NULL,
     LoginAttemptId UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_sec_LA_Id DEFAULT NEWSEQUENTIALID(),

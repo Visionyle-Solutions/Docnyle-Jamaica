@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Web.UI.WebControls;
@@ -67,16 +68,14 @@ namespace OpdProject.templates.patients
             DayText = day == Today ? "today" : "on " + FmtDate(day);
             SubtitleText.Text = Server.HtmlEncode((ShowDoctor ? "All Doctors" : CurrentUser.FullName) + " · " + day.ToString("dddd", CultureInfo.InvariantCulture) + ", " + FmtDate(day));
 
-            var rows = ReportService.AppointmentList(HospitalId, ShowDoctor ? null : UserId, KindFilter.SelectedValue, day, day);
-            if (ShowDoctor && DoctorFilter.SelectedValue != "") rows = rows.Where(a => a.DoctorId == DoctorFilter.SelectedValue).ToList();
-
-            CountBooked.Text = rows.Count(a => a.Status == "BOOKED").ToString();
-            CountCheckedIn.Text = rows.Count(a => a.Status == "CHECKED_IN").ToString();
-            CountInConsult.Text = rows.Count(a => a.Status == "IN_CONSULT").ToString();
-            CountCompleted.Text = rows.Count(a => a.Status == "COMPLETED").ToString();
+            var dayRows = DayRows(day);
+            CountBooked.Text = dayRows.Count(a => a.Status == "BOOKED").ToString();
+            CountCheckedIn.Text = dayRows.Count(a => a.Status == "CHECKED_IN").ToString();
+            CountInConsult.Text = dayRows.Count(a => a.Status == "IN_CONSULT").ToString();
+            CountCompleted.Text = dayRows.Count(a => a.Status == "COMPLETED").ToString();
 
             /* counts above stay the period's totals; the status filter only narrows the list */
-            if (StatusFilter.SelectedValue != "") rows = rows.Where(a => a.Status == StatusFilter.SelectedValue).ToList();
+            var rows = ByStatus(dayRows);
 
             /* paging: PageSize 0 = all records; the page index is clamped so a shrinking list never shows an empty page */
             var size = PageSize;
@@ -93,6 +92,48 @@ namespace OpdProject.templates.patients
             PrevPageButton.Enabled = PageIndex > 0;
             NextPageButton.Enabled = PageIndex < pages - 1;
             foreach (var b in new[] { PrevPageButton, NextPageButton }) { if (b.Enabled) b.Style.Remove("opacity"); else b.Style["opacity"] = "0.45"; }
+        }
+
+        /// <summary>The day's appointments of the selected kind, narrowed to the doctor filter.</summary>
+        private List<AppointmentView> DayRows(DateTime day)
+        {
+            var rows = ReportService.AppointmentList(HospitalId, ShowDoctor ? null : UserId, KindFilter.SelectedValue, day, day);
+            if (ShowDoctor && DoctorFilter.SelectedValue != "") rows = rows.Where(a => a.DoctorId == DoctorFilter.SelectedValue).ToList();
+            return rows;
+        }
+
+        private List<AppointmentView> ByStatus(List<AppointmentView> rows)
+        {
+            return StatusFilter.SelectedValue == "" ? rows : rows.Where(a => a.Status == StatusFilter.SelectedValue).ToList();
+        }
+
+        /// <summary>Excel / PDF of every row matching the filters (all pages, not just the one shown).</summary>
+        protected void Export_Command(object sender, CommandEventArgs e)
+        {
+            var day = ParseDate(DateFilter.Text);
+            var rows = ByStatus(DayRows(day));
+            if (rows.Count == 0) { ToastWarning("No " + KindFilter.SelectedItem.Text.ToLower() + " to export"); BindQueue(); return; }
+
+            var table = new TableExport.Table
+            {
+                Title = "Appointment Summary",
+                Subtitle = string.Join(" · ", new[] {
+                    ShowDoctor ? DoctorFilter.SelectedItem.Text : CurrentUser.FullName,
+                    day.ToString("dddd", CultureInfo.InvariantCulture) + ", " + FmtDate(day),
+                    KindFilter.SelectedItem.Text, StatusFilter.SelectedItem.Text }),
+            };
+            table.Headers.AddRange(new[] { "S.No", "Time" });
+            if (ShowDoctor) table.Headers.AddRange(new[] { "Doctor", "Room" });
+            table.Headers.AddRange(new[] { "Patient Name", PatientIdLabel, "Type", "Status", "Status Time" });
+            var n = 0;
+            foreach (var a in rows)
+            {
+                var cells = new List<object> { ++n, EventTime(a) };
+                if (ShowDoctor) cells.AddRange(new object[] { a.DoctorName, a.DoctorRoom });
+                cells.AddRange(new object[] { a.PatientName, a.PatientMrn, AppointmentTypeName(a.Type), StatusLabel(a.Status), StatusTime(a) });
+                table.Rows.Add(cells.ToArray());
+            }
+            DownloadTable((string)e.CommandArgument, "appointment-summary-" + day.ToString("yyyy-MM-dd"), table);
         }
 
         protected int PageSize { get { int n; return int.TryParse(PageSizeFilter.SelectedValue, out n) ? n : 10; } }

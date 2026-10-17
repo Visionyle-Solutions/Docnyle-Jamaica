@@ -39,6 +39,27 @@
    procedures compile on SQL Server against schema v4.0 with no
    unresolved references.
 
+   Version 3.6 (2026-10-17) — closes API-SPECIFICATION.md Known Gaps #4–#7:
+   opd.usp_CreatePatient / opd.usp_UpdatePatient take every registration
+   field and RegisteredVia, and MRNs follow MRN_PREFIX / MRN_FORMAT /
+   MRN_SEQ (cfg.fn_FormatMrn, allocated under a lock); sec.usp_GetUserCredential
+   and sec.usp_RecordLoginAttempt support the salted password check and
+   lockout (sec.LoginAttempt is no longer reserved); opd.usp_CreateAppointment
+   re-checks the slot under the per-doctor-day lock; opd.usp_ListAvailableSlots
+   rejects slot lengths that would never end its loop. Error numbers 50205, 50206.
+
+   Version 3.5 (2026-10-17) — section 22 closes the Phase 4 gaps: 52
+   procedures and 2 helper functions for the features the Web Forms app
+   ran only in memory (duplicate check, medical event / family history
+   edits, social history, consent documents, CSV import, payer and lab
+   partner admin, single appointment / patient history / range lists and
+   the dashboard, reschedule, recurring booking, patient-portal booking,
+   in-progress consultation, medication history, outside medicines,
+   removing an order, editing a drug, service charge on/off, lab claim by
+   mobile, lab attachments, in-app notifications and the consultation form
+   designer). Needs schema.sql v4.1 (sec.LabClaimAttempt). Error numbers
+   50200–50249.
+
    Naming: {SqlSchema}.usp_{Verb}{Entity}{Qualifier}
    Verbs (14, per architecture doc §2): Get, List, Search, Check,
      Create, Save, Update, Delete, Submit, Confirm, Cancel,
@@ -123,6 +144,45 @@ AS BEGIN
     INNER JOIN cfg.Hospital h ON h.HospitalId = u.HospitalId AND h.IsActive = 1
     WHERE u.Email = @Email AND u.PasswordHash = @PasswordHash
       AND u.IsActive = 1;
+END;
+GO
+-- v3.6: salted password check (WCF-MIGRATION-GUIDE.md §7.5). A PBKDF2 hash cannot be recomputed from the
+-- password alone, so the service first reads the stored hash for the e-mail here, verifies the password in C#,
+-- then calls sec.usp_AuthenticateUser with that stored hash. PasswordHash format (written by the service):
+--   PBKDF2$SHA256${iterations}${salt base64}${hash base64}
+-- Returns nothing for an unknown e-mail, an inactive user or an inactive hospital — the service still runs one
+-- dummy PBKDF2 verification then, so response time does not reveal which e-mails exist.
+-- RecentFailures: failed sign-ins for this e-mail in the last 15 minutes since the last success
+-- (sec.LoginAttempt); 5 or more = locked out until LockedUntil.
+CREATE OR ALTER PROCEDURE sec.usp_GetUserCredential
+    @Email NVARCHAR(100)
+AS BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Since DATETIMEOFFSET(3) = DATEADD(MINUTE, -15, SYSUTCDATETIME());
+    DECLARE @LastSuccess DATETIMEOFFSET(3) = (SELECT MAX(CreatedAt) FROM sec.LoginAttempt WHERE EmailAttempted = @Email AND IsSuccess = 1);
+    DECLARE @Failures INT, @LastFailure DATETIMEOFFSET(3);
+    SELECT @Failures = COUNT(*), @LastFailure = MAX(CreatedAt)
+    FROM sec.LoginAttempt
+    WHERE EmailAttempted = @Email AND IsSuccess = 0 AND CreatedAt > @Since
+      AND (@LastSuccess IS NULL OR CreatedAt > @LastSuccess);
+
+    SELECT u.UserId, u.PasswordHash, @Failures AS RecentFailures,
+           CASE WHEN @Failures >= 5 THEN DATEADD(MINUTE, 15, @LastFailure) END AS LockedUntil
+    FROM sec.ApplicationUser u
+    INNER JOIN cfg.Hospital h ON h.HospitalId = u.HospitalId AND h.IsActive = 1
+    WHERE u.Email = @Email AND u.IsActive = 1;
+END;
+GO
+
+-- v3.6: one row per sign-in attempt (success or failure), for the lockout above. Called by the service after it
+-- has verified (or failed to verify) the password; the LOGIN / LOGIN_FAIL audit entry is written separately.
+CREATE OR ALTER PROCEDURE sec.usp_RecordLoginAttempt
+    @Email     NVARCHAR(100),
+    @IsSuccess BIT,
+    @IpAddress NVARCHAR(45) = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO sec.LoginAttempt (EmailAttempted, IsSuccess, IpAddress) VALUES (@Email, @IsSuccess, @IpAddress);
 END;
 GO
 
@@ -620,6 +680,29 @@ AS BEGIN
 END;
 GO
 
+-- MRN from the hospital's settings — HospitalService.FormatMrn. Tokens: {prefix} (MRN_PREFIX, default 'MRN'),
+-- {year}, {seq:N} (zero-padded to N, never truncated), {seq}. Default format '{prefix}-{seq:5}'.
+-- v3.6: {year} is the hospital's year (memory used the UTC year).
+CREATE OR ALTER FUNCTION cfg.fn_FormatMrn (@Format NVARCHAR(200), @Seq INT, @Prefix NVARCHAR(200), @Year INT)
+RETURNS NVARCHAR(400) AS
+BEGIN
+    DECLARE @s NVARCHAR(400) = COALESCE(NULLIF(@Format, N''), N'{prefix}-{seq:5}');
+    DECLARE @SeqText NVARCHAR(12) = CAST(@Seq AS NVARCHAR(12)), @i INT, @j INT, @n INT, @Token NVARCHAR(20);
+    SET @s = REPLACE(REPLACE(@s, N'{prefix}', COALESCE(NULLIF(@Prefix, N''), N'MRN')), N'{year}', CAST(@Year AS NVARCHAR(4)));
+    SET @i = CHARINDEX(N'{seq:', @s);
+    WHILE @i > 0
+    BEGIN
+        SET @j = CHARINDEX(N'}', @s, @i);
+        SET @n = CASE WHEN @j > @i + 5 THEN TRY_CAST(SUBSTRING(@s, @i + 5, @j - @i - 5) AS INT) END;
+        IF @n IS NULL OR @n < 0 OR @n > 12 BREAK;                       -- not a {seq:N} token: leave the rest as typed
+        SET @Token = SUBSTRING(@s, @i, @j - @i + 1);
+        SET @s = REPLACE(@s, @Token, CASE WHEN LEN(@SeqText) >= @n THEN @SeqText ELSE RIGHT(REPLICATE(N'0', @n) + @SeqText, @n) END);
+        SET @i = CHARINDEX(N'{seq:', @s);
+    END;
+    RETURN REPLACE(@s, N'{seq}', @SeqText);
+END;
+GO
+
 CREATE OR ALTER PROCEDURE opd.usp_CreatePatient
     @HospitalId     UNIQUEIDENTIFIER,
     @FullName       NVARCHAR(200),
@@ -633,23 +716,87 @@ CREATE OR ALTER PROCEDURE opd.usp_CreatePatient
     @InsurancePolicyNo NVARCHAR(50) = NULL,
     @EmergencyContactName NVARCHAR(200) = NULL,
     @EmergencyContactPhone NVARCHAR(20) = NULL,
-    @CreatedBy      UNIQUEIDENTIFIER = NULL
+    @CreatedBy      UNIQUEIDENTIFIER = NULL,
+    -- v3.6: the structured registration fields (Patient Registration form) and the channel
+    @RegisteredVia  NVARCHAR(20) = 'FRONT_DESK',   -- FRONT_DESK | PATIENT_PORTAL | CSV_IMPORT
+    @Prefix         NVARCHAR(10) = NULL,
+    @FirstName      NVARCHAR(60) = NULL,
+    @MiddleName     NVARCHAR(60) = NULL,
+    @LastName       NVARCHAR(60) = NULL,
+    @Trn            NVARCHAR(20) = NULL,
+    @CountryCode    NVARCHAR(5) = NULL,
+    @Mobile         NVARCHAR(16) = NULL,
+    @PreferredLanguage NVARCHAR(40) = NULL,
+    @AddrLine1      NVARCHAR(150) = NULL,
+    @AddrLine2      NVARCHAR(150) = NULL,
+    @City           NVARCHAR(80) = NULL,
+    @Region         NVARCHAR(80) = NULL,
+    @Country        NVARCHAR(60) = NULL,
+    @MaritalStatus  NVARCHAR(10) = NULL,
+    @ReferralSource NVARCHAR(80) = NULL,
+    @PreferredDoctorId UNIQUEIDENTIFIER = NULL,
+    @BloodGroup     NVARCHAR(5) = NULL,
+    @Occupation     NVARCHAR(80) = NULL
 AS BEGIN
     SET NOCOUNT ON;
+    SET XACT_ABORT ON;
     DECLARE @Out TABLE (PatientId UNIQUEIDENTIFIER, Mrn NVARCHAR(20), FullName NVARCHAR(200), CreatedAt DATETIMEOFFSET(3));
     -- AUDIT: caller must also invoke sec.usp_RecordAuditEntry (Action='CREATE', EntityType='Patient')
-    DECLARE @Mrn NVARCHAR(20);
-    SELECT @Mrn = 'MRN-' + RIGHT('000000' + CAST(ISNULL(MAX(Id), 0) + 1 AS NVARCHAR), 6)
-    FROM opd.Patient WHERE HospitalId = @HospitalId;
+
+    -- v3.6: the MRN follows the hospital's MRN_PREFIX / MRN_FORMAT and takes the next MRN_SEQ
+    -- (HospitalService.IssueMrnUnlocked). The counter row is locked for the transaction, so two
+    -- registrations never get the same number; a number already used (e.g. after the format changed) is skipped.
+    DECLARE @Seq INT, @Mrn NVARCHAR(400), @Tries INT = 0,
+            @Format NVARCHAR(200) = (SELECT [Value] FROM cfg.HospitalSetting WHERE HospitalId = @HospitalId AND SettingKey = 'MRN_FORMAT'),
+            @Prefix2 NVARCHAR(200) = (SELECT [Value] FROM cfg.HospitalSetting WHERE HospitalId = @HospitalId AND SettingKey = 'MRN_PREFIX'),
+            @Year INT = YEAR(cfg.fn_HospitalToday(@HospitalId));
+
+    BEGIN TRAN;
+    SELECT @Seq = ISNULL(TRY_CAST([Value] AS INT), 0)
+    FROM cfg.HospitalSetting WITH (UPDLOCK, HOLDLOCK)
+    WHERE HospitalId = @HospitalId AND SettingKey = 'MRN_SEQ';
+    IF @@ROWCOUNT = 0
+    BEGIN
+        SET @Seq = 0;
+        INSERT INTO cfg.HospitalSetting (HospitalId, SettingKey, [Value], CreatedBy)
+        VALUES (@HospitalId, 'MRN_SEQ', '0', ISNULL(@CreatedBy, '00000000-0000-0000-0000-000000000000'));
+    END;
+
+    WHILE 1 = 1
+    BEGIN
+        SET @Seq += 1; SET @Tries += 1;
+        SET @Mrn = cfg.fn_FormatMrn(@Format, @Seq, @Prefix2, @Year);
+        IF LEN(@Mrn) > 20
+        BEGIN   -- XACT_ABORT rolls back (no ROLLBACK here: the CSV import calls this inside INSERT … EXEC)
+            THROW 50205, N'The MRN format makes numbers longer than 20 characters. Shorten it in Settings → Formats.', 1;
+        END;
+        IF NOT EXISTS (SELECT 1 FROM opd.Patient WHERE HospitalId = @HospitalId AND Mrn = @Mrn) BREAK;
+        IF @Tries >= 1000
+        BEGIN   -- XACT_ABORT rolls back (no ROLLBACK here: the CSV import calls this inside INSERT … EXEC)
+            THROW 50206, N'No free MRN could be issued with the current format. Check Settings → Formats.', 1;
+        END;
+    END;
+
+    UPDATE cfg.HospitalSetting SET [Value] = CAST(@Seq AS NVARCHAR(200)), ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @CreatedBy
+    WHERE HospitalId = @HospitalId AND SettingKey = 'MRN_SEQ';
 
     INSERT INTO opd.Patient (HospitalId, Mrn, FullName, Gender, Dob, Phone, Email,
                              [Address], NationalHealthId, InsuranceProvider, InsurancePolicyNo,
-                             EmergencyContactName, EmergencyContactPhone, CreatedBy)
+                             EmergencyContactName, EmergencyContactPhone, RegisteredVia,
+                             Prefix, FirstName, MiddleName, LastName, Trn, CountryCode, Mobile, PreferredLanguage,
+                             AddrLine1, AddrLine2, City, Region, Country, MaritalStatus, ReferralSource, PreferredDoctorId,
+                             BloodGroup, Occupation, CreatedBy)
     OUTPUT inserted.PatientId, inserted.Mrn, inserted.FullName, inserted.CreatedAt
     INTO @Out
     VALUES (@HospitalId, @Mrn, @FullName, @Gender, @Dob, @Phone, @Email,
             @Address, @NationalHealthId, @InsuranceProvider, @InsurancePolicyNo,
-            @EmergencyContactName, @EmergencyContactPhone, ISNULL(@CreatedBy, '00000000-0000-0000-0000-000000000000'));
+            @EmergencyContactName, @EmergencyContactPhone, @RegisteredVia,
+            NULLIF(@Prefix, N''), NULLIF(@FirstName, N''), NULLIF(@MiddleName, N''), NULLIF(@LastName, N''), NULLIF(@Trn, N''),
+            NULLIF(@CountryCode, N''), NULLIF(@Mobile, N''), NULLIF(@PreferredLanguage, N''),
+            NULLIF(@AddrLine1, N''), NULLIF(@AddrLine2, N''), NULLIF(@City, N''), NULLIF(@Region, N''), NULLIF(@Country, N''),
+            NULLIF(@MaritalStatus, N''), NULLIF(@ReferralSource, N''), @PreferredDoctorId,
+            NULLIF(@BloodGroup, N''), NULLIF(@Occupation, N''), ISNULL(@CreatedBy, '00000000-0000-0000-0000-000000000000'));
+    COMMIT;
     SELECT PatientId, Mrn, FullName, CreatedAt FROM @Out;
 END;
 GO
@@ -665,23 +812,66 @@ CREATE OR ALTER PROCEDURE opd.usp_UpdatePatient
     @InsurancePolicyNo NVARCHAR(50) = NULL,
     @EmergencyContactName NVARCHAR(200) = NULL,
     @EmergencyContactPhone NVARCHAR(20) = NULL,
-    @ModifiedBy     UNIQUEIDENTIFIER = NULL
+    @ModifiedBy     UNIQUEIDENTIFIER = NULL,
+    -- v3.6: every field the registration form edits (PatientService.Update). NULL keeps the stored value;
+    -- '' clears an optional text field.
+    @Gender         NVARCHAR(10) = NULL,
+    @Dob            DATE = NULL,
+    @Prefix         NVARCHAR(10) = NULL,
+    @FirstName      NVARCHAR(60) = NULL,
+    @MiddleName     NVARCHAR(60) = NULL,
+    @LastName       NVARCHAR(60) = NULL,
+    @Trn            NVARCHAR(20) = NULL,
+    @CountryCode    NVARCHAR(5) = NULL,
+    @Mobile         NVARCHAR(16) = NULL,
+    @PreferredLanguage NVARCHAR(40) = NULL,
+    @AddrLine1      NVARCHAR(150) = NULL,
+    @AddrLine2      NVARCHAR(150) = NULL,
+    @City           NVARCHAR(80) = NULL,
+    @Region         NVARCHAR(80) = NULL,
+    @Country        NVARCHAR(60) = NULL,
+    @MaritalStatus  NVARCHAR(10) = NULL,
+    @ReferralSource NVARCHAR(80) = NULL,
+    @PreferredDoctorId UNIQUEIDENTIFIER = NULL,
+    @BloodGroup     NVARCHAR(5) = NULL,
+    @Occupation     NVARCHAR(80) = NULL
 AS BEGIN
     SET NOCOUNT ON;
     UPDATE opd.Patient SET
         FullName = ISNULL(@FullName, FullName),
         Phone = ISNULL(@Phone, Phone),
-        Email = ISNULL(@Email, Email),
-        [Address] = ISNULL(@Address, [Address]),
-        NationalHealthId = ISNULL(@NationalHealthId, NationalHealthId),
+        Email = CASE WHEN @Email IS NULL THEN Email ELSE NULLIF(@Email, N'') END,
+        [Address] = CASE WHEN @Address IS NULL THEN [Address] ELSE NULLIF(@Address, N'') END,
+        NationalHealthId = CASE WHEN @NationalHealthId IS NULL THEN NationalHealthId ELSE NULLIF(@NationalHealthId, N'') END,
         InsuranceProvider = ISNULL(@InsuranceProvider, InsuranceProvider),
         InsurancePolicyNo = ISNULL(@InsurancePolicyNo, InsurancePolicyNo),
-        EmergencyContactName = ISNULL(@EmergencyContactName, EmergencyContactName),
-        EmergencyContactPhone = ISNULL(@EmergencyContactPhone, EmergencyContactPhone),
+        EmergencyContactName = CASE WHEN @EmergencyContactName IS NULL THEN EmergencyContactName ELSE NULLIF(@EmergencyContactName, N'') END,
+        EmergencyContactPhone = CASE WHEN @EmergencyContactPhone IS NULL THEN EmergencyContactPhone ELSE NULLIF(@EmergencyContactPhone, N'') END,
+        Gender = ISNULL(@Gender, Gender),
+        Dob = ISNULL(@Dob, Dob),
+        Prefix = CASE WHEN @Prefix IS NULL THEN Prefix ELSE NULLIF(@Prefix, N'') END,
+        FirstName = CASE WHEN @FirstName IS NULL THEN FirstName ELSE NULLIF(@FirstName, N'') END,
+        MiddleName = CASE WHEN @MiddleName IS NULL THEN MiddleName ELSE NULLIF(@MiddleName, N'') END,
+        LastName = CASE WHEN @LastName IS NULL THEN LastName ELSE NULLIF(@LastName, N'') END,
+        Trn = CASE WHEN @Trn IS NULL THEN Trn ELSE NULLIF(@Trn, N'') END,
+        CountryCode = CASE WHEN @CountryCode IS NULL THEN CountryCode ELSE NULLIF(@CountryCode, N'') END,
+        Mobile = CASE WHEN @Mobile IS NULL THEN Mobile ELSE NULLIF(@Mobile, N'') END,
+        PreferredLanguage = CASE WHEN @PreferredLanguage IS NULL THEN PreferredLanguage ELSE NULLIF(@PreferredLanguage, N'') END,
+        AddrLine1 = CASE WHEN @AddrLine1 IS NULL THEN AddrLine1 ELSE NULLIF(@AddrLine1, N'') END,
+        AddrLine2 = CASE WHEN @AddrLine2 IS NULL THEN AddrLine2 ELSE NULLIF(@AddrLine2, N'') END,
+        City = CASE WHEN @City IS NULL THEN City ELSE NULLIF(@City, N'') END,
+        Region = CASE WHEN @Region IS NULL THEN Region ELSE NULLIF(@Region, N'') END,
+        Country = CASE WHEN @Country IS NULL THEN Country ELSE NULLIF(@Country, N'') END,
+        MaritalStatus = CASE WHEN @MaritalStatus IS NULL THEN MaritalStatus ELSE NULLIF(@MaritalStatus, N'') END,
+        ReferralSource = CASE WHEN @ReferralSource IS NULL THEN ReferralSource ELSE NULLIF(@ReferralSource, N'') END,
+        PreferredDoctorId = ISNULL(@PreferredDoctorId, PreferredDoctorId),
+        BloodGroup = CASE WHEN @BloodGroup IS NULL THEN BloodGroup ELSE NULLIF(@BloodGroup, N'') END,
+        Occupation = CASE WHEN @Occupation IS NULL THEN Occupation ELSE NULLIF(@Occupation, N'') END,
         ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
     WHERE PatientId = @PatientId AND IsActive = 1;
 
-    SELECT PatientId, Mrn, FullName, Phone, Email FROM opd.Patient WHERE PatientId = @PatientId;
+    -- v3.6: returns the full record (opd.usp_GetPatient's shape), as UpdatePatient's `Patient` result says
+    EXEC opd.usp_GetPatient @PatientId = @PatientId;
 END;
 GO
 
@@ -1128,6 +1318,9 @@ AS BEGIN
         WHERE d.n = ((DATEPART(WEEKDAY, @AppointmentDate) + @@DATEFIRST - 2) % 7) + 1);
     DECLARE @Slot INT = COALESCE(@DurationMinutes, TRY_CAST(cfg.fn_ResolveSetting(@HospitalId, @DoctorId, 'APPT_SLOT_MINS') AS INT), 15);
     DECLARE @Buffer INT = COALESCE(TRY_CAST(cfg.fn_ResolveSetting(@HospitalId, NULL, 'APPT_BUFFER_MINS') AS INT), 0);
+    -- v3.6: a slot of under 5 minutes or over 12 hours, or a negative buffer, would make the loop below never end
+    IF @Slot < 5 OR @Slot > 720 RETURN;
+    IF @Buffer < 0 SET @Buffer = 0;
 
     DECLARE @Grid TABLE (StartMin INT NOT NULL);
     DECLARE @WStart INT, @WEnd INT, @M INT;
@@ -1651,15 +1844,39 @@ CREATE OR ALTER PROCEDURE opd.usp_CreateAppointment
     @SlotEndLocal   DATETIME2(0),
     @Type           NVARCHAR(20) = 'NEW',      -- cfg.AppointmentType.Code
     @Notes          NVARCHAR(300) = NULL,
-    @CreatedBy      UNIQUEIDENTIFIER = NULL
+    @CreatedBy      UNIQUEIDENTIFIER = NULL,
+    @SkipSlotCheck  BIT = 0                    -- v3.6: 1 only from procedures that already checked under the lock
+-- v3.6: with @SkipSlotCheck = 0 the slot check runs INSERT … EXEC internally, so this procedure cannot itself be
+-- called inside INSERT … EXEC (SQL error 8164). DataRepository calls it through ADO.NET; the procedures here that
+-- capture its result (recurring booking) pass @SkipSlotCheck = 1 after checking under the lock themselves.
 AS BEGIN
     SET NOCOUNT ON;
+    SET XACT_ABORT ON;
     DECLARE @Out TABLE (AppointmentId UNIQUEIDENTIFIER, AppointmentDate DATE, SlotStart DATETIMEOFFSET(0), SlotEnd DATETIMEOFFSET(0),
                         TimeZoneId NVARCHAR(50), Status NVARCHAR(15));
     DECLARE @TimeZoneId NVARCHAR(50), @Tz NVARCHAR(100);
     SELECT @TimeZoneId = h.Timezone, @Tz = tz.WindowsTimeZoneId
     FROM cfg.Hospital h INNER JOIN cfg.TimeZone tz ON tz.TimeZoneId = h.Timezone WHERE h.HospitalId = @HospitalId;
     IF @Tz IS NULL THROW 50050, N'Hospital not found or has no timezone.', 1;
+
+    BEGIN TRAN;
+    -- v3.6: re-check that the slot is still one of the doctor's free slots, under the same per-doctor-day lock as
+    -- reschedule / recurring / portal booking, so two front-desk users cannot book the same time. Front-desk
+    -- bookings may be for a slot that has already started today (walk-ins), so past times are allowed here.
+    IF @SkipSlotCheck = 0
+    BEGIN
+        DECLARE @LockResult INT, @Free BIT,
+                @Lock NVARCHAR(255) = N'opd.Appointment:' + CONVERT(NVARCHAR(36), @DoctorId) + N':' + CONVERT(NVARCHAR(10), CAST(@SlotStartLocal AS DATE), 23);
+        EXEC @LockResult = sp_getapplock @Resource = @Lock, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;
+        IF @LockResult < 0 THROW 50220, N'The doctor''s schedule is being changed by someone else. Try again.', 1;
+        EXEC opd.usp_CheckSlotAvailable @HospitalId = @HospitalId, @DoctorId = @DoctorId,
+             @SlotStartLocal = @SlotStartLocal, @SlotEndLocal = @SlotEndLocal, @IsAvailable = @Free OUTPUT, @AllowPast = 1;
+        IF @Free = 0
+        BEGIN
+            ROLLBACK;
+            THROW 50214, N'That slot was just taken — choose another time.', 1;
+        END;
+    END;
 
     INSERT INTO opd.Appointment (HospitalId, PatientId, DoctorId, SlotStart, SlotEnd, TimeZoneId, AppointmentDate,
                                   [Type], Notes, CreatedBy)
@@ -1670,6 +1887,7 @@ AS BEGIN
             (@SlotEndLocal AT TIME ZONE @Tz) AT TIME ZONE 'UTC',
             @TimeZoneId, CAST(@SlotStartLocal AS DATE),
             @Type, @Notes, ISNULL(@CreatedBy, '00000000-0000-0000-0000-000000000000'));
+    COMMIT;
     SELECT o.AppointmentId, o.AppointmentDate, o.SlotStart, o.SlotEnd, o.TimeZoneId,
            o.SlotStart AT TIME ZONE @Tz AS SlotStartLocal, o.SlotEnd AT TIME ZONE @Tz AS SlotEndLocal, o.Status
     FROM @Out o;
@@ -4257,6 +4475,1394 @@ END;
 GO
 
 -- ============================================================
+-- 22. PHASE 4 GAP CLOSURE (v3.5)
+--     Procedures for the features the Web Forms app runs in memory but which had no
+--     procedure, so no WCF operation (API-SPECIFICATION.md Known Gaps #1 and
+--     API-INTEGRATION-GUIDE.md §8, gaps G-1 … G-17). Each one ports the matching
+--     Services/*Service.cs method; differences from the in-memory behavior are
+--     commented "v3.5:". Error numbers 50200–50249.
+-- ============================================================
+
+-- ---- 22.0 Helpers (internal) ----
+
+-- Digits only: "+1 (876) 555-0101" → "18765550101". NULL → ''.
+CREATE OR ALTER FUNCTION cfg.fn_DigitsOnly (@Value NVARCHAR(50))
+RETURNS NVARCHAR(50) WITH SCHEMABINDING AS
+BEGIN
+    DECLARE @Out NVARCHAR(50) = N'', @i INT = 1, @c NCHAR(1);
+    WHILE @i <= LEN(@Value)
+    BEGIN
+        SET @c = SUBSTRING(@Value, @i, 1);
+        IF @c LIKE N'[0-9]' SET @Out += @c;
+        SET @i += 1;
+    END;
+    RETURN @Out;
+END;
+GO
+
+-- The last 10 digits of a phone number — LabService.MobileKey. A key shorter than 10 is not a full mobile number.
+-- TODO (encryption): opd.Patient.Phone is marked "ENCRYPTION: DETERMINISTIC". Once Always Encrypted is applied the
+-- server cannot strip digits from it; store a computed MobileKey column (written by the service) before then.
+CREATE OR ALTER FUNCTION cfg.fn_MobileKey (@Phone NVARCHAR(50))
+RETURNS NVARCHAR(10) WITH SCHEMABINDING AS
+BEGIN
+    DECLARE @d NVARCHAR(50) = cfg.fn_DigitsOnly(@Phone);
+    RETURN CASE WHEN LEN(@d) > 10 THEN RIGHT(@d, 10) ELSE @d END;
+END;
+GO
+
+-- ---- 22.1 Patients — duplicate check (G-1) ----
+
+-- PatientService.FindDuplicate: the first other patient in the hospital with the same national health id, the same
+-- TRN (both compared without spaces / hyphens, case-insensitive), or the same mobile number (digits, ≥ 7, one may be
+-- the tail of the other, e.g. with / without country code). Empty result = no duplicate.
+CREATE OR ALTER PROCEDURE opd.usp_CheckDuplicatePatient
+    @HospitalId       UNIQUEIDENTIFIER,
+    @PatientId        UNIQUEIDENTIFIER = NULL,   -- the patient being edited; NULL on registration
+    @NationalHealthId NVARCHAR(50) = NULL,
+    @Trn              NVARCHAR(20) = NULL,
+    @Mobile           NVARCHAR(20) = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Hit TABLE (Field NVARCHAR(20), [Value] NVARCHAR(50), PatientId UNIQUEIDENTIFIER, Mrn NVARCHAR(20), FullName NVARCHAR(200));
+    DECLARE @Nhi NVARCHAR(50) = REPLACE(REPLACE(ISNULL(@NationalHealthId, N''), N' ', N''), N'-', N''),
+            @TrnN NVARCHAR(20) = REPLACE(REPLACE(ISNULL(@Trn, N''), N' ', N''), N'-', N''),
+            @Mob NVARCHAR(50) = cfg.fn_DigitsOnly(@Mobile);
+
+    IF LEN(@Nhi) > 0
+        INSERT INTO @Hit
+        SELECT TOP 1 N'NationalHealthId', @NationalHealthId, p.PatientId, p.Mrn, p.FullName
+        FROM opd.Patient p
+        WHERE p.HospitalId = @HospitalId AND (@PatientId IS NULL OR p.PatientId <> @PatientId)
+          AND REPLACE(REPLACE(p.NationalHealthId, N' ', N''), N'-', N'') = @Nhi
+        ORDER BY p.CreatedAt;
+
+    IF NOT EXISTS (SELECT 1 FROM @Hit) AND LEN(@TrnN) > 0
+        INSERT INTO @Hit
+        SELECT TOP 1 N'Trn', @Trn, p.PatientId, p.Mrn, p.FullName
+        FROM opd.Patient p
+        WHERE p.HospitalId = @HospitalId AND (@PatientId IS NULL OR p.PatientId <> @PatientId)
+          AND REPLACE(REPLACE(p.Trn, N' ', N''), N'-', N'') = @TrnN
+        ORDER BY p.CreatedAt;
+
+    IF NOT EXISTS (SELECT 1 FROM @Hit) AND LEN(@Mob) >= 7
+        INSERT INTO @Hit
+        SELECT TOP 1 N'Mobile', @Mobile, x.PatientId, x.Mrn, x.FullName
+        FROM (SELECT p.PatientId, p.Mrn, p.FullName, p.CreatedAt,
+                     cfg.fn_DigitsOnly(COALESCE(NULLIF(p.Mobile, N''), p.Phone)) AS d
+              FROM opd.Patient p
+              WHERE p.HospitalId = @HospitalId AND (@PatientId IS NULL OR p.PatientId <> @PatientId)) x
+        WHERE LEN(x.d) >= 7 AND (x.d = @Mob OR x.d LIKE N'%' + @Mob OR @Mob LIKE N'%' + x.d)
+        ORDER BY x.CreatedAt;
+
+    SELECT Field, [Value], PatientId, Mrn, FullName FROM @Hit;
+END;
+GO
+
+-- ---- 22.2 Patients — medical events and family history: get / update / delete (G-2) ----
+
+CREATE OR ALTER PROCEDURE opd.usp_GetPatientMedicalEvent
+    @HospitalId        UNIQUEIDENTIFIER,
+    @PatientMedEventId UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT PatientMedEventId, PatientId, EventId, EventName, EventMonth, EventYear, Notes, RecordedAt, RecordedByUserId
+    FROM opd.PatientMedicalEvent
+    WHERE PatientMedEventId = @PatientMedEventId AND HospitalId = @HospitalId AND IsActive = 1;
+END;
+GO
+
+-- PatientService.SaveMedicalEventRecord (existing record). EventId is re-resolved from the name against the hospital's
+-- cfg.MedicalEventType list, as in memory; a name not on the list is kept as free text (EventId NULL).
+CREATE OR ALTER PROCEDURE opd.usp_UpdatePatientMedicalEvent
+    @HospitalId        UNIQUEIDENTIFIER,
+    @PatientMedEventId UNIQUEIDENTIFIER,
+    @EventName         NVARCHAR(100),
+    @EventMonth        INT = NULL,
+    @EventYear         INT = NULL,
+    @Notes             NVARCHAR(500) = NULL,
+    @ModifiedBy        UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    SET @EventName = LTRIM(RTRIM(@EventName));
+    IF ISNULL(@EventName, N'') = N'' THROW 50200, N'Enter the surgery or event name.', 1;
+
+    DECLARE @EventId UNIQUEIDENTIFIER = (SELECT TOP 1 EventId FROM cfg.MedicalEventType
+                                         WHERE HospitalId = @HospitalId AND EventName = @EventName AND IsActive = 1);
+    UPDATE opd.PatientMedicalEvent
+    SET EventId = @EventId, EventName = @EventName, EventMonth = @EventMonth, EventYear = @EventYear, Notes = @Notes,
+        ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+    WHERE PatientMedEventId = @PatientMedEventId AND HospitalId = @HospitalId AND IsActive = 1;
+
+    -- empty result = not found (the service raises NotFound)
+    EXEC opd.usp_GetPatientMedicalEvent @HospitalId = @HospitalId, @PatientMedEventId = @PatientMedEventId;
+END;
+GO
+
+-- v3.5: soft delete (IsActive = 0) — memory removes the row, the table keeps history.
+CREATE OR ALTER PROCEDURE opd.usp_DeletePatientMedicalEvent
+    @HospitalId        UNIQUEIDENTIFIER,
+    @PatientMedEventId UNIQUEIDENTIFIER,
+    @ModifiedBy        UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    UPDATE opd.PatientMedicalEvent
+    SET IsActive = 0, ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+    WHERE PatientMedEventId = @PatientMedEventId AND HospitalId = @HospitalId AND IsActive = 1;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE opd.usp_GetPatientFamilyHistory
+    @HospitalId      UNIQUEIDENTIFIER,
+    @FamilyHistoryId UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT FamilyHistoryId, PatientId, RelationshipType, ConditionName, Notes, RecordedAt
+    FROM opd.PatientFamilyHistory
+    WHERE FamilyHistoryId = @FamilyHistoryId AND HospitalId = @HospitalId AND IsActive = 1;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE opd.usp_UpdatePatientFamilyHistory
+    @HospitalId       UNIQUEIDENTIFIER,
+    @FamilyHistoryId  UNIQUEIDENTIFIER,
+    @RelationshipType NVARCHAR(30),
+    @ConditionName    NVARCHAR(100),
+    @Notes            NVARCHAR(300) = NULL,
+    @ModifiedBy       UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    IF ISNULL(LTRIM(RTRIM(@RelationshipType)), N'') = N'' OR ISNULL(LTRIM(RTRIM(@ConditionName)), N'') = N''
+        THROW 50201, N'Choose the relative and enter the condition.', 1;
+
+    UPDATE opd.PatientFamilyHistory
+    SET RelationshipType = @RelationshipType, ConditionName = LTRIM(RTRIM(@ConditionName)), Notes = @Notes,
+        ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+    WHERE FamilyHistoryId = @FamilyHistoryId AND HospitalId = @HospitalId AND IsActive = 1;
+
+    EXEC opd.usp_GetPatientFamilyHistory @HospitalId = @HospitalId, @FamilyHistoryId = @FamilyHistoryId;
+END;
+GO
+
+-- v3.5: soft delete, as opd.usp_DeletePatientMedicalEvent.
+CREATE OR ALTER PROCEDURE opd.usp_DeletePatientFamilyHistory
+    @HospitalId      UNIQUEIDENTIFIER,
+    @FamilyHistoryId UNIQUEIDENTIFIER,
+    @ModifiedBy      UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    UPDATE opd.PatientFamilyHistory
+    SET IsActive = 0, ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+    WHERE FamilyHistoryId = @FamilyHistoryId AND HospitalId = @HospitalId AND IsActive = 1;
+END;
+GO
+
+-- ---- 22.3 Patients — social history (G-3) ----
+
+-- PatientService.UpdateSocialHistory: replaces all six values (NULL clears one), as the Family & Social tab saves them together.
+CREATE OR ALTER PROCEDURE opd.usp_UpdatePatientSocialHistory
+    @HospitalId       UNIQUEIDENTIFIER,
+    @PatientId        UNIQUEIDENTIFIER,
+    @SmokingStatus    NVARCHAR(10) = NULL,    -- NEVER | FORMER | CURRENT
+    @SmokingPackYears INT = NULL,
+    @AlcoholUse       NVARCHAR(12) = NULL,    -- NONE | OCCASIONAL | REGULAR
+    @Occupation       NVARCHAR(80) = NULL,
+    @PhysicalActivity NVARCHAR(12) = NULL,    -- SEDENTARY | LIGHT | MODERATE | ACTIVE
+    @Diet             NVARCHAR(16) = NULL,    -- VEGETARIAN | EGGETARIAN | NON_VEGETARIAN | VEGAN
+    @ModifiedBy       UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    UPDATE opd.Patient
+    SET SmokingStatus = NULLIF(@SmokingStatus, N''), SmokingPackYears = @SmokingPackYears,
+        AlcoholUse = NULLIF(@AlcoholUse, N''), Occupation = NULLIF(LTRIM(RTRIM(@Occupation)), N''),
+        PhysicalActivity = NULLIF(@PhysicalActivity, N''), Diet = NULLIF(@Diet, N''),
+        ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+    WHERE PatientId = @PatientId AND HospitalId = @HospitalId;
+
+    SELECT PatientId, SmokingStatus, SmokingPackYears, AlcoholUse, Occupation, PhysicalActivity, Diet
+    FROM opd.Patient WHERE PatientId = @PatientId AND HospitalId = @HospitalId;
+END;
+GO
+
+-- ---- 22.4 Patients — consent documents (G-4, metadata; the file itself is in the service's file store) ----
+
+CREATE OR ALTER PROCEDURE opd.usp_ListPatientConsentDocuments
+    @HospitalId UNIQUEIDENTIFIER,
+    @PatientId  UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT ConsentDocumentId, PatientId, FormVersion, FileName, ContentType, SizeBytes, StoredFileName,
+           UploadedByUserId, UploadedAt
+    FROM opd.PatientConsentDocument
+    WHERE PatientId = @PatientId AND HospitalId = @HospitalId AND IsActive = 1
+    ORDER BY UploadedAt DESC;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE opd.usp_GetPatientConsentDocument
+    @HospitalId        UNIQUEIDENTIFIER,
+    @ConsentDocumentId UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT ConsentDocumentId, PatientId, FormVersion, FileName, ContentType, SizeBytes, StoredFileName,
+           UploadedByUserId, UploadedAt
+    FROM opd.PatientConsentDocument
+    WHERE ConsentDocumentId = @ConsentDocumentId AND HospitalId = @HospitalId AND IsActive = 1;
+END;
+GO
+
+-- PatientService.SaveConsentDocument. The service writes the file first (StoredFileName = new GUID "N" + extension)
+-- and records it here; if this fails it deletes the file.
+CREATE OR ALTER PROCEDURE opd.usp_CreatePatientConsentDocument
+    @HospitalId       UNIQUEIDENTIFIER,
+    @PatientId        UNIQUEIDENTIFIER,
+    @FormVersion      NVARCHAR(20) = NULL,
+    @FileName         NVARCHAR(255),
+    @ContentType      NVARCHAR(100),
+    @SizeBytes        BIGINT,
+    @StoredFileName   NVARCHAR(100),
+    @UploadedByUserId UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM opd.Patient WHERE PatientId = @PatientId AND HospitalId = @HospitalId)
+        THROW 50202, N'Patient not found.', 1;
+
+    DECLARE @Out TABLE (ConsentDocumentId UNIQUEIDENTIFIER, PatientId UNIQUEIDENTIFIER, FormVersion NVARCHAR(20), FileName NVARCHAR(255),
+                        ContentType NVARCHAR(100), SizeBytes BIGINT, StoredFileName NVARCHAR(100), UploadedByUserId UNIQUEIDENTIFIER,
+                        UploadedAt DATETIMEOFFSET(3));
+    INSERT INTO opd.PatientConsentDocument (HospitalId, PatientId, FormVersion, FileName, ContentType, SizeBytes, StoredFileName,
+                                            UploadedByUserId, CreatedBy)
+    OUTPUT inserted.ConsentDocumentId, inserted.PatientId, inserted.FormVersion, inserted.FileName, inserted.ContentType,
+           inserted.SizeBytes, inserted.StoredFileName, inserted.UploadedByUserId, inserted.UploadedAt
+    INTO @Out
+    VALUES (@HospitalId, @PatientId, @FormVersion, @FileName, @ContentType, @SizeBytes, @StoredFileName,
+            @UploadedByUserId, ISNULL(@UploadedByUserId, '00000000-0000-0000-0000-000000000000'));
+    SELECT ConsentDocumentId, PatientId, FormVersion, FileName, ContentType, SizeBytes, StoredFileName, UploadedByUserId, UploadedAt FROM @Out;
+END;
+GO
+
+-- ---- 22.5 Patients — CSV import (G-15) ----
+
+-- ExportService.ImportPatients: creates every row through opd.usp_CreatePatient (same MRN rule, RegisteredVia
+-- CSV_IMPORT), all or nothing.
+-- @PatientsJson: [{"FullName","Gender","Dob":"yyyy-MM-dd","Phone","Email","Address","NationalHealthId"}, …].
+-- v3.5: rows are validated here as well as by the page (ExportService.PatientRequiredColumns); the first bad row
+-- (1-based) is named in error 50204.
+CREATE OR ALTER PROCEDURE opd.usp_CreatePatientsBatch
+    @HospitalId   UNIQUEIDENTIFIER,
+    @PatientsJson NVARCHAR(MAX),
+    @CreatedBy    UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF ISJSON(@PatientsJson) <> 1 THROW 50203, N'The import file could not be read.', 1;
+
+    DECLARE @Rows TABLE (RowNo INT PRIMARY KEY, FullName NVARCHAR(200), Gender NVARCHAR(10), DobText NVARCHAR(30), Dob DATE,
+                         Phone NVARCHAR(20), Email NVARCHAR(100), [Address] NVARCHAR(500), NationalHealthId NVARCHAR(50));
+    INSERT INTO @Rows
+    SELECT CAST(j.[key] AS INT) + 1,
+           LTRIM(RTRIM(JSON_VALUE(j.value, '$.FullName'))), UPPER(LTRIM(RTRIM(JSON_VALUE(j.value, '$.Gender')))),
+           JSON_VALUE(j.value, '$.Dob'), TRY_CONVERT(DATE, JSON_VALUE(j.value, '$.Dob'), 23),
+           LTRIM(RTRIM(JSON_VALUE(j.value, '$.Phone'))), NULLIF(LTRIM(RTRIM(JSON_VALUE(j.value, '$.Email'))), N''),
+           NULLIF(LTRIM(RTRIM(JSON_VALUE(j.value, '$.Address'))), N''), NULLIF(LTRIM(RTRIM(JSON_VALUE(j.value, '$.NationalHealthId'))), N'')
+    FROM OPENJSON(@PatientsJson) j;
+
+    DECLARE @Bad INT = (SELECT MIN(RowNo) FROM @Rows
+                        WHERE ISNULL(FullName, N'') = N'' OR Gender NOT IN (N'MALE', N'FEMALE', N'OTHER') OR Gender IS NULL
+                           OR Dob IS NULL OR ISNULL(Phone, N'') = N'');
+    IF @Bad IS NOT NULL
+    BEGIN
+        DECLARE @Msg NVARCHAR(200) = N'Row ' + CAST(@Bad AS NVARCHAR(10)) + N': FullName, Gender (MALE/FEMALE/OTHER), Dob (yyyy-MM-dd) and Phone are required.';
+        THROW 50204, @Msg, 1;
+    END;
+
+    DECLARE @Created TABLE (PatientId UNIQUEIDENTIFIER, Mrn NVARCHAR(20), FullName NVARCHAR(200), CreatedAt DATETIMEOFFSET(3));
+    DECLARE @RowNo INT, @FullName NVARCHAR(200), @Gender NVARCHAR(10), @Dob DATE, @Phone NVARCHAR(20), @Email NVARCHAR(100),
+            @Address NVARCHAR(500), @Nhi NVARCHAR(50);
+
+    BEGIN TRAN;
+    DECLARE r CURSOR LOCAL FAST_FORWARD FOR
+        SELECT RowNo, FullName, Gender, Dob, Phone, Email, [Address], NationalHealthId FROM @Rows ORDER BY RowNo;
+    OPEN r; FETCH NEXT FROM r INTO @RowNo, @FullName, @Gender, @Dob, @Phone, @Email, @Address, @Nhi;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        INSERT INTO @Created
+        EXEC opd.usp_CreatePatient @HospitalId = @HospitalId, @FullName = @FullName, @Gender = @Gender, @Dob = @Dob,
+             @Phone = @Phone, @Email = @Email, @Address = @Address, @NationalHealthId = @Nhi, @CreatedBy = @CreatedBy,
+             @RegisteredVia = N'CSV_IMPORT';
+        FETCH NEXT FROM r INTO @RowNo, @FullName, @Gender, @Dob, @Phone, @Email, @Address, @Nhi;
+    END;
+    CLOSE r; DEALLOCATE r;
+
+    COMMIT;
+
+    -- AUDIT: the service records one IMPORT entry (EntityType = 'Patient', Details = row count)
+    SELECT PatientId, Mrn, FullName, CreatedAt FROM @Created;
+END;
+GO
+
+-- ---- 22.6 Payers (insurers / government schemes) admin (G-5) ----
+-- cfg.Payer is per country, not per hospital: every hospital in a country shares its payer list. The operations are
+-- ADMIN-only; a hospital admin's change is visible to other hospitals in the same country (as in memory).
+
+CREATE OR ALTER PROCEDURE cfg.usp_ListAllPayers
+    @Country  NVARCHAR(5),
+    @Category NVARCHAR(15) = NULL      -- PRIVATE | GOVT_SCHEME | NULL = both
+AS BEGIN
+    SET NOCOUNT ON;
+    -- Unlike cfg.usp_ListPayers, includes inactive payers (Settings → Payers shows and re-enables them)
+    SELECT PayerId, Name, Category, Country, IsActive
+    FROM cfg.Payer
+    WHERE Country = @Country AND (@Category IS NULL OR Category = @Category)
+    ORDER BY Category, Name;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE cfg.usp_GetPayer
+    @PayerId UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT PayerId, Name, Category, Country, IsActive FROM cfg.Payer WHERE PayerId = @PayerId;
+END;
+GO
+
+-- PatientService.AddPayer: whitespace collapsed; an inactive payer with the same name is re-enabled; an active one is
+-- a duplicate (50210 — memory returned null). v3.5: UQ_cfg_Payer_Country_Name is per country regardless of category,
+-- so the same name under the other category is rejected (50211) instead of failing on the constraint.
+CREATE OR ALTER PROCEDURE cfg.usp_SavePayer
+    @Name      NVARCHAR(150),
+    @Category  NVARCHAR(15),
+    @Country   NVARCHAR(5),
+    @CreatedBy UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    SET @Name = LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(ISNULL(@Name, N''), NCHAR(9), N' '), NCHAR(13), N' '), NCHAR(10), N' ')));
+    WHILE CHARINDEX(N'  ', @Name) > 0 SET @Name = REPLACE(@Name, N'  ', N' ');
+    IF @Name = N'' OR @Category NOT IN (N'PRIVATE', N'GOVT_SCHEME') OR ISNULL(@Country, N'') = N''
+        THROW 50212, N'Enter the payer name and choose private insurance or government scheme.', 1;
+
+    DECLARE @PayerId UNIQUEIDENTIFIER, @ExistingCategory NVARCHAR(15), @IsActive BIT;
+    SELECT @PayerId = PayerId, @ExistingCategory = Category, @IsActive = IsActive
+    FROM cfg.Payer WHERE Country = @Country AND Name = @Name;
+
+    IF @PayerId IS NOT NULL AND @ExistingCategory <> @Category
+        THROW 50211, N'A payer with this name already exists under the other category.', 1;
+    IF @PayerId IS NOT NULL AND @IsActive = 1
+        THROW 50210, N'This payer is already on the list.', 1;
+
+    IF @PayerId IS NOT NULL
+        UPDATE cfg.Payer SET IsActive = 1, ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @CreatedBy WHERE PayerId = @PayerId;
+    ELSE
+    BEGIN
+        DECLARE @Out TABLE (PayerId UNIQUEIDENTIFIER);
+        INSERT INTO cfg.Payer (Name, Category, Country, CreatedBy)
+        OUTPUT inserted.PayerId INTO @Out
+        VALUES (@Name, @Category, @Country, ISNULL(@CreatedBy, '00000000-0000-0000-0000-000000000000'));
+        SELECT @PayerId = PayerId FROM @Out;
+    END;
+
+    EXEC cfg.usp_GetPayer @PayerId = @PayerId;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE cfg.usp_UpdatePayerActive
+    @PayerId    UNIQUEIDENTIFIER,
+    @IsActive   BIT = NULL,                 -- NULL toggles (PatientService.TogglePayer)
+    @ModifiedBy UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    UPDATE cfg.Payer
+    SET IsActive = COALESCE(@IsActive, CASE WHEN IsActive = 1 THEN 0 ELSE 1 END),
+        ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+    WHERE PayerId = @PayerId;
+    EXEC cfg.usp_GetPayer @PayerId = @PayerId;
+END;
+GO
+
+-- ---- 22.7 Scheduling — single appointment, patient history, range lists, dashboard (G-7, G-14) ----
+
+CREATE OR ALTER PROCEDURE opd.usp_GetAppointment
+    @HospitalId    UNIQUEIDENTIFIER,
+    @AppointmentId UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT a.AppointmentId, a.PatientId, p.FullName AS PatientName, p.Mrn, a.DoctorId, d.FullName AS DoctorName, d.Room AS DoctorRoom,
+           a.SlotStart, a.SlotEnd, a.TimeZoneId, a.AppointmentDate,
+           a.SlotStart AT TIME ZONE tz.WindowsTimeZoneId AS SlotStartLocal,
+           a.SlotEnd AT TIME ZONE tz.WindowsTimeZoneId AS SlotEndLocal,
+           a.[Type], a.Status, a.Notes, a.CheckedInAt, a.ConsultStartedAt, a.CompletedAt, a.CreatedAt
+    FROM opd.Appointment a
+    INNER JOIN opd.Patient p ON p.PatientId = a.PatientId
+    INNER JOIN sec.ApplicationUser d ON d.UserId = a.DoctorId
+    INNER JOIN cfg.TimeZone tz ON tz.TimeZoneId = a.TimeZoneId
+    WHERE a.AppointmentId = @AppointmentId AND a.HospitalId = @HospitalId AND a.IsActive = 1;
+END;
+GO
+
+-- SchedulingService.ListAppointmentsForPatient: every appointment of the patient, newest first (all statuses).
+CREATE OR ALTER PROCEDURE opd.usp_ListAppointmentsForPatient
+    @HospitalId UNIQUEIDENTIFIER,
+    @PatientId  UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT a.AppointmentId, a.PatientId, a.DoctorId, d.FullName AS DoctorName,
+           a.SlotStart, a.SlotEnd, a.TimeZoneId, a.AppointmentDate,
+           a.SlotStart AT TIME ZONE tz.WindowsTimeZoneId AS SlotStartLocal,
+           a.SlotEnd AT TIME ZONE tz.WindowsTimeZoneId AS SlotEndLocal,
+           a.[Type], a.Status, a.Notes
+    FROM opd.Appointment a
+    INNER JOIN sec.ApplicationUser d ON d.UserId = a.DoctorId
+    INNER JOIN cfg.TimeZone tz ON tz.TimeZoneId = a.TimeZoneId
+    WHERE a.PatientId = @PatientId AND a.HospitalId = @HospitalId AND a.IsActive = 1
+    ORDER BY a.SlotStart DESC;
+END;
+GO
+
+-- ReportService.AppointmentList / DashboardList: appointments with AppointmentDate in [@FromDate, @ToDate] (hospital-local
+-- dates, inclusive). @Kind as ReportService.MatchesKind: 'consultations' = seen (CHECKED_IN / IN_CONSULT / COMPLETED),
+-- 'appointments' = not cancelled, 'cancelled' = cancelled, NULL = all. @Status narrows further (dashboard drill-down).
+CREATE OR ALTER PROCEDURE opd.usp_ListAppointmentsForRange
+    @HospitalId UNIQUEIDENTIFIER,
+    @FromDate   DATE,
+    @ToDate     DATE,
+    @DoctorId   UNIQUEIDENTIFIER = NULL,    -- NULL = every doctor (front desk); a doctor-only user passes their own id
+    @Kind       NVARCHAR(15) = NULL,
+    @Status     NVARCHAR(15) = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT a.AppointmentId, a.PatientId, p.FullName AS PatientName, p.Mrn, a.DoctorId, d.FullName AS DoctorName, d.Room AS DoctorRoom,
+           a.SlotStart, a.SlotEnd, a.TimeZoneId, a.AppointmentDate,
+           a.SlotStart AT TIME ZONE tz.WindowsTimeZoneId AS SlotStartLocal,
+           a.SlotEnd AT TIME ZONE tz.WindowsTimeZoneId AS SlotEndLocal,
+           a.[Type], a.Status, a.Notes
+    FROM opd.Appointment a
+    INNER JOIN opd.Patient p ON p.PatientId = a.PatientId
+    INNER JOIN sec.ApplicationUser d ON d.UserId = a.DoctorId
+    INNER JOIN cfg.TimeZone tz ON tz.TimeZoneId = a.TimeZoneId
+    WHERE a.HospitalId = @HospitalId AND a.IsActive = 1
+      AND a.AppointmentDate BETWEEN @FromDate AND @ToDate
+      AND (@DoctorId IS NULL OR a.DoctorId = @DoctorId)
+      AND (@Kind IS NULL
+           OR (@Kind = N'consultations' AND a.Status IN (N'CHECKED_IN', N'IN_CONSULT', N'COMPLETED'))
+           OR (@Kind = N'appointments'  AND a.Status <> N'CANCELLED')
+           OR (@Kind = N'cancelled'     AND a.Status = N'CANCELLED'))
+      AND (@Status IS NULL OR a.Status = @Status)
+    ORDER BY a.SlotStart;
+END;
+GO
+
+-- ReportService.Dashboard: counts for today / this week (Monday–Sunday) / this calendar month per kind, plus today's
+-- non-cancelled appointments by status. Result set 1: Kind, TodayCount, WeekCount, MonthCount (3 rows).
+-- Result set 2: Status, [Count], most first.
+CREATE OR ALTER PROCEDURE opd.usp_GetAppointmentDashboard
+    @HospitalId UNIQUEIDENTIFIER,
+    @DoctorId   UNIQUEIDENTIFIER = NULL,
+    @Today      DATE = NULL                 -- NULL = the hospital's today
+AS BEGIN
+    SET NOCOUNT ON;
+    SET @Today = ISNULL(@Today, cfg.fn_HospitalToday(@HospitalId));
+    DECLARE @WeekFrom DATE = DATEADD(DAY, -((DATEPART(WEEKDAY, @Today) + @@DATEFIRST - 2) % 7), @Today);
+    DECLARE @WeekTo DATE = DATEADD(DAY, 6, @WeekFrom);
+    DECLARE @MonthFrom DATE = DATEFROMPARTS(YEAR(@Today), MONTH(@Today), 1);
+    DECLARE @MonthTo DATE = EOMONTH(@Today);
+    DECLARE @From DATE = CASE WHEN @WeekFrom < @MonthFrom THEN @WeekFrom ELSE @MonthFrom END;
+    DECLARE @To DATE = CASE WHEN @WeekTo > @MonthTo THEN @WeekTo ELSE @MonthTo END;
+
+    ;WITH A AS (
+        SELECT a.AppointmentDate, a.Status
+        FROM opd.Appointment a
+        WHERE a.HospitalId = @HospitalId AND a.IsActive = 1 AND a.AppointmentDate BETWEEN @From AND @To
+          AND (@DoctorId IS NULL OR a.DoctorId = @DoctorId)
+    ), K AS (
+        SELECT k.Kind, A.AppointmentDate
+        FROM A
+        CROSS APPLY (VALUES
+            (CASE WHEN A.Status IN (N'CHECKED_IN', N'IN_CONSULT', N'COMPLETED') THEN N'consultations' END),
+            (CASE WHEN A.Status <> N'CANCELLED' THEN N'appointments' END),
+            (CASE WHEN A.Status = N'CANCELLED' THEN N'cancelled' END)) k(Kind)
+        WHERE k.Kind IS NOT NULL
+    )
+    SELECT kinds.Kind,
+           COUNT(CASE WHEN K.AppointmentDate = @Today THEN 1 END) AS TodayCount,
+           COUNT(CASE WHEN K.AppointmentDate BETWEEN @WeekFrom AND @WeekTo THEN 1 END) AS WeekCount,
+           COUNT(CASE WHEN K.AppointmentDate BETWEEN @MonthFrom AND @MonthTo THEN 1 END) AS MonthCount
+    FROM (VALUES (N'consultations'), (N'appointments'), (N'cancelled')) kinds(Kind)
+    LEFT JOIN K ON K.Kind = kinds.Kind
+    GROUP BY kinds.Kind;
+
+    SELECT a.Status, COUNT(*) AS [Count]
+    FROM opd.Appointment a
+    WHERE a.HospitalId = @HospitalId AND a.IsActive = 1 AND a.AppointmentDate = @Today AND a.Status <> N'CANCELLED'
+      AND (@DoctorId IS NULL OR a.DoctorId = @DoctorId)
+    GROUP BY a.Status
+    ORDER BY COUNT(*) DESC;
+END;
+GO
+
+-- ---- 22.8 Scheduling — reschedule, recurring and patient-portal booking (G-8, G-12) ----
+
+-- INTERNAL: is this exact slot one of opd.usp_ListAvailableSlots' free slots for the doctor, and still in the future on
+-- the clinic's clock? Called (EXEC, not INSERT … EXEC) by the booking procedures below, inside their transaction after
+-- they take the doctor-day application lock, so two bookings cannot both see the slot free.
+-- v3.6: opd.usp_CreateAppointment (front desk) uses it too, with @AllowPast = 1.
+CREATE OR ALTER PROCEDURE opd.usp_CheckSlotAvailable
+    @HospitalId     UNIQUEIDENTIFIER,
+    @DoctorId       UNIQUEIDENTIFIER,
+    @SlotStartLocal DATETIME2(0),
+    @SlotEndLocal   DATETIME2(0),
+    @IsAvailable    BIT OUTPUT,
+    @AllowPast      BIT = 0                    -- v3.6: 1 for front-desk bookings (opd.usp_CreateAppointment)
+AS BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Slots TABLE (SlotStart NVARCHAR(19), SlotEnd NVARCHAR(19), IsBooked BIT, TimeZoneId NVARCHAR(50));
+    DECLARE @Date DATE = CAST(@SlotStartLocal AS DATE),
+            @Minutes INT = DATEDIFF(MINUTE, @SlotStartLocal, @SlotEndLocal),
+            @NowLocal DATETIME2(0) = CAST(SYSDATETIMEOFFSET() AT TIME ZONE cfg.fn_HospitalWindowsTz(@HospitalId) AS DATETIME2(0));
+    -- A slot must be 5 minutes to 12 hours long and end on the day it starts. Checked before calling
+    -- opd.usp_ListAvailableSlots, whose slot loop never ends for a duration ≤ 0.
+    IF @Minutes < 5 OR @Minutes > 720 OR CAST(@SlotEndLocal AS DATE) <> @Date OR (@AllowPast = 0 AND @SlotStartLocal <= @NowLocal)
+    BEGIN
+        SET @IsAvailable = 0;
+        RETURN;
+    END;
+    INSERT INTO @Slots
+    EXEC opd.usp_ListAvailableSlots @DoctorId = @DoctorId, @HospitalId = @HospitalId, @AppointmentDate = @Date, @DurationMinutes = @Minutes;
+    SET @IsAvailable = CASE WHEN EXISTS (SELECT 1 FROM @Slots WHERE IsBooked = 0 AND SlotStart = CONVERT(NVARCHAR(19), @SlotStartLocal, 126))
+                            THEN 1 ELSE 0 END;
+END;
+GO
+
+-- SchedulingService.Reschedule: a BOOKED appointment moves to another free slot of the same doctor and the same length.
+-- As in memory, the original is CANCELLED and a new appointment is created (Notes 'Rescheduled'), in one transaction.
+-- Returns the new appointment (opd.usp_CreateAppointment's shape).
+CREATE OR ALTER PROCEDURE opd.usp_UpdateAppointmentSlot
+    @HospitalId        UNIQUEIDENTIFIER,
+    @AppointmentId     UNIQUEIDENTIFIER,
+    @NewSlotStartLocal DATETIME2(0),       -- a SlotStart from opd.usp_ListAvailableSlots, unchanged
+    @ModifiedBy        UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @PatientId UNIQUEIDENTIFIER, @DoctorId UNIQUEIDENTIFIER, @Type NVARCHAR(20), @Status NVARCHAR(15), @Minutes INT;
+    SELECT @PatientId = PatientId, @DoctorId = DoctorId, @Type = [Type], @Status = Status,
+           @Minutes = DATEDIFF(MINUTE, SlotStart, SlotEnd)
+    FROM opd.Appointment WHERE AppointmentId = @AppointmentId AND HospitalId = @HospitalId AND IsActive = 1;
+    IF @DoctorId IS NULL RETURN;                                     -- not found: empty result
+    IF @Status <> N'BOOKED' THROW 50213, N'Only a booked appointment that has not been checked in can be rescheduled.', 1;
+
+    DECLARE @NewEnd DATETIME2(0) = DATEADD(MINUTE, @Minutes, @NewSlotStartLocal), @Free BIT,
+            @Lock NVARCHAR(255) = N'opd.Appointment:' + CONVERT(NVARCHAR(36), @DoctorId) + N':' + CONVERT(NVARCHAR(10), CAST(@NewSlotStartLocal AS DATE), 23);
+    DECLARE @LockResult INT;
+    BEGIN TRAN;
+    EXEC @LockResult = sp_getapplock @Resource = @Lock, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;
+    IF @LockResult < 0 THROW 50220, N'The doctor''s schedule is being changed by someone else. Try again.', 1;
+    EXEC opd.usp_CheckSlotAvailable @HospitalId = @HospitalId, @DoctorId = @DoctorId,
+         @SlotStartLocal = @NewSlotStartLocal, @SlotEndLocal = @NewEnd, @IsAvailable = @Free OUTPUT;
+    IF @Free = 0
+    BEGIN
+        ROLLBACK;
+        THROW 50214, N'That time is no longer free — choose another slot.', 1;
+    END;
+
+    UPDATE opd.Appointment
+    SET Status = N'CANCELLED', Notes = LEFT(ISNULL(Notes + N' · ', N'') + N'Rescheduled', 300),
+        ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+    WHERE AppointmentId = @AppointmentId AND Status = N'BOOKED';
+
+    EXEC opd.usp_CreateAppointment @HospitalId = @HospitalId, @PatientId = @PatientId, @DoctorId = @DoctorId,
+         @SlotStartLocal = @NewSlotStartLocal, @SlotEndLocal = @NewEnd, @Type = @Type, @Notes = N'Rescheduled', @CreatedBy = @ModifiedBy, @SkipSlotCheck = 1;
+    COMMIT;
+    -- AUDIT: the service records UPDATE on the original (EntityType = 'Appointment') with the new appointment id
+END;
+GO
+
+-- SchedulingService.BookRecurring: @Count visits, @EveryDays apart from @StartDate; on each day the first free slot of the
+-- appointment type's length (or the doctor's slot length). A day with no free slot is skipped, as in memory.
+-- Returns the appointments created (0 rows = none could be booked). v3.5: only future slots (clinic clock) are used.
+CREATE OR ALTER PROCEDURE opd.usp_CreateRecurringAppointments
+    @HospitalId UNIQUEIDENTIFIER,
+    @PatientId  UNIQUEIDENTIFIER,
+    @DoctorId   UNIQUEIDENTIFIER,
+    @StartDate  DATE,
+    @EveryDays  INT,                       -- 7 = weekly, 14 = fortnightly, …
+    @Count      INT,
+    @Type       NVARCHAR(20) = N'FOLLOWUP',
+    @CreatedBy  UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF @EveryDays NOT BETWEEN 1 AND 365 OR @Count NOT BETWEEN 1 AND 52
+        THROW 50215, N'Choose up to 52 visits, between 1 and 365 days apart.', 1;
+    IF NOT EXISTS (SELECT 1 FROM opd.Patient WHERE PatientId = @PatientId AND HospitalId = @HospitalId)
+        THROW 50202, N'Patient not found.', 1;
+
+    DECLARE @Duration INT = (SELECT DurationMinutes FROM cfg.AppointmentType WHERE HospitalId = @HospitalId AND Code = @Type);
+    DECLARE @NowLocal DATETIME2(0) = CAST(SYSDATETIMEOFFSET() AT TIME ZONE cfg.fn_HospitalWindowsTz(@HospitalId) AS DATETIME2(0));
+    DECLARE @Slots TABLE (SlotStart NVARCHAR(19), SlotEnd NVARCHAR(19), IsBooked BIT, TimeZoneId NVARCHAR(50));
+    DECLARE @Created TABLE (AppointmentId UNIQUEIDENTIFIER, AppointmentDate DATE, SlotStart DATETIMEOFFSET(0), SlotEnd DATETIMEOFFSET(0),
+                            TimeZoneId NVARCHAR(50), SlotStartLocal DATETIMEOFFSET(0), SlotEndLocal DATETIMEOFFSET(0), Status NVARCHAR(15));
+    DECLARE @i INT = 0, @Date DATE, @S DATETIME2(0), @E DATETIME2(0), @Lock NVARCHAR(255), @Note NVARCHAR(300);
+
+    DECLARE @LockResult INT;
+    BEGIN TRAN;
+    WHILE @i < @Count
+    BEGIN
+        SET @Date = DATEADD(DAY, @i * @EveryDays, @StartDate);
+        SET @Lock = N'opd.Appointment:' + CONVERT(NVARCHAR(36), @DoctorId) + N':' + CONVERT(NVARCHAR(10), @Date, 23);
+        EXEC @LockResult = sp_getapplock @Resource = @Lock, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;
+        IF @LockResult < 0 THROW 50220, N'The doctor''s schedule is being changed by someone else. Try again.', 1;
+        DELETE FROM @Slots;
+        INSERT INTO @Slots
+        EXEC opd.usp_ListAvailableSlots @DoctorId = @DoctorId, @HospitalId = @HospitalId, @AppointmentDate = @Date, @DurationMinutes = @Duration;
+        SELECT @S = NULL, @E = NULL;
+        SELECT TOP 1 @S = CONVERT(DATETIME2(0), SlotStart, 126), @E = CONVERT(DATETIME2(0), SlotEnd, 126)
+        FROM @Slots WHERE IsBooked = 0 AND CONVERT(DATETIME2(0), SlotStart, 126) > @NowLocal
+        ORDER BY SlotStart;
+        IF @S IS NOT NULL
+        BEGIN
+            SET @Note = N'Recurring ' + CAST(@i + 1 AS NVARCHAR(5)) + N'/' + CAST(@Count AS NVARCHAR(5));
+            INSERT INTO @Created
+            EXEC opd.usp_CreateAppointment @HospitalId = @HospitalId, @PatientId = @PatientId, @DoctorId = @DoctorId,
+                 @SlotStartLocal = @S, @SlotEndLocal = @E, @Type = @Type, @Notes = @Note, @CreatedBy = @CreatedBy, @SkipSlotCheck = 1;
+        END;
+        SET @i += 1;
+    END;
+    COMMIT;
+
+    SELECT AppointmentId, AppointmentDate, SlotStart, SlotEnd, TimeZoneId, SlotStartLocal, SlotEndLocal, Status
+    FROM @Created ORDER BY SlotStart;
+END;
+GO
+
+-- Patient portal (self-book.aspx FindPatient): find the patient by MRN, or by phone number (same digits). Anonymous
+-- caller, so v3.5 returns only what the page needs — never the full name, phone or date of birth.
+-- TODO (privacy): an MRN or phone number alone identifies the patient, as it does in memory. Requiring a second factor
+-- (date of birth, or an SMS code) is a product decision; add @Dob here when it is made.
+CREATE OR ALTER PROCEDURE opd.usp_GetPortalPatient
+    @HospitalId UNIQUEIDENTIFIER,
+    @Mrn        NVARCHAR(20) = NULL,
+    @Phone      NVARCHAR(20) = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Digits NVARCHAR(50) = cfg.fn_DigitsOnly(@Phone);
+    SET @Mrn = NULLIF(LTRIM(RTRIM(@Mrn)), N'');
+    IF @Mrn IS NULL AND LEN(@Digits) < 7 RETURN;
+
+    SELECT TOP 1 p.PatientId, p.Mrn,
+           -- "Ravi K." — first name and last initial, for the confirmation screen
+           LEFT(COALESCE(NULLIF(p.FirstName, N''), LEFT(p.FullName, CHARINDEX(N' ', p.FullName + N' ') - 1)), 60)
+             + CASE WHEN COALESCE(NULLIF(p.LastName, N''), NULLIF(LTRIM(SUBSTRING(p.FullName, CHARINDEX(N' ', p.FullName + N' ') + 1, 200)), N'')) IS NULL
+                    THEN N'' ELSE N' ' + LEFT(COALESCE(NULLIF(p.LastName, N''), LTRIM(SUBSTRING(p.FullName, CHARINDEX(N' ', p.FullName + N' ') + 1, 200))), 1) + N'.' END
+             AS DisplayName
+    FROM opd.Patient p
+    WHERE p.HospitalId = @HospitalId AND p.IsActive = 1
+      AND ((@Mrn IS NOT NULL AND p.Mrn = @Mrn)
+           OR (@Mrn IS NULL AND cfg.fn_DigitsOnly(p.Phone) = @Digits))
+    ORDER BY p.CreatedAt;
+END;
+GO
+
+-- Patient portal (self-book.aspx BookButton_Click): re-checks the slot and books it atomically (Notes 'Booked online').
+-- The doctor must be an active DOCTOR of the hospital. Returns opd.usp_CreateAppointment's shape.
+CREATE OR ALTER PROCEDURE opd.usp_CreatePortalAppointment
+    @HospitalId     UNIQUEIDENTIFIER,
+    @PatientId      UNIQUEIDENTIFIER,
+    @DoctorId       UNIQUEIDENTIFIER,
+    @SlotStartLocal DATETIME2(0),
+    @SlotEndLocal   DATETIME2(0),
+    @Type           NVARCHAR(20) = N'NEW'
+AS BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF NOT EXISTS (SELECT 1 FROM opd.Patient WHERE PatientId = @PatientId AND HospitalId = @HospitalId AND IsActive = 1)
+        THROW 50202, N'Patient not found.', 1;
+    IF NOT EXISTS (SELECT 1 FROM sec.ApplicationUser u INNER JOIN sec.UserRole r ON r.UserId = u.UserId AND r.[Role] = N'DOCTOR'
+                   WHERE u.UserId = @DoctorId AND u.HospitalId = @HospitalId AND u.IsActive = 1)
+        THROW 50216, N'Choose a doctor from the list.', 1;
+    IF NOT EXISTS (SELECT 1 FROM cfg.AppointmentType WHERE HospitalId = @HospitalId AND Code = @Type AND IsActive = 1)
+        THROW 50216, N'Choose a visit type from the list.', 1;
+
+    DECLARE @Free BIT,
+            @Lock NVARCHAR(255) = N'opd.Appointment:' + CONVERT(NVARCHAR(36), @DoctorId) + N':' + CONVERT(NVARCHAR(10), CAST(@SlotStartLocal AS DATE), 23);
+    DECLARE @LockResult INT;
+    BEGIN TRAN;
+    EXEC @LockResult = sp_getapplock @Resource = @Lock, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;
+    IF @LockResult < 0 THROW 50220, N'The doctor''s schedule is being changed by someone else. Try again.', 1;
+    EXEC opd.usp_CheckSlotAvailable @HospitalId = @HospitalId, @DoctorId = @DoctorId,
+         @SlotStartLocal = @SlotStartLocal, @SlotEndLocal = @SlotEndLocal, @IsAvailable = @Free OUTPUT;
+    IF @Free = 0
+    BEGIN
+        ROLLBACK;
+        THROW 50214, N'That time was just taken — please choose another slot.', 1;
+    END;
+    EXEC opd.usp_CreateAppointment @HospitalId = @HospitalId, @PatientId = @PatientId, @DoctorId = @DoctorId,
+         @SlotStartLocal = @SlotStartLocal, @SlotEndLocal = @SlotEndLocal, @Type = @Type, @Notes = N'Booked online', @CreatedBy = NULL, @SkipSlotCheck = 1;
+    COMMIT;
+    -- AUDIT: the service records CREATE (EntityType = 'Appointment', Details 'Booked online by patient {Mrn}')
+END;
+GO
+
+-- ---- 22.9 Consultation — in-progress lookup, medication history, outside medicines, removing an order (G-9 … G-11) ----
+
+-- ConsultationService.FindInProgress: the doctor's open consultation for the patient, without creating one.
+CREATE OR ALTER PROCEDURE cln.usp_GetInProgressConsultation
+    @HospitalId UNIQUEIDENTIFIER,
+    @PatientId  UNIQUEIDENTIFIER,
+    @DoctorId   UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1 ConsultationId, PatientId, DoctorId, AppointmentId, VisitDate, TimeZoneId, VisitLocalDate, Status, IsLocked
+    FROM cln.Consultation
+    WHERE HospitalId = @HospitalId AND PatientId = @PatientId AND DoctorId = @DoctorId
+      AND Status = N'IN_PROGRESS' AND IsActive = 1
+    ORDER BY VisitDate DESC;
+END;
+GO
+
+-- ConsultationService.ListMedicationHistory: every prescription of the patient — this clinic's and outside medicines,
+-- all statuses — newest first by period start (else prescribed date).
+CREATE OR ALTER PROCEDURE cln.usp_ListPatientMedicationHistory
+    @HospitalId UNIQUEIDENTIFIER,
+    @PatientId  UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT rx.PrescriptionId, rx.ConsultationId, rx.PatientId, rx.Source, rx.SourceDetail, rx.Category,
+           rx.MedicineName, rx.Strength, rx.GenericClass, rx.TherapeuticClass, rx.DrugForm, rx.DeliveryRoute,
+           rx.TakeInQty, rx.TakeInUnit, rx.TimesPerDay, rx.DurationValue, rx.DurationUnit, rx.PeriodStart, rx.PeriodEnd,
+           rx.FrequencyMode, rx.FrequencyPeriod, rx.TimingBf, rx.TimingAn, rx.TimingNi, rx.TimingEm, rx.Prn,
+           rx.Instructions, rx.DynamicInstruction, rx.ValidUntil, rx.PrescribedDate, rx.Status,
+           c.DoctorId, d.FullName AS DoctorName
+    FROM cln.Prescription rx
+    LEFT JOIN cln.Consultation c ON c.ConsultationId = rx.ConsultationId
+    LEFT JOIN sec.ApplicationUser d ON d.UserId = c.DoctorId
+    WHERE rx.PatientId = @PatientId AND rx.HospitalId = @HospitalId AND rx.IsActive = 1
+    ORDER BY COALESCE(CAST(rx.PeriodStart AS DATETIMEOFFSET(0)), rx.PrescribedDate) DESC;
+END;
+GO
+
+-- ConsultationService.SaveOutsideMedication: a medicine the patient takes that another prescriber started
+-- (Source = 'OUTSIDE', no consultation). New: generic / therapeutic class copied from the formulary when the name
+-- matches a brand. Existing (@PrescriptionId): only the fields the Medications tab edits are replaced.
+CREATE OR ALTER PROCEDURE cln.usp_SaveOutsideMedication
+    @HospitalId         UNIQUEIDENTIFIER,
+    @PatientId          UNIQUEIDENTIFIER,
+    @PrescriptionId     UNIQUEIDENTIFIER = NULL,   -- NULL = new
+    @MedicineName       NVARCHAR(200),
+    @Strength           NVARCHAR(50) = NULL,
+    @DrugForm           NVARCHAR(30) = NULL,
+    @TakeInQty          DECIMAL(6,2) = 1,
+    @TakeInUnit         NVARCHAR(20) = NULL,
+    @TimesPerDay        INT = 1,
+    @TimingNi           BIT = 0,
+    @Prn                BIT = 0,
+    @FrequencyMode      NVARCHAR(10) = NULL,
+    @DynamicInstruction NVARCHAR(500) = NULL,
+    @Instructions       NVARCHAR(500) = NULL,
+    @PeriodStart        DATE = NULL,
+    @SourceDetail       NVARCHAR(120) = NULL,      -- who prescribed it
+    @ModifiedBy         UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    SET @MedicineName = LTRIM(RTRIM(@MedicineName));
+    IF ISNULL(@MedicineName, N'') = N'' THROW 50217, N'Enter the medicine name.', 1;
+
+    IF @PrescriptionId IS NULL
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM opd.Patient WHERE PatientId = @PatientId AND HospitalId = @HospitalId)
+            THROW 50202, N'Patient not found.', 1;
+        DECLARE @Out TABLE (PrescriptionId UNIQUEIDENTIFIER);
+        INSERT INTO cln.Prescription (HospitalId, ConsultationId, PatientId, Source, SourceDetail, MedicineName, Strength,
+                                      GenericClass, TherapeuticClass, DrugForm, TakeInQty, TakeInUnit, TimesPerDay, TimingNi, Prn,
+                                      FrequencyMode, DynamicInstruction, Instructions, PeriodStart, Status, CreatedBy)
+        OUTPUT inserted.PrescriptionId INTO @Out
+        SELECT @HospitalId, NULL, @PatientId, N'OUTSIDE', @SourceDetail, @MedicineName, @Strength,
+               f.GenericClass, f.TherapeuticClass, @DrugForm, ISNULL(@TakeInQty, 1), @TakeInUnit, ISNULL(@TimesPerDay, 1),
+               ISNULL(@TimingNi, 0), ISNULL(@Prn, 0), @FrequencyMode, @DynamicInstruction, @Instructions, @PeriodStart, N'ACTIVE',
+               ISNULL(@ModifiedBy, '00000000-0000-0000-0000-000000000000')
+        FROM (SELECT 1 AS One) x
+        OUTER APPLY (SELECT TOP 1 GenericClass, TherapeuticClass FROM cfg.DrugFormulary
+                     WHERE HospitalId = @HospitalId AND BrandName = @MedicineName AND IsActive = 1) f;
+        SELECT @PrescriptionId = PrescriptionId FROM @Out;
+    END
+    ELSE
+        UPDATE cln.Prescription
+        SET MedicineName = @MedicineName, Strength = @Strength, DrugForm = @DrugForm, TakeInQty = ISNULL(@TakeInQty, 1),
+            TakeInUnit = @TakeInUnit, TimesPerDay = ISNULL(@TimesPerDay, 1), TimingNi = ISNULL(@TimingNi, 0), Prn = ISNULL(@Prn, 0),
+            FrequencyMode = @FrequencyMode, DynamicInstruction = @DynamicInstruction, Instructions = @Instructions,
+            PeriodStart = @PeriodStart, SourceDetail = @SourceDetail,
+            ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+        WHERE PrescriptionId = @PrescriptionId AND HospitalId = @HospitalId AND PatientId = @PatientId
+          AND Source = N'OUTSIDE' AND IsActive = 1;
+
+    SELECT PrescriptionId, PatientId, Source, SourceDetail, MedicineName, Strength, GenericClass, TherapeuticClass, DrugForm,
+           TakeInQty, TakeInUnit, TimesPerDay, TimingNi, Prn, FrequencyMode, DynamicInstruction, Instructions, PeriodStart,
+           PrescribedDate, Status
+    FROM cln.Prescription
+    WHERE PrescriptionId = @PrescriptionId AND HospitalId = @HospitalId AND Source = N'OUTSIDE' AND IsActive = 1;
+END;
+GO
+
+-- ConsultationService.RemoveOrder: an order can be removed only while ORDERED (not yet sent to or claimed by a lab).
+-- v3.5: soft delete (IsActive = 0), and refused once the consultation is signed (memory did not check the lock).
+CREATE OR ALTER PROCEDURE cln.usp_DeleteInvestigationOrder
+    @HospitalId UNIQUEIDENTIFIER,
+    @OrderId    UNIQUEIDENTIFIER,
+    @ModifiedBy UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Status NVARCHAR(15), @Locked BIT;
+    SELECT @Status = o.Status, @Locked = c.IsLocked
+    FROM cln.InvestigationOrder o INNER JOIN cln.Consultation c ON c.ConsultationId = o.ConsultationId
+    WHERE o.OrderId = @OrderId AND o.HospitalId = @HospitalId AND o.IsActive = 1;
+    IF @Status IS NULL RETURN;                                       -- not found
+    IF @Status <> N'ORDERED' OR @Locked = 1
+        THROW 50218, N'This order has already been sent to a lab or the consultation is signed; it cannot be removed.', 1;
+
+    UPDATE cln.InvestigationOrder
+    SET IsActive = 0, ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+    WHERE OrderId = @OrderId AND Status = N'ORDERED' AND IsActive = 1;
+    SELECT @OrderId AS OrderId;
+END;
+GO
+
+-- ---- 22.10 Catalog and billing — edit a drug, service charge on/off (G-13) ----
+
+-- CatalogService.SaveDrug (existing drug): replaces the editable fields; DefaultRoute is kept, as in memory.
+CREATE OR ALTER PROCEDURE cfg.usp_UpdateDrug
+    @HospitalId            UNIQUEIDENTIFIER,
+    @DrugId                UNIQUEIDENTIFIER,
+    @BrandName             NVARCHAR(200),
+    @GenericName           NVARCHAR(200) = NULL,
+    @Composition           NVARCHAR(500) = NULL,
+    @TherapeuticClass      NVARCHAR(300) = NULL,
+    @GenericClass          NVARCHAR(200) = NULL,
+    @DrugForm              NVARCHAR(30) = NULL,
+    @DefaultDosage         NVARCHAR(20) = NULL,
+    @DefaultFrequency      NVARCHAR(20) = NULL,
+    @DefaultDurationDays   INT = NULL,
+    @DefaultInstructions   NVARCHAR(300) = NULL,
+    @IsControlledSubstance BIT = 0,
+    @ModifiedBy            UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    SET @BrandName = LTRIM(RTRIM(@BrandName));
+    IF ISNULL(@BrandName, N'') = N'' THROW 50219, N'Enter the brand name.', 1;
+
+    UPDATE cfg.DrugFormulary
+    SET BrandName = @BrandName, GenericName = @GenericName, Composition = @Composition, TherapeuticClass = @TherapeuticClass,
+        GenericClass = @GenericClass, DrugForm = @DrugForm, DefaultDosage = @DefaultDosage, DefaultFrequency = @DefaultFrequency,
+        DefaultDurationDays = @DefaultDurationDays, DefaultInstructions = @DefaultInstructions,
+        IsControlledSubstance = ISNULL(@IsControlledSubstance, 0),
+        ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+    WHERE DrugId = @DrugId AND HospitalId = @HospitalId;
+
+    SELECT DrugId, HospitalId, BrandName, GenericName, Composition, TherapeuticClass, GenericClass, DrugForm, DefaultRoute,
+           DefaultDosage, DefaultFrequency, DefaultDurationDays, DefaultInstructions, IsControlledSubstance, IsActive
+    FROM cfg.DrugFormulary WHERE DrugId = @DrugId AND HospitalId = @HospitalId;
+END;
+GO
+
+-- BillingService.ListAllServiceCharges: the full master list for Settings → Services, inactive included.
+CREATE OR ALTER PROCEDURE bil.usp_ListAllServiceCharges
+    @HospitalId UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT sc.ServiceChargeId, sc.ServiceCode, sc.ServiceName, sc.Category, sc.DefaultAmount, sc.TaxPercent, sc.IsActive, h.Currency
+    FROM bil.ServiceChargeMaster sc
+    INNER JOIN cfg.Hospital h ON h.HospitalId = sc.HospitalId
+    WHERE sc.HospitalId = @HospitalId
+    ORDER BY sc.Category, sc.ServiceName;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE bil.usp_UpdateServiceChargeActive
+    @HospitalId      UNIQUEIDENTIFIER,
+    @ServiceChargeId UNIQUEIDENTIFIER,
+    @IsActive        BIT = NULL,              -- NULL toggles (BillingService.ToggleServiceCharge)
+    @ModifiedBy      UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    UPDATE bil.ServiceChargeMaster
+    SET IsActive = COALESCE(@IsActive, CASE WHEN IsActive = 1 THEN 0 ELSE 1 END),
+        ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+    WHERE ServiceChargeId = @ServiceChargeId AND HospitalId = @HospitalId;
+    SELECT ServiceChargeId, ServiceName, IsActive
+    FROM bil.ServiceChargeMaster WHERE ServiceChargeId = @ServiceChargeId AND HospitalId = @HospitalId;
+END;
+GO
+
+-- ---- 22.11 Lab partners (G-5) ----
+
+CREATE OR ALTER PROCEDURE cfg.usp_ListLabPartners
+    @HospitalId UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT LabPartnerId, Name, IsActive FROM cfg.LabPartner
+    WHERE HospitalId = @HospitalId AND IsActive = 1
+    ORDER BY Name;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE cfg.usp_GetLabPartner
+    @HospitalId   UNIQUEIDENTIFIER,
+    @LabPartnerId UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT LabPartnerId, Name, IsActive FROM cfg.LabPartner
+    WHERE LabPartnerId = @LabPartnerId AND HospitalId = @HospitalId;
+END;
+GO
+
+-- LabService.SaveLabPartner: by name (case-insensitive) — an existing partner is re-enabled and returned, else created.
+CREATE OR ALTER PROCEDURE cfg.usp_SaveLabPartner
+    @HospitalId UNIQUEIDENTIFIER,
+    @Name       NVARCHAR(100),
+    @CreatedBy  UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    SET @Name = LTRIM(RTRIM(@Name));
+    IF ISNULL(@Name, N'') = N'' THROW 50232, N'Enter the lab name.', 1;
+
+    DECLARE @Id UNIQUEIDENTIFIER = (SELECT LabPartnerId FROM cfg.LabPartner WHERE HospitalId = @HospitalId AND Name = @Name);
+    IF @Id IS NOT NULL
+        UPDATE cfg.LabPartner SET IsActive = 1, ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @CreatedBy
+        WHERE LabPartnerId = @Id AND IsActive = 0;
+    ELSE
+    BEGIN
+        DECLARE @Out TABLE (LabPartnerId UNIQUEIDENTIFIER);
+        INSERT INTO cfg.LabPartner (HospitalId, Name, CreatedBy)
+        OUTPUT inserted.LabPartnerId INTO @Out
+        VALUES (@HospitalId, @Name, ISNULL(@CreatedBy, '00000000-0000-0000-0000-000000000000'));
+        SELECT @Id = LabPartnerId FROM @Out;
+    END;
+    EXEC cfg.usp_GetLabPartner @HospitalId = @HospitalId, @LabPartnerId = @Id;
+END;
+GO
+
+-- ---- 22.12 Lab — claim a requisition by the patient's mobile number (G-6) ----
+
+-- LabService.FindOrdersByMobile: every open order (ORDERED / SENT, not yet taken by a lab) of every patient in the
+-- hospital registered with this mobile number (last 10 digits of Phone). Each lookup is logged in sec.LabClaimAttempt;
+-- 5 lookups that found nothing within 15 minutes (since the user's last successful one) lock the user out for the
+-- rest of that window (50231) — replacing the in-process LabService.ClaimFailures counter.
+-- The service only calls this for a LAB_PARTNER caller and passes the caller's own LabPartnerId.
+CREATE OR ALTER PROCEDURE cln.usp_SearchLabOrdersByMobile
+    @HospitalId   UNIQUEIDENTIFIER,
+    @UserId       UNIQUEIDENTIFIER,
+    @LabPartnerId UNIQUEIDENTIFIER,
+    @Mobile       NVARCHAR(20)
+AS BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Key NVARCHAR(10) = cfg.fn_MobileKey(@Mobile);
+    IF LEN(@Key) < 10 THROW 50230, N'Enter the full mobile number.', 1;
+    IF @LabPartnerId IS NULL THROW 50230, N'This account is not linked to a lab.', 1;
+
+    DECLARE @WindowStart DATETIMEOFFSET(3) = DATEADD(MINUTE, -15, SYSUTCDATETIME());
+    DECLARE @LastSuccess DATETIMEOFFSET(3) = (SELECT MAX(CreatedAt) FROM sec.LabClaimAttempt WHERE UserId = @UserId AND IsSuccess = 1);
+    IF (SELECT COUNT(*) FROM sec.LabClaimAttempt
+        WHERE UserId = @UserId AND IsSuccess = 0 AND CreatedAt > @WindowStart
+          AND (@LastSuccess IS NULL OR CreatedAt > @LastSuccess)) >= 5
+        THROW 50231, N'Too many numbers with no match. Try again in 15 minutes.', 1;
+
+    DECLARE @Found TABLE (OrderId UNIQUEIDENTIFIER, ConsultationId UNIQUEIDENTIFIER, PatientId UNIQUEIDENTIFIER, PatientName NVARCHAR(200),
+                          PatientMrn NVARCHAR(20), TestId UNIQUEIDENTIFIER, TestName NVARCHAR(100), TestType NVARCHAR(20),
+                          Status NVARCHAR(15), OrderedAt DATETIMEOFFSET(3));
+    INSERT INTO @Found
+    SELECT o.OrderId, o.ConsultationId, o.PatientId, p.FullName, p.Mrn, o.TestId, o.TestName, o.TestType, o.Status, o.OrderedAt
+    FROM cln.InvestigationOrder o
+    INNER JOIN opd.Patient p ON p.PatientId = o.PatientId
+    WHERE o.HospitalId = @HospitalId AND o.IsActive = 1 AND o.LabPartnerId IS NULL
+      AND o.Status IN (N'ORDERED', N'SENT')
+      AND cfg.fn_MobileKey(p.Phone) = @Key;
+
+    INSERT INTO sec.LabClaimAttempt (HospitalId, UserId, IsSuccess, CreatedBy)
+    VALUES (@HospitalId, @UserId, CASE WHEN EXISTS (SELECT 1 FROM @Found) THEN 1 ELSE 0 END, @UserId);
+
+    SELECT OrderId, ConsultationId, PatientId, PatientName, PatientMrn, TestId, TestName, TestType, Status, OrderedAt
+    FROM @Found ORDER BY OrderedAt DESC;
+END;
+GO
+
+-- LabService.ClaimOrder: the lab takes the order (LabPartnerId set, Status SENT) if it is still open and the mobile
+-- number matches its patient. The LabPartnerId IS NULL condition makes the first of two competing claims win.
+-- Empty result = not claimable (NotFound).
+CREATE OR ALTER PROCEDURE cln.usp_ConfirmLabOrderClaim
+    @HospitalId   UNIQUEIDENTIFIER,
+    @OrderId      UNIQUEIDENTIFIER,
+    @LabPartnerId UNIQUEIDENTIFIER,
+    @Mobile       NVARCHAR(20),
+    @ModifiedBy   UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Key NVARCHAR(10) = cfg.fn_MobileKey(@Mobile);
+    IF LEN(@Key) < 10 THROW 50230, N'Enter the full mobile number.', 1;
+
+    DECLARE @Out TABLE (OrderId UNIQUEIDENTIFIER, PatientId UNIQUEIDENTIFIER, TestName NVARCHAR(100), Status NVARCHAR(15), LabPartnerId UNIQUEIDENTIFIER);
+    UPDATE o
+    SET LabPartnerId = @LabPartnerId, Status = N'SENT', ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+    OUTPUT inserted.OrderId, inserted.PatientId, inserted.TestName, inserted.Status, inserted.LabPartnerId INTO @Out
+    FROM cln.InvestigationOrder o
+    INNER JOIN opd.Patient p ON p.PatientId = o.PatientId
+    WHERE o.OrderId = @OrderId AND o.HospitalId = @HospitalId AND o.IsActive = 1 AND o.LabPartnerId IS NULL
+      AND o.Status IN (N'ORDERED', N'SENT') AND cfg.fn_MobileKey(p.Phone) = @Key;
+    SELECT OrderId, PatientId, TestName, Status, LabPartnerId FROM @Out;
+    -- AUDIT: the service records UPDATE (EntityType = 'InvestigationOrder', Details 'Claimed by lab')
+END;
+GO
+
+-- ---- 22.13 Lab result attachments (G-4, metadata; the file itself is in the service's file store) ----
+
+-- LabService.SaveAttachment. OrderId and LabPartnerId are taken from the result, not the caller.
+CREATE OR ALTER PROCEDURE cln.usp_CreateLabResultAttachment
+    @HospitalId       UNIQUEIDENTIFIER,
+    @ResultId         UNIQUEIDENTIFIER,
+    @FileName         NVARCHAR(255),
+    @ContentType      NVARCHAR(100),
+    @SizeBytes        BIGINT,
+    @StoredFileName   NVARCHAR(100),
+    @UploadedByUserId UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    DECLARE @OrderId UNIQUEIDENTIFIER, @LabPartnerId UNIQUEIDENTIFIER;
+    SELECT @OrderId = OrderId, @LabPartnerId = LabPartnerId
+    FROM cln.LabResult WHERE ResultId = @ResultId AND HospitalId = @HospitalId AND IsActive = 1;
+    IF @OrderId IS NULL THROW 50235, N'Lab result not found.', 1;
+
+    DECLARE @Out TABLE (AttachmentId UNIQUEIDENTIFIER, ResultId UNIQUEIDENTIFIER, OrderId UNIQUEIDENTIFIER, LabPartnerId UNIQUEIDENTIFIER,
+                        FileName NVARCHAR(255), ContentType NVARCHAR(100), SizeBytes BIGINT, StoredFileName NVARCHAR(100),
+                        UploadedByUserId UNIQUEIDENTIFIER, UploadedAt DATETIMEOFFSET(3));
+    INSERT INTO cln.LabResultAttachment (ResultId, OrderId, HospitalId, LabPartnerId, FileName, ContentType, SizeBytes, StoredFileName,
+                                         UploadedByUserId, CreatedBy)
+    OUTPUT inserted.AttachmentId, inserted.ResultId, inserted.OrderId, inserted.LabPartnerId, inserted.FileName, inserted.ContentType,
+           inserted.SizeBytes, inserted.StoredFileName, inserted.UploadedByUserId, inserted.UploadedAt
+    INTO @Out
+    VALUES (@ResultId, @OrderId, @HospitalId, @LabPartnerId, @FileName, @ContentType, @SizeBytes, @StoredFileName,
+            @UploadedByUserId, ISNULL(@UploadedByUserId, '00000000-0000-0000-0000-000000000000'));
+    SELECT AttachmentId, ResultId, OrderId, LabPartnerId, FileName, ContentType, SizeBytes, StoredFileName, UploadedByUserId, UploadedAt FROM @Out;
+END;
+GO
+
+-- LabService.ListAttachments (@ResultId) and CountAttachmentsForOrder (@OrderId — the caller counts the rows).
+CREATE OR ALTER PROCEDURE cln.usp_ListLabResultAttachments
+    @HospitalId UNIQUEIDENTIFIER,
+    @ResultId   UNIQUEIDENTIFIER = NULL,
+    @OrderId    UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    IF @ResultId IS NULL AND @OrderId IS NULL THROW 50236, N'A result or an order is required.', 1;
+    SELECT AttachmentId, ResultId, OrderId, LabPartnerId, FileName, ContentType, SizeBytes, StoredFileName, UploadedByUserId, UploadedAt
+    FROM cln.LabResultAttachment
+    WHERE HospitalId = @HospitalId AND IsActive = 1
+      AND (@ResultId IS NULL OR ResultId = @ResultId)
+      AND (@OrderId IS NULL OR OrderId = @OrderId)
+    ORDER BY UploadedAt;
+END;
+GO
+
+-- LabService.GetAttachment. The service applies LabService.CanViewAttachment (a lab partner sees only its own files).
+CREATE OR ALTER PROCEDURE cln.usp_GetLabResultAttachment
+    @HospitalId   UNIQUEIDENTIFIER,
+    @AttachmentId UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT AttachmentId, ResultId, OrderId, LabPartnerId, FileName, ContentType, SizeBytes, StoredFileName, UploadedByUserId, UploadedAt
+    FROM cln.LabResultAttachment
+    WHERE AttachmentId = @AttachmentId AND HospitalId = @HospitalId AND IsActive = 1;
+END;
+GO
+
+-- ---- 22.14 In-app user notifications (G-17) ----
+
+CREATE OR ALTER PROCEDURE sec.usp_CreateUserNotification
+    @HospitalId UNIQUEIDENTIFIER,
+    @UserId     UNIQUEIDENTIFIER,
+    @Kind       NVARCHAR(30),
+    @Title      NVARCHAR(200),
+    @Message    NVARCHAR(500) = NULL,
+    @Url        NVARCHAR(500) = NULL,
+    @IsCritical BIT = 0,
+    @EntityId   NVARCHAR(50) = NULL,
+    @CreatedBy  UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    -- the recipient must be a user of the same hospital
+    IF NOT EXISTS (SELECT 1 FROM sec.ApplicationUser WHERE UserId = @UserId AND HospitalId = @HospitalId) RETURN;
+    DECLARE @Out TABLE (NotificationId UNIQUEIDENTIFIER, CreatedAt DATETIMEOFFSET(3));
+    INSERT INTO sec.UserNotification (HospitalId, UserId, Kind, Title, [Message], Url, IsCritical, EntityId, CreatedBy)
+    OUTPUT inserted.NotificationId, inserted.CreatedAt INTO @Out
+    VALUES (@HospitalId, @UserId, @Kind, @Title, @Message, @Url, ISNULL(@IsCritical, 0), @EntityId,
+            ISNULL(@CreatedBy, '00000000-0000-0000-0000-000000000000'));
+    SELECT NotificationId, CreatedAt FROM @Out;
+END;
+GO
+
+-- UserNotificationService.ListRecent: newest first, except that unread critical ones always come first.
+CREATE OR ALTER PROCEDURE sec.usp_ListUserNotifications
+    @HospitalId UNIQUEIDENTIFIER,
+    @UserId     UNIQUEIDENTIFIER,
+    @Take       INT = 15
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP (@Take) NotificationId, Kind, Title, [Message], Url, IsCritical, EntityId, ReadAt, CreatedAt
+    FROM sec.UserNotification
+    WHERE UserId = @UserId AND HospitalId = @HospitalId
+    ORDER BY CASE WHEN IsCritical = 1 AND ReadAt IS NULL THEN 0 ELSE 1 END, CreatedAt DESC;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE sec.usp_GetUserNotificationUnreadCount
+    @HospitalId UNIQUEIDENTIFIER,
+    @UserId     UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT COUNT(*) AS UnreadCount
+    FROM sec.UserNotification
+    WHERE UserId = @UserId AND HospitalId = @HospitalId AND ReadAt IS NULL;
+END;
+GO
+
+-- UserNotificationService.MarkRead: the caller's own notification only. Empty result = not found / someone else's.
+CREATE OR ALTER PROCEDURE sec.usp_UpdateUserNotificationRead
+    @HospitalId     UNIQUEIDENTIFIER,
+    @UserId         UNIQUEIDENTIFIER,
+    @NotificationId UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    UPDATE sec.UserNotification
+    SET ReadAt = SYSUTCDATETIME(), ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @UserId
+    WHERE NotificationId = @NotificationId AND UserId = @UserId AND HospitalId = @HospitalId AND ReadAt IS NULL;
+    SELECT NotificationId, Kind, Title, [Message], Url, IsCritical, EntityId, ReadAt, CreatedAt
+    FROM sec.UserNotification
+    WHERE NotificationId = @NotificationId AND UserId = @UserId AND HospitalId = @HospitalId;
+END;
+GO
+
+-- UserNotificationService.MarkAllRead
+CREATE OR ALTER PROCEDURE sec.usp_UpdateUserNotificationsReadAll
+    @HospitalId UNIQUEIDENTIFIER,
+    @UserId     UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    UPDATE sec.UserNotification
+    SET ReadAt = SYSUTCDATETIME(), ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @UserId
+    WHERE UserId = @UserId AND HospitalId = @HospitalId AND ReadAt IS NULL;
+    SELECT @@ROWCOUNT AS UpdatedCount;
+END;
+GO
+
+-- UserNotificationService.MarkReadForEntity: clears everyone's notifications about something that has been dealt with
+-- (e.g. a lab result marked reviewed). Called by the service inside the operation that deals with it.
+CREATE OR ALTER PROCEDURE sec.usp_UpdateUserNotificationReadForEntity
+    @HospitalId UNIQUEIDENTIFIER,
+    @EntityId   NVARCHAR(50),
+    @ModifiedBy UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    UPDATE sec.UserNotification
+    SET ReadAt = SYSUTCDATETIME(), ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+    WHERE EntityId = @EntityId AND HospitalId = @HospitalId AND ReadAt IS NULL;
+END;
+GO
+
+-- ---- 22.15 Consultation form designer (G-16) ----
+-- The designer's editing rules (toggle / move / add sections, fields, options, units, presets, problems, diff,
+-- restore defaults) stay in C# — they work on the whole ConsultFormConfig document. The database stores that
+-- document as JSON: one DRAFT and one PUBLISHED row per hospital (cfg.ConsultationFormConfig). A hospital with no
+-- PUBLISHED row uses the built-in default form (ConsultationConfigService.Catalog()).
+
+CREATE OR ALTER PROCEDURE cfg.usp_GetConsultationFormConfig
+    @HospitalId  UNIQUEIDENTIFIER,
+    @ConfigState NVARCHAR(10) = N'PUBLISHED'     -- PUBLISHED | DRAFT
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT HospitalId, ConfigState, Version, PublishedAt, PublishedBy, Sections, VitalUnits, ModifiedAt
+    FROM cfg.ConsultationFormConfig
+    WHERE HospitalId = @HospitalId AND ConfigState = @ConfigState;
+END;
+GO
+
+-- Saves the whole draft after an edit. @ExpectedModifiedAt (the draft's ModifiedAt as last read; NULL for the first
+-- save) stops two administrators overwriting each other's draft (50241 → the service reports a Conflict).
+CREATE OR ALTER PROCEDURE cfg.usp_SaveConsultationFormDraft
+    @HospitalId         UNIQUEIDENTIFIER,
+    @Sections           NVARCHAR(MAX),           -- JSON: List<ConsultFormSection>
+    @VitalUnits         NVARCHAR(MAX) = NULL,    -- JSON: List<VitalUnitSetting>
+    @ExpectedModifiedAt DATETIMEOFFSET(3) = NULL,
+    @ModifiedBy         UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF ISJSON(@Sections) <> 1 OR (@VitalUnits IS NOT NULL AND ISJSON(@VitalUnits) <> 1)
+        THROW 50240, N'The consultation form could not be saved (invalid form data).', 1;
+
+    BEGIN TRAN;
+    DECLARE @Current DATETIMEOFFSET(3), @Exists BIT = 0;
+    SELECT @Exists = 1, @Current = COALESCE(ModifiedAt, CreatedAt)
+    FROM cfg.ConsultationFormConfig WITH (UPDLOCK, HOLDLOCK)
+    WHERE HospitalId = @HospitalId AND ConfigState = N'DRAFT';
+
+    IF @Exists = 1 AND @ExpectedModifiedAt IS NOT NULL AND @Current <> @ExpectedModifiedAt
+    BEGIN
+        ROLLBACK;
+        THROW 50241, N'Someone else changed the draft. Reload Consultation Setup and try again.', 1;
+    END;
+
+    IF @Exists = 1
+        UPDATE cfg.ConsultationFormConfig
+        SET Sections = @Sections, VitalUnits = @VitalUnits, ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+        WHERE HospitalId = @HospitalId AND ConfigState = N'DRAFT';
+    ELSE
+        -- a new draft starts at the published version (the draft is a copy of the live form being edited)
+        INSERT INTO cfg.ConsultationFormConfig (HospitalId, ConfigState, Version, Sections, VitalUnits, CreatedBy, ModifiedAt, ModifiedBy)
+        SELECT @HospitalId, N'DRAFT',
+               ISNULL((SELECT Version FROM cfg.ConsultationFormConfig WHERE HospitalId = @HospitalId AND ConfigState = N'PUBLISHED'), 0),
+               @Sections, @VitalUnits, ISNULL(@ModifiedBy, '00000000-0000-0000-0000-000000000000'), SYSUTCDATETIME(), @ModifiedBy;
+    COMMIT;
+
+    EXEC cfg.usp_GetConsultationFormConfig @HospitalId = @HospitalId, @ConfigState = N'DRAFT';
+END;
+GO
+
+-- ConsultationConfigService.Publish, after the service has checked ListPublishProblems / ListDraftChanges and created
+-- any pending custom vitals (cfg.usp_CreateVitalConfig) and saved the draft without the pending flags. Copies the draft
+-- to PUBLISHED with Version + 1 and turns each vital on/off in cfg.VitalDefinition from the draft's VitalUnits
+-- (VitalCode / Enabled). Returns the new version.
+CREATE OR ALTER PROCEDURE cfg.usp_ConfirmConsultationFormPublish
+    @HospitalId  UNIQUEIDENTIFIER,
+    @PublishedBy UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRAN;
+    DECLARE @Sections NVARCHAR(MAX), @VitalUnits NVARCHAR(MAX);
+    SELECT @Sections = Sections, @VitalUnits = VitalUnits
+    FROM cfg.ConsultationFormConfig WITH (UPDLOCK, HOLDLOCK)
+    WHERE HospitalId = @HospitalId AND ConfigState = N'DRAFT';
+    IF @Sections IS NULL
+    BEGIN
+        ROLLBACK;
+        THROW 50242, N'There is no draft to publish.', 1;
+    END;
+
+    DECLARE @Version INT = 1 + ISNULL((SELECT Version FROM cfg.ConsultationFormConfig WITH (UPDLOCK, HOLDLOCK)
+                                       WHERE HospitalId = @HospitalId AND ConfigState = N'PUBLISHED'), 0);
+    DECLARE @Now DATETIMEOFFSET(3) = SYSUTCDATETIME();
+
+    IF EXISTS (SELECT 1 FROM cfg.ConsultationFormConfig WHERE HospitalId = @HospitalId AND ConfigState = N'PUBLISHED')
+        UPDATE cfg.ConsultationFormConfig
+        SET Version = @Version, PublishedAt = @Now, PublishedBy = @PublishedBy, Sections = @Sections, VitalUnits = @VitalUnits,
+            ModifiedAt = @Now, ModifiedBy = @PublishedBy
+        WHERE HospitalId = @HospitalId AND ConfigState = N'PUBLISHED';
+    ELSE
+        INSERT INTO cfg.ConsultationFormConfig (HospitalId, ConfigState, Version, PublishedAt, PublishedBy, Sections, VitalUnits, CreatedBy)
+        VALUES (@HospitalId, N'PUBLISHED', @Version, @Now, @PublishedBy, @Sections, @VitalUnits, @PublishedBy);
+
+    UPDATE cfg.ConsultationFormConfig
+    SET Version = @Version, PublishedAt = @Now, PublishedBy = @PublishedBy, ModifiedAt = @Now, ModifiedBy = @PublishedBy
+    WHERE HospitalId = @HospitalId AND ConfigState = N'DRAFT';
+
+    IF @VitalUnits IS NOT NULL
+        UPDATE vd
+        SET IsEnabled = j.Enabled, ModifiedAt = @Now, ModifiedBy = @PublishedBy
+        FROM cfg.VitalDefinition vd
+        INNER JOIN OPENJSON(@VitalUnits) WITH (VitalCode NVARCHAR(40) '$.VitalCode', Enabled BIT '$.Enabled') j
+            ON j.VitalCode = vd.VitalCode
+        WHERE vd.HospitalId = @HospitalId AND j.Enabled IS NOT NULL AND vd.IsEnabled <> j.Enabled;
+    COMMIT;
+    -- AUDIT: the service records UPDATE (EntityType = 'ConsultationForm', Details 'Published version {n}')
+    SELECT @Version AS Version, @Now AS PublishedAt;
+END;
+GO
+
+-- ConsultationConfigService.DiscardDraft: the draft goes back to the published form (or is removed when nothing has
+-- been published, so the built-in default applies again).
+CREATE OR ALTER PROCEDURE cfg.usp_CancelConsultationFormDraft
+    @HospitalId UNIQUEIDENTIFIER,
+    @ModifiedBy UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    IF EXISTS (SELECT 1 FROM cfg.ConsultationFormConfig WHERE HospitalId = @HospitalId AND ConfigState = N'PUBLISHED')
+    BEGIN
+        UPDATE d
+        SET Sections = p.Sections, VitalUnits = p.VitalUnits, Version = p.Version, PublishedAt = p.PublishedAt,
+            PublishedBy = p.PublishedBy, ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @ModifiedBy
+        FROM cfg.ConsultationFormConfig d
+        INNER JOIN cfg.ConsultationFormConfig p ON p.HospitalId = d.HospitalId AND p.ConfigState = N'PUBLISHED'
+        WHERE d.HospitalId = @HospitalId AND d.ConfigState = N'DRAFT';
+    END
+    ELSE
+        -- Hard delete: nothing was published, so the draft row is the only copy and the default form replaces it.
+        DELETE FROM cfg.ConsultationFormConfig WHERE HospitalId = @HospitalId AND ConfigState = N'DRAFT';
+END;
+GO
+
+-- ConsultationConfigService.SaveCustomValues: one section's custom field values for a consultation.
+-- @ValuesJson: [{"FieldKey","Value","SectionLabel","FieldLabel","InputType","DisplayValue"}, …] — labels, input type and
+-- display value are worked out by the service from the published form. An empty Value removes that field's row.
+-- v3.5: refused once the consultation is signed (memory did not check the lock).
+CREATE OR ALTER PROCEDURE cln.usp_SaveConsultationCustomValues
+    @HospitalId     UNIQUEIDENTIFIER,
+    @ConsultationId UNIQUEIDENTIFIER,
+    @SectionKey     NVARCHAR(60),
+    @ValuesJson     NVARCHAR(MAX),
+    @UpdatedBy      UNIQUEIDENTIFIER = NULL
+AS BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF NOT EXISTS (SELECT 1 FROM cln.Consultation WHERE ConsultationId = @ConsultationId AND HospitalId = @HospitalId AND IsLocked = 0)
+        THROW 50245, N'The consultation was not found or is already signed.', 1;
+    IF ISJSON(@ValuesJson) <> 1 THROW 50246, N'The form values could not be read.', 1;
+
+    DECLARE @V TABLE (FieldKey NVARCHAR(60) PRIMARY KEY, [Value] NVARCHAR(MAX), SectionLabel NVARCHAR(100), FieldLabel NVARCHAR(100),
+                      InputType NVARCHAR(10), DisplayValue NVARCHAR(MAX));
+    INSERT INTO @V
+    SELECT FieldKey, NULLIF([Value], N''), SectionLabel, FieldLabel, ISNULL(NULLIF(InputType, N''), N'TEXT'), DisplayValue
+    FROM OPENJSON(@ValuesJson) WITH (FieldKey NVARCHAR(60) '$.FieldKey', [Value] NVARCHAR(MAX) '$.Value',
+                                     SectionLabel NVARCHAR(100) '$.SectionLabel', FieldLabel NVARCHAR(100) '$.FieldLabel',
+                                     InputType NVARCHAR(10) '$.InputType', DisplayValue NVARCHAR(MAX) '$.DisplayValue')
+    WHERE ISNULL(FieldKey, N'') <> N'';
+
+    BEGIN TRAN;
+    -- Hard delete: a cleared field has no value to keep (the table has no IsActive column).
+    DELETE cv FROM cln.ConsultationCustomValue cv
+    INNER JOIN @V v ON v.FieldKey = cv.FieldKey AND v.[Value] IS NULL
+    WHERE cv.ConsultationId = @ConsultationId AND cv.SectionKey = @SectionKey;
+
+    UPDATE cv
+    SET [Value] = v.[Value], SectionLabel = ISNULL(v.SectionLabel, cv.SectionLabel), FieldLabel = ISNULL(v.FieldLabel, cv.FieldLabel),
+        InputType = v.InputType, DisplayValue = ISNULL(v.DisplayValue, v.[Value]),
+        UpdatedAt = SYSUTCDATETIME(), UpdatedBy = @UpdatedBy, ModifiedAt = SYSUTCDATETIME(), ModifiedBy = @UpdatedBy
+    FROM cln.ConsultationCustomValue cv
+    INNER JOIN @V v ON v.FieldKey = cv.FieldKey AND v.[Value] IS NOT NULL
+    WHERE cv.ConsultationId = @ConsultationId AND cv.SectionKey = @SectionKey;
+
+    INSERT INTO cln.ConsultationCustomValue (HospitalId, ConsultationId, SectionKey, FieldKey, [Value], SectionLabel, FieldLabel,
+                                             InputType, DisplayValue, UpdatedBy, CreatedBy)
+    SELECT @HospitalId, @ConsultationId, @SectionKey, v.FieldKey, v.[Value], v.SectionLabel, v.FieldLabel, v.InputType,
+           ISNULL(v.DisplayValue, v.[Value]), @UpdatedBy, ISNULL(@UpdatedBy, '00000000-0000-0000-0000-000000000000')
+    FROM @V v
+    WHERE v.[Value] IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM cln.ConsultationCustomValue cv
+                      WHERE cv.ConsultationId = @ConsultationId AND cv.SectionKey = @SectionKey AND cv.FieldKey = v.FieldKey);
+    COMMIT;
+END;
+GO
+
+-- ConsultationConfigService.GetCustomValues / ListCustomValues: the consultation's non-empty custom values. The service
+-- orders them by the published form's section and field order (and fills missing labels from it).
+CREATE OR ALTER PROCEDURE cln.usp_ListConsultationCustomValues
+    @HospitalId     UNIQUEIDENTIFIER,
+    @ConsultationId UNIQUEIDENTIFIER
+AS BEGIN
+    SET NOCOUNT ON;
+    SELECT ConsultationId, SectionKey, FieldKey, [Value], SectionLabel, FieldLabel, InputType, DisplayValue, UpdatedAt, UpdatedBy
+    FROM cln.ConsultationCustomValue
+    WHERE ConsultationId = @ConsultationId AND HospitalId = @HospitalId AND [Value] IS NOT NULL AND [Value] <> N''
+    ORDER BY CreatedAt;
+END;
+GO
+
+-- ============================================================
 -- SUMMARY
 -- ============================================================
 -- 157 stored procedures + 3 reporting views, covering all 150
@@ -4287,6 +5893,19 @@ GO
 -- (cfg.ConsultationFormConfig, sec.UserNotification,
 -- opd.PatientConsentDocument,
 -- cln.ConsultationCustomValue) and cln.LabResultAttachment.
+--
+-- v3.6: opd.usp_CreatePatient / UpdatePatient widened and MRN from settings (cfg.fn_FormatMrn);
+-- sec.usp_GetUserCredential, sec.usp_RecordLoginAttempt; front-desk slot re-check in
+-- opd.usp_CreateAppointment (@SkipSlotCheck for the booking procedures that already checked);
+-- slot-length guard in opd.usp_ListAvailableSlots.
+--
+-- v3.5: section 22 — 52 procedures + cfg.fn_DigitsOnly / cfg.fn_MobileKey for the
+-- in-memory features that had no procedure (API-SPECIFICATION.md v3.2 Known Gaps #1,
+-- API-INTEGRATION-GUIDE.md §8). The v3.0 note above about tables with no procedure
+-- (cfg.ConsultationFormConfig, sec.UserNotification, opd.PatientConsentDocument,
+-- cln.ConsultationCustomValue, cln.LabResultAttachment) is resolved.
+-- opd.usp_CheckSlotAvailable is an internal helper (OUTPUT parameter) for the
+-- booking procedures.
 --
 -- v3.4: procedures added in v3.1 renamed to the DATA-LAYER-ARCHITECTURE verbs:
 -- inv.usp_UpdateInventoryItemActive (was ToggleInventoryItem; takes @IsActive),
