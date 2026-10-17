@@ -1,537 +1,926 @@
-# Consult360 — REST API Specification
+# Consult360 — WCF Service Specification (DOCNyleUnifiedAPI)
 
-**Version:** 2.3
-**Scope:** This document is derived 1:1 from `js/api.js` (150 public methods),
-`js/data.js` (the Phase 1 business-logic implementation each method wraps),
-and `docs/schema.sql` (the SQL Server 2019 schema), per the binding rules in
-`docs/DATA-LAYER-ARCHITECTURE.md`. Every method on `window.API` maps to
-exactly one endpoint below, using the verb → HTTP mapping table in
-architecture doc §2 and the `api.js → ASP.NET Controller` mapping in §3.
-Every endpoint names the stored procedure from `docs/stored-procedures.sql`
-that backs it.
+**Version:** 3.1
+**Platform:** .NET Framework 4.8 · Windows Communication Foundation (WCF) hosted in IIS ·
+SQL Server 2019 (`docs/schema.sql`, `docs/stored-procedures.sql`)
+**Service:** `DOCNyleUnifiedAPI` — one `.svc`, one service contract (`IDOCNyleUnifiedAPI`)
+**Consumer:** the Consult360 ASP.NET Web Forms application (`OpdProject`)
 
-**v2.1 change note:** a Phase-1 JSDOM functional-test pass found 7 UI call
-sites invoking `window.API` methods that didn't exist yet, plus one
-documented-but-unwired method (`updatePermission`). Fixing those on the
-client added `toggleSpecialty`, `createVitalConfig`, `createDrug`,
-`updateDrugStatus`, `updateMessageTemplate`, and `exportTableCsv` to
-`api.js`, and this revision adds their endpoints/procedures here (5 new
-stored procedures; `exportTableCsv` reuses the existing export procedures).
-`updatePermission`'s endpoint is now listed rather than marked
-"not currently called." Method count moved from 143 to 150 accordingly.
+This document is the service contract for Consult360's data layer. Every operation below is
+one `[OperationContract]` on the single WCF contract `IDOCNyleUnifiedAPI`, and every operation
+names the stored procedure in `docs/stored-procedures.sql` that backs it. Consult360 does not
+use ASP.NET MVC or Web API: the pages are Web Forms, and the data layer is the
+`DOCNyleUnifiedAPI` WCF service.
 
-**v2.3 change note:** `POST/PUT /doctors` is now backed by `sec.usp_SaveDoctorProfile`, and
-`PUT /hospitals/{id}` (`cfg.usp_UpdateHospital`) is new; every endpoint now has a procedure.
+**v3.1 change note:** matched to the `DOCNyleUnifiedAPI` solution — a single service
+(`DOCNyleUnifiedAPI.svc` / `.svc.cs`), a single interface file (`IDOCNyleUnifiedAPI.cs`), and
+the data access in the `DOCNyleUnifiedAPI.DAL` project (`DataRepository.cs`, `Helper.cs`).
+v3.0's 13 separate services (`IPatientService`, `IBillingService`, …) are now **regions** of the
+one contract; operation names, inputs, returns and procedures are unchanged.
 
-**v2.2 change note:** re-checked endpoint by endpoint against
-`docs/stored-procedures.sql` v3.2. Request fields now use the procedures' parameter
-names (the v4.0 schema renames — e.g. `reactionType`, `onsetMonth`, `icd10Description`,
-`defaultRoute` — had not reached this document); appointments, slots, consultations and
-sign-off describe the UTC / clinic-timezone handling; sign-off deducts clinic stock;
-invoice lines carry `inventoryItemId`. New: Services & Procedures items (§5),
-Clinic Inventory (§11) and time zones (§2). Known Gaps rewritten (the v4.0 schema
-resolved the earlier ones).
+**v3.0 change note:** rewritten for WCF. Routes and HTTP verbs are gone; each REST endpoint is
+now an operation. The procedures, their parameters, return shapes and error numbers are
+unchanged from v2.3. Also changed:
 
-**Base URL:** `https://{host}/api`
-**Auth:** Bearer JWT (Phase 4). Session token in header: `X-Session-Token`.
-**Tenant:** Every request is scoped by `HospitalId` from JWT claims (the
-`_hid()` guard in api.js). Server injects it via `SESSION_CONTEXT` for
-row-level security (architecture §6).
-**Format:** JSON request/response. IDs are UUIDs (the external `{Table}Id`,
-never the internal `Id`).
-**Dates & times:** every point in time is ISO 8601 UTC with its offset
-(`2026-10-20T14:00:00Z` / `+00:00`). Business events tied to a clinic (appointments,
-visits) also return `timeZoneId` (IANA, e.g. `America/Jamaica`) and the same instant on
-the clinic's clock (`slotStartLocal` = `2026-10-20T09:00:00-05:00`); show them in that
-zone for every user. Calendar dates (`date`, `expiryDate`, `followupDate`, report
-`fromDate`/`toDate`) are dates in the hospital's timezone, not UTC.
-**Actor fields:** `createdBy` / `modifiedBy` / `recordedByUserId` / `uploadedByUserId`
-parameters are filled by the API from the signed-in user and are not part of request bodies.
-**Roles:** ADMIN, DOCTOR, RECEPTIONIST, BILLING, NURSE, LAB_PARTNER — see
-`sec.PermissionMatrix` / the `permissionMatrix` object in data.js. Endpoints
-note the roles that data.js's static permission matrix grants access to via
-the named feature flag (e.g. `consultation`, `billing`, `admin_users`);
-enforcement in Phase 1 is at the router, and in Phase 4 becomes
-`[Authorize(Policy = "Require{Feature}")]`.
+- `hospitalId` and actor fields (`createdBy`, `modifiedBy`, `recordedByUserId`, …) are no
+  longer parameters. The service takes them from the caller's session (§0.4).
+- HTTP status codes are replaced by SOAP faults (`ServiceFault`, §0.6). v2.3's "HTTP 409"
+  responses are `Conflict` faults.
+- Operations v2.3 marked "AUDIT: caller must also call `POST /audit/logs`" now write that audit
+  entry themselves, in the same call (§0.7).
+- Duplicate entries that only existed for the retired `js/api.js` (`getDoctorFee` beside
+  `checkEffectiveFee`, `exportTableCsv` beside `listExportData`) are one operation each.
 
 ---
 
-## 1. Authentication, Sessions & Users
+## 0. Conventions
 
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| POST | `/auth/login` | `{ email, passwordHash }` | `user \| null` | `sec.usp_AuthenticateUser` — *api.js: `authenticateUser`* (also inserts `sec.LoginAttempt`) |
-| POST | `/auth/session` | `{ userId, sessionToken, browser?, ipAddress?, expiresAt }` | `{ userSessionId, sessionToken, createdAt, expiresAt }` | `sec.usp_CreateUserSession` |
-| GET | `/auth/session` | Header `X-Session-Token` (passed as `@SessionToken`) | `{ valid, userId, expiresAt }` | `sec.usp_CheckSessionValid` |
-| GET | `/users?hospitalId=` | `hospitalId` (query, `_hid()` fallback) | `[ User ]` — `{userId, fullName, email, phone, role, specialtyId, licenseNumber, labPartnerId, isActive, createdAt}` | `sec.usp_ListUsers` — *api.js: `listUsers`* |
-| POST | `/users` | `{ hospitalId, fullName, email, passwordHash, phone?, roles, specialtyId?, licenseNumber?, labPartnerId? }` | `User` (created) | `sec.usp_CreateUser` — *api.js: `createUser`* |
-| PUT | `/users/{id}` | `{ fullName?, phone?, roles?, specialtyId?, licenseNumber? }` | `User` (updated) | `sec.usp_UpdateUser` — *api.js: `updateUser`* |
-| PUT | `/users/{id}/active` | — (toggles current value) | `{ userId, isActive }` | `sec.usp_UpdateUserActive` — *api.js: `updateUserActive`*. AUDIT: role-change adjacent action; caller should also call `POST /audit/logs`. |
+### 0.1 Solution layout
 
-### Permissions (`admin_users`, `ADMIN` role)
+```
+Solution 'DOCNyleUnifiedAPI'
+├── DOCNyleUnifiedAPI                 WCF Service Application (.NET 4.8, IIS)
+│   ├── DOCNyleUnifiedAPI.svc         the one service endpoint
+│   │   └── DOCNyleUnifiedAPI.svc.cs  class DOCNyleUnifiedAPI : IDOCNyleUnifiedAPI — every operation
+│   ├── IDOCNyleUnifiedAPI.cs         [ServiceContract] IDOCNyleUnifiedAPI + all [DataContract]s
+│   │                                 + ServiceFault
+│   ├── Web.config                    <system.serviceModel>, connection string, appSettings
+│   └── packages.config
+└── DOCNyleUnifiedAPI.DAL             Class library (.NET 4.8)
+    ├── DataRepository.cs             one method per stored procedure
+    ├── Helper.cs                     connection, SESSION_CONTEXT, parameter and reader helpers
+    ├── App.Config                    design-time only — runtime settings come from the service's Web.config
+    └── packages.config
+```
 
-| Verb | Endpoint | Params | Returns | SP |
-|------|----------|--------|---------|-----|
-| GET | `/permissions?hospitalId=` | `hospitalId` | `{ [role]: { [feature]: boolean } }` (pivoted from flat grid) | `sec.usp_GetPermissionMatrix` — *api.js: `getPermissionMatrix`* |
-| GET | `/permissions/roles?hospitalId=` | `hospitalId` | `[ roleName ]` | `sec.usp_ListRoles` — *api.js: `listRoles`* |
-| GET | `/permissions/features?hospitalId=` | `hospitalId` | `[ featureName ]` | `sec.usp_ListPermissionFeatures` — *api.js: `listPermissionFeatures`* |
-| PUT | `/permissions/{role}/{feature}` | `{ hospitalId, isGranted }` — toggles the current value if `isGranted` is omitted, matching `data.js`'s `updatePermission(role, feature)` | `{ [feature]: boolean }` — the role's updated feature grid | `sec.usp_UpdatePermission` — *api.js: `updatePermission`*. AUDIT: caller should also invoke `POST /audit/logs` (`Action='UPDATE'`, `EntityType='Permission'`). |
+| File | Responsibility |
+|------|----------------|
+| `IDOCNyleUnifiedAPI.cs` | The `[ServiceContract]` interface with every `[OperationContract]`, grouped in `#region`s that follow §1–§13 of this document; the `[DataContract]` classes (request and response types) and `ServiceFault`, each region's types after its operations. |
+| `DOCNyleUnifiedAPI.svc.cs` | Implements the interface. Each operation: check the session and feature (§0.4–0.5), validate input, call `DataRepository`, map rows to data contracts, write the audit entry (§0.7). A shared wrapper turns exceptions into `ServiceFault` (§0.6). No SQL here. |
+| `DataRepository.cs` | One public method per stored procedure (`SearchPatients` → `opd.usp_SearchPatients`), `CommandType.StoredProcedure`, parameters by name. Returns rows / `DataTable`s / simple DAL types — never WCF data contracts, so the DAL does not reference the service project. |
+| `Helper.cs` | Opens the connection from the `DOCNyle` connection string, runs `sp_set_session_context` (§0.4), adds parameters (null → `DBNull.Value`), reads nullable columns, and retries transient SQL errors. |
+| `OpdProject` (Web Forms) | Calls the service through the generated client in **Connected Services** (§0.9). Until the service is deployed, the in-process classes in `Services/*Service.cs` (backed by `DataStore`) stand in for it; each region below names the class it replaces. |
+
+### 0.2 Endpoint and regions
+
+Address: `https://{host}/DOCNyleUnifiedAPI.svc` — one endpoint for every operation. Contract
+namespace: `http://schemas.consult360.com/opd/2026/10`.
+
+The contract is one interface; the regions only organize it (and this document). Each region
+has a default feature from `sec.PermissionMatrix`; operations that need a different feature say
+so.
+
+| § | Region in `IDOCNyleUnifiedAPI` | Replaces (in-process) | Feature (`sec.PermissionMatrix`) |
+|---|--------------------------------|-----------------------|----------------------------------|
+| 1 | Auth | `UserService.Authenticate` | — (anonymous + session) |
+| 2 | Users & permissions | `UserService` | `admin_users` |
+| 3 | Hospital & configuration | `HospitalService`, `TimeZoneService` | read: any signed-in user; write: `admin_hospital` |
+| 4 | Patients | `PatientService` | `patients` |
+| 5 | Scheduling | `SchedulingService` | `scheduling`; settings: `admin_scheduling` |
+| 6 | Consultation | `ConsultationService` | `consultation` |
+| 7 | Catalog | `CatalogService`, `PhraseService` | `consultation`; formulary admin: `admin_formulary` |
+| 8 | Lab | `LabService` | ordering/review: `consultation`; portal: `lab_portal` |
+| 9 | Billing | `BillingService` | `billing` |
+| 10 | Inventory | `InventoryService` | `admin_inventory` |
+| 11 | Reports | `ReportService` | `reports` |
+| 12 | Notifications | `NotificationService` | `admin_hospital` |
+| 13 | Audit & export | `AuditService`, `ExportService` | `audit_log` / `data_export` |
+
+Roles: ADMIN, DOCTOR, RECEPTIONIST, BILLING, NURSE, LAB_PARTNER. A role reaches an operation
+when the permission matrix grants it the region's feature. Operation names are unique across
+the whole contract (they are the procedure names, §0.10), so no two regions clash.
+
+### 0.3 Binding and hosting
+
+- **Binding:** `basicHttpBinding`, `security mode="Transport"` (HTTPS only),
+  `messageEncoding="Mtom"` so `byte[]` payloads (logos, sketches, CSV exports) travel as binary
+  attachments rather than base64 text.
+- **Limits:** `maxReceivedMessageSize="52428800"` (50 MB) with matching `readerQuotas`, the same
+  ceiling as the site's `httpRuntime maxRequestLength` / `requestLimits`.
+- **Behaviors:** `InstanceContextMode.PerCall`, `ConcurrencyMode.Multiple` on the
+  `DOCNyleUnifiedAPI` class. No WCF sessions — the caller's session is the `SessionToken` header
+  (§0.4). `includeExceptionDetailInFaults="false"` outside Debug builds; metadata
+  (`serviceMetadata httpsGetEnabled`) on in Debug so Connected Services can refresh, off in
+  Release.
+- **Same-server option:** when the service and the site share a machine, a second
+  `netNamedPipeBinding` endpoint on the same service can be used instead; the contract does not
+  change.
+
+```xml
+<!-- DOCNyleUnifiedAPI/Web.config (excerpt) -->
+<connectionStrings>
+  <add name="DOCNyle" connectionString="…" providerName="System.Data.SqlClient" />
+</connectionStrings>
+<system.serviceModel>
+  <bindings>
+    <basicHttpBinding>
+      <binding name="docnyleHttps" messageEncoding="Mtom" maxReceivedMessageSize="52428800">
+        <readerQuotas maxStringContentLength="52428800" maxArrayLength="52428800" />
+        <security mode="Transport" />
+      </binding>
+    </basicHttpBinding>
+  </bindings>
+  <behaviors>
+    <serviceBehaviors>
+      <behavior name="docnyle">
+        <serviceMetadata httpsGetEnabled="true" />   <!-- false in Web.Release.config -->
+        <serviceDebug includeExceptionDetailInFaults="false" />
+      </behavior>
+    </serviceBehaviors>
+  </behaviors>
+  <services>
+    <service name="DOCNyleUnifiedAPI.DOCNyleUnifiedAPI" behaviorConfiguration="docnyle">
+      <endpoint address="" binding="basicHttpBinding" bindingConfiguration="docnyleHttps"
+                contract="DOCNyleUnifiedAPI.IDOCNyleUnifiedAPI" />
+    </service>
+  </services>
+</system.serviceModel>
+```
+
+```xml
+<%@ ServiceHost Language="C#" Service="DOCNyleUnifiedAPI.DOCNyleUnifiedAPI" CodeBehind="DOCNyleUnifiedAPI.svc.cs" %>
+```
+
+### 0.4 Session, caller context and tenancy
+
+- **Sign-in:** `AuthenticateUser` and `CreateUserSession` (§1) are the only operations that run
+  without a session. They return the session token the Web Forms app keeps in `AppSession`.
+- **Every other call** carries a SOAP header `SessionToken` (namespace as §0.2), added on the
+  client by a message inspector registered on the generated client (§0.9). An optional
+  `CorrelationId` header is logged with the call.
+- **Server side:** each operation in `DOCNyleUnifiedAPI.svc.cs` starts with
+  `var caller = Authorize("feature");`. `Authorize` reads the header from
+  `OperationContext.Current.IncomingMessageHeaders`, validates the token through
+  `DataRepository.CheckSessionValid` (`sec.usp_CheckSessionValid`; a short `MemoryCache` is
+  allowed), and returns a `CallerContext` with the user's `UserId`, `HospitalId`, roles and the
+  hospital's `TimeZoneId`. A missing, expired or revoked token is an `Unauthenticated` fault.
+- **Tenancy:** the hospital always comes from `caller.HospitalId`, never from the message. The
+  service passes it to every `DataRepository` method, which uses it as the procedure's
+  `@HospitalId`; `Helper` runs
+  `EXEC sp_set_session_context N'HospitalId', @hid, @read_only = 1` on every connection it opens
+  so row-level security applies (`DATA-LAYER-ARCHITECTURE.md` §6). An id that belongs to another
+  hospital is reported as `NotFound`.
+- **Actor fields:** `@CreatedBy`, `@ModifiedBy`, `@RecordedByUserId`, `@UploadedByUserId`,
+  `@IssuedBy`, `@ReceivedBy`, `@VoidedBy`, `@CheckedInBy` and similar are filled from
+  `caller.UserId`. They are not data members of any request.
+
+### 0.5 Authorization
+
+`Authorize("feature")` also checks the caller's roles against `sec.PermissionMatrix`
+(`DataRepository.GetPermissionMatrix`, cached per hospital and cleared by `UpdatePermission`)
+and raises a `Forbidden` fault when no role grants the feature. The region's feature is in
+§0.2; operation-level exceptions are listed with the operation. This is the same check the
+pages make today with `UserService.HasPermission`.
+
+### 0.6 Faults
+
+Every operation is declared with `[FaultContract(typeof(ServiceFault))]`. `ServiceFault` is
+defined in `IDOCNyleUnifiedAPI.cs`:
+
+```csharp
+[DataContract(Namespace = Ns.V1)]
+public class ServiceFault
+{
+    [DataMember(Order = 1)] public FaultCode Code { get; set; }
+    [DataMember(Order = 2)] public string Message { get; set; }        // safe to show the user
+    [DataMember(Order = 3)] public int? ErrorNumber { get; set; }      // SQL THROW number, e.g. 50040
+    [DataMember(Order = 4)] public List<FieldError> Fields { get; set; } // Validation only
+}
+
+[DataContract(Namespace = Ns.V1)]
+public enum FaultCode
+{
+    [EnumMember] Validation, [EnumMember] NotFound, [EnumMember] Conflict, [EnumMember] BusinessRule,
+    [EnumMember] Unauthenticated, [EnumMember] Forbidden, [EnumMember] Internal
+}
+```
+
+Each operation body runs inside one wrapper in `DOCNyleUnifiedAPI.svc.cs`
+(`return Run(() => { … });`) that converts exceptions to `FaultException<ServiceFault>`:
+
+| Source | `FaultCode` |
+|--------|-------------|
+| Request fails validation (missing required member, bad enum value, string too long) | `Validation` |
+| Procedure returns no row for the id given, or the row belongs to another hospital | `NotFound` |
+| A state change the record's current state does not allow — appointment status moves (v2.3's "null / HTTP 409"), invoice cancelled (50121), payer already settled (50122), removing a settled coverage line | `Conflict` |
+| Any other `SqlException` with `Number` 50000–59999 (the `THROW`s in `stored-procedures.sql`) | `BusinessRule`, with `ErrorNumber` and the procedure's message |
+| `SessionToken` missing / invalid / expired | `Unauthenticated` |
+| Feature not granted to any of the caller's roles; confidential note requested by a non-author | `Forbidden` |
+| Anything else | `Internal` (message is generic; details go to the server log with the `CorrelationId`) |
+
+Error numbers in use: 50020–50024 (stock receipts/adjustments), 50030–50033 (consultation
+services), 50040 (not enough stock at sign-off), 50050 (hospital has no timezone), 50060–50065
+(doctor profiles), 50070–50073 (hospital profile), 50120–50122 (payments / coverage).
+
+### 0.7 Audit
+
+Operations marked **Audited: ACTION** write their `sec.AuditLog` entry themselves (via
+`DataRepository.RecordAuditEntry` → `sec.usp_RecordAuditEntry`) inside the same call, with
+`EntityType` / `EntityId` set from the operation. Callers do not record those again. Other
+screen-level audit events the pages record today with `AuditService.Record(...)` go through the
+`RecordAuditEntry` operation (§13).
+
+### 0.8 Data contracts
+
+- All `[DataContract]` classes live in `IDOCNyleUnifiedAPI.cs` beside the interface, use the
+  namespace in §0.2, implement `IExtensibleDataObject`, and give every `[DataMember]` an explicit
+  `Order`. New members are only ever added (with a higher `Order`, `IsRequired = false`); a
+  breaking change gets a new namespace date.
+- Member names are PascalCase, the same as the `Models/*.cs` properties they replace.
+- **Ids** are `string`, holding the record's external id (`{Table}Id` UUID in SQL; the
+  in-memory store's readable ids such as `PAT-001` until then). The internal `Id` column never
+  leaves the database.
+- **Instants** (`CreatedAt`, `SignedAt`, `SlotStart`, `VisitDate`, …) are `DateTime` with
+  `Kind = Utc` (serialized with `Z`).
+- **Clinic-clock values** (`SlotStartLocal`, `SlotEndLocal`) are `DateTimeOffset` in the
+  hospital's zone, returned beside `TimeZoneId` (IANA, e.g. `America/Jamaica`). Show them in
+  that zone for every user.
+- **Calendar dates** (`Date`, `LeaveDate`, `ExpiryDate`, `FollowUpDate`, report
+  `FromDate`/`ToDate`) are `DateTime` with `Kind = Unspecified` and time 00:00 — a date in the
+  hospital's timezone, not UTC.
+- **Wall-clock slot times** (`ListAvailableSlots` output, `CreateAppointment` input) are
+  `DateTime` with `Kind = Unspecified` and no offset; pass them back unchanged.
+- **Times of day** (`StartTime`, `EndTime` in slot windows) are `string` `"HH:mm"`.
+- **Money** is `decimal`; quantities are `int`.
+- **Optional / partial-update members** are nullable (`string`, `int?`, `decimal?`, `bool?`) with
+  `EmitDefaultValue = false`. In an `Update…` request, a member left `null` keeps its stored
+  value.
+- **Settings maps** (`Dictionary<string,string>`) and other procedure inputs documented as
+  `@…Json` are serialized to JSON by the service, not by the caller.
+- **Lists** are `List<T>` in the contract; configure the service reference's collection type as
+  `System.Collections.Generic.List` so the client sees `List<T>` too. An empty list, never
+  `null`, means "none".
+- **"Success" results:** operations whose procedure returns only a success flag are `void`; a
+  failure is a fault.
+
+### 0.9 Calling from Web Forms
+
+`OpdProject` adds a service reference to `https://{host}/DOCNyleUnifiedAPI.svc?wsdl`
+(Connected Services → Add Service Reference, namespace `DocNyleApi`, collection type `List`).
+That generates `DocNyleApi.DOCNyleUnifiedAPIClient` and the data contracts; update the
+reference whenever `IDOCNyleUnifiedAPI.cs` changes.
+
+```csharp
+// OpdProject/Web/DocNyle.cs — one place that creates clients, adds the session header and closes them
+public static class DocNyle
+{
+    public static T Call<T>(Func<DocNyleApi.DOCNyleUnifiedAPIClient, T> call)
+    {
+        var client = new DocNyleApi.DOCNyleUnifiedAPIClient();      // endpoint from Web.config <client>
+        try
+        {
+            using (new OperationContextScope(client.InnerChannel))
+            {
+                OperationContext.Current.OutgoingMessageHeaders.Add(
+                    MessageHeader.CreateHeader("SessionToken", Ns.V1, AppSession.ServiceToken));
+                var result = call(client);
+                client.Close();
+                return result;
+            }
+        }
+        catch (FaultException) { client.Close(); throw; }   // a fault leaves the channel usable
+        catch { client.Abort(); throw; }
+    }
+}
+
+// in a page:
+var patient = DocNyle.Call(api => api.GetPatient(PatientId));
+```
+
+Never wrap the client in `using` — `Dispose` throws on a faulted channel and hides the real
+error. `BasePage` turns a `FaultException<ServiceFault>` into the page's error toast
+(`Detail.Message`), and an `Unauthenticated` fault into the redirect to `login.aspx` it already
+does for an expired `AppSession`.
+
+### 0.10 Contract example
+
+```csharp
+// DOCNyleUnifiedAPI/IDOCNyleUnifiedAPI.cs
+[ServiceContract(Namespace = Ns.V1)]
+public interface IDOCNyleUnifiedAPI
+{
+    #region Patients (§4)
+
+    [OperationContract, FaultContract(typeof(ServiceFault))]
+    List<PatientSummary> SearchPatients(string term);
+
+    [OperationContract, FaultContract(typeof(ServiceFault))]
+    Patient GetPatient(string patientId);
+
+    [OperationContract, FaultContract(typeof(ServiceFault))]
+    Patient CreatePatient(CreatePatientRequest request);
+    // …
+
+    #endregion
+
+    #region Billing (§9)
+    // …
+    #endregion
+}
+```
+
+```csharp
+// DOCNyleUnifiedAPI/DOCNyleUnifiedAPI.svc.cs
+[ServiceBehavior(InstanceContextMode = InstanceContextMode.PerCall, ConcurrencyMode = ConcurrencyMode.Multiple,
+                 Namespace = Ns.V1)]
+public class DOCNyleUnifiedAPI : IDOCNyleUnifiedAPI
+{
+    public Patient GetPatient(string patientId)
+    {
+        return Run(() =>
+        {
+            var caller = Authorize("patients");
+            var row = new DataRepository(caller.HospitalId, caller.UserId).GetPatient(patientId)
+                      ?? throw NotFound("Patient not found.");
+            Audit(caller, "READ", "Patient", patientId);
+            return ToPatient(row);
+        });
+    }
+}
+```
+
+```csharp
+// DOCNyleUnifiedAPI.DAL/DataRepository.cs
+public DataRow GetPatient(string patientId)
+{
+    using (var conn = Helper.Open(_hospitalId))                       // sets SESSION_CONTEXT
+    using (var cmd = Helper.Procedure(conn, "opd.usp_GetPatient"))
+    {
+        Helper.Add(cmd, "@HospitalId", _hospitalId);
+        Helper.Add(cmd, "@PatientId", patientId);
+        return Helper.FirstRow(cmd);                                  // null when no row
+    }
+}
+```
+
+Operation names are the procedure name without its schema and `usp_` prefix
+(`opd.usp_SearchPatients` → `SearchPatients`), so they keep the 14-verb taxonomy in
+`DATA-LAYER-ARCHITECTURE.md` §1, and the matching `DataRepository` method has the same name.
+
+### 0.11 Reading the tables
+
+Each row is one `[OperationContract]` on `IDOCNyleUnifiedAPI`: **Operation** is the C#
+signature (request classes are expanded in **Input**), **Returns** gives the data contract and
+its members, **Procedure** is the backing stored procedure (and the `DataRepository` method of
+the same name), followed by notes.
 
 ---
 
-## 2. Hospitals & Specialties
+## 1. Auth — sign-in and sessions
 
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/hospitals/{id}` | — (`id` defaults to `_hid()`) | `Hospital` — `{hospitalId, name, address, phone, email, country, currency, timezone, licenseNumber, patientIdLabel, nationalHealthIdLabel, isNationalHealthIdMandatory, defaultTempUnit, defaultRxValidityDays, isActive}` | `cfg.usp_GetHospital` — *api.js: `getHospital`* |
-| GET | `/specialties?hospitalId=` | `hospitalId` (`_hid()` fallback) | `[ Specialty ]` — `{specialtyId, hospitalId, specialtyName, isActive}`, active only | `cfg.usp_ListSpecialties` — *api.js: `listSpecialties`* |
-| POST | `/specialties` | `{ hospitalId, specialtyName }` | `Specialty` (created) | `cfg.usp_CreateSpecialty` — *api.js: `createSpecialty`* |
-| GET | `/config/specialties?hospitalId=` | `hospitalId` (`_hid()` fallback) | `[ Specialty ]`, incl. inactive (admin config view) | `cfg.usp_ListSpecialtyConfig` — *api.js: `listSpecialtyConfig`* |
-| PUT | `/specialties/{id}/toggle-active` | — (toggles current value) | `Specialty` (updated) | `cfg.usp_ToggleSpecialty` — *api.js: `toggleSpecialty`* |
-| PUT | `/hospitals/{id}` | `{ name?, legalAddress?, contactNumber?, primaryEmail?, country?, currency?, timezone?, licenseNumber?, patientIdLabel?, nationalHealthIdLabel?, nationalHealthIdMandatory?, growthChartStandard?, defaultTempUnit?, defaultRxValidityDays?, rxPrefix?, receiptPrefix?, invoicePrefix?, labChargePerTest?, logoBase64?, removeLogo? }` — omitted fields keep their value; `timezone` must be an id from `GET /time-zones` | `Hospital` (same as GET) | `cfg.usp_UpdateHospital`. Errors 50070 hospital not found, 50071 unknown time zone, 50072 blank name, 50073 Rx validity < 1 |
-| GET | `/time-zones` | — | `[ { timeZoneId, windowsTimeZoneId, displayName } ]` — IANA ids a hospital can use (`cfg.TimeZone`); a hospital's `timezone` drives its "today", report dates and appointment times | `cfg.usp_ListTimeZones` |
-| GET | `/payment-methods?hospitalId=` | `hospitalId` (`_hid()` fallback) | `[ PaymentMethod ]` — `{paymentMethodId, hospitalId, methodName, isActive}` | `cfg.usp_ListPaymentMethods` — *api.js: `listPaymentMethods`* |
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `AuthenticateUser(AuthenticateRequest request)` | `Email, Password` — the service verifies `Password` against the stored hash (Known Gaps #4) | `AuthenticatedUser` — `UserId, HospitalId, FullName, Email, Phone, Roles, SpecialtyId, LicenseNumber, LabPartnerId, IsActive` — or `null` when the email/password do not match | `sec.usp_AuthenticateUser`. `[AnonymousOperation]`. **Audited: LOGIN / LOGIN_FAIL** |
+| `CreateUserSession(CreateSessionRequest request)` | `UserId, SessionToken, Browser?, IpAddress?, ExpiresAt` | `UserSession` — `UserSessionId, SessionToken, CreatedAt, ExpiresAt` | `sec.usp_CreateUserSession`. `[AnonymousOperation]`; only accepted for a `UserId` returned by `AuthenticateUser` in the same sign-in |
+| `CheckSessionValid()` | — (the `SessionToken` header) | `SessionStatus` — `Valid, UserId, ExpiresAt` | `sec.usp_CheckSessionValid`. Used by `BasePage` to confirm the session on postback |
 
 ---
 
-## 3. Patients + Sub-resources
+## 2. Users & permissions
 
-Role: `patients` feature (ADMIN, DOCTOR, RECEPTIONIST, BILLING, NURSE).
+Feature: `admin_users` (ADMIN).
 
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/patients/search?term=&hospitalId=` | `term`, `hospitalId` (`_hid()` fallback); term < 2 chars returns unfiltered hospital list | `[ Patient ]` — `{patientId, mrn, fullName, gender, dob, phone, email, isActive}` | `opd.usp_SearchPatients` — *api.js: `searchPatients`* |
-| GET | `/patients/{id}` | — | `Patient` (full record incl. `address`, `nationalHealthId`, `insuranceProvider`, `insurancePolicyNo`, `photoBase64`, `emergencyContactName`, `emergencyContactPhone`) | `opd.usp_GetPatient` — *api.js: `getPatient`*. AUDIT: caller must also call `POST /audit/logs` (Action=`READ`). |
-| POST | `/patients` | `{ hospitalId, fullName, gender, dob, phone, email?, address?, nationalHealthId?, insuranceProvider?, insurancePolicyNo?, emergencyContactName?, emergencyContactPhone? }` | `Patient` (created; server generates `mrn`) | `opd.usp_CreatePatient` — *api.js: `createPatient`*. AUDIT: caller must also call `POST /audit/logs` (Action=`CREATE`). |
-| PUT | `/patients/{id}` | `{ fullName?, phone?, email?, address?, nationalHealthId?, insuranceProvider?, insurancePolicyNo?, emergencyContactName?, emergencyContactPhone? }` | `Patient` (updated) | `opd.usp_UpdatePatient` — *api.js: `updatePatient`* |
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListUsers()` | — | `List<User>` — `UserId, FullName, Email, Phone, Roles, SpecialtyId, LicenseNumber, LabPartnerId, IsActive, CreatedAt` | `sec.usp_ListUsers` |
+| `CreateUser(CreateUserRequest request)` | `FullName, Email, Password, Phone?, Roles, SpecialtyId?, LicenseNumber?, LabPartnerId?` | `User` | `sec.usp_CreateUser`. **Audited: CREATE** |
+| `UpdateUser(string userId, UpdateUserRequest request)` | `FullName?, Phone?, Roles?, SpecialtyId?, LicenseNumber?` | `User` | `sec.usp_UpdateUser`. **Audited: UPDATE** |
+| `UpdateUserActive(string userId)` | — (toggles) | `UserActiveState` — `UserId, IsActive` | `sec.usp_UpdateUserActive`. **Audited: UPDATE** |
+| `GetPermissionMatrix()` | — | `List<PermissionGrant>` — `Role, Feature, IsGranted` (the page pivots it to role × feature) | `sec.usp_GetPermissionMatrix` |
+| `ListRoles()` | — | `List<string>` | `sec.usp_ListRoles` |
+| `ListPermissionFeatures()` | — | `List<string>` | `sec.usp_ListPermissionFeatures` |
+| `UpdatePermission(string role, string feature, bool? isGranted)` | `isGranted` `null` toggles the current value | `List<PermissionGrant>` — the role's updated grid | `sec.usp_UpdatePermission`. **Audited: UPDATE** (`EntityType = Permission`) |
+
+---
+
+## 3. Hospital & configuration — profile, settings and configuration lists
+
+Reads: any signed-in user. Writes: `admin_hospital` (ADMIN) unless stated.
+
+### Hospital, time zones, settings
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `GetHospital()` | — | `Hospital` — `HospitalId, Name, Address, Phone, Email, Country, Currency, Timezone, LicenseNumber, PatientIdLabel, NationalHealthIdLabel, IsNationalHealthIdMandatory, DefaultTempUnit, DefaultRxValidityDays, IsActive` | `cfg.usp_GetHospital` |
+| `UpdateHospital(UpdateHospitalRequest request)` | `Name?, LegalAddress?, ContactNumber?, PrimaryEmail?, Country?, Currency?, Timezone?, LicenseNumber?, PatientIdLabel?, NationalHealthIdLabel?, NationalHealthIdMandatory?, GrowthChartStandard?, DefaultTempUnit?, DefaultRxValidityDays?, RxPrefix?, ReceiptPrefix?, InvoicePrefix?, LabChargePerTest?, Logo? (byte[]), RemoveLogo?` — `null` keeps the value; `Timezone` must come from `ListTimeZones` | `Hospital` | `cfg.usp_UpdateHospital`. Errors 50070 not found, 50071 unknown time zone, 50072 blank name, 50073 Rx validity < 1. **Audited: UPDATE** |
+| `ListTimeZones()` | — | `List<TimeZoneOption>` — `TimeZoneId, WindowsTimeZoneId, DisplayName` | `cfg.usp_ListTimeZones`. The hospital's zone drives its "today", report dates and appointment times |
+| `GetHospitalSettings()` | — | `Dictionary<string,string>` — `APPT_SLOT_MINS, APPT_BUFFER_MINS, FREE_FOLLOWUP_ALLOWED, FREE_FOLLOWUP_DAYS, DATE_FORMAT, TIME_FORMAT, MRN_PREFIX, MRN_FORMAT, MRN_SEQ, DOCTOR_NAME_TEMPLATE` | `cfg.usp_GetHospitalSettings` |
+| `SaveHospitalSettings(Dictionary<string,string> values)` | sent as `@ValuesJson`; `MRN_SEQ` ignored | settings map | `cfg.usp_SaveHospitalSettings`. Feature `admin_scheduling`. A new `DOCTOR_NAME_TEMPLATE` re-renders every doctor's `FullName` in the procedure |
+| `ListPaymentMethods()` | — | `List<PaymentMethod>` — `PaymentMethodId, MethodName, IsActive` | `cfg.usp_ListPaymentMethods` |
+
+### Specialties
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListSpecialties()` | — | `List<Specialty>` — `SpecialtyId, SpecialtyName, IsActive`; active only | `cfg.usp_ListSpecialties` |
+| `ListSpecialtyConfig()` | — | `List<Specialty>` incl. inactive (admin view) | `cfg.usp_ListSpecialtyConfig` |
+| `CreateSpecialty(string specialtyName)` | — | `Specialty` | `cfg.usp_CreateSpecialty` |
+| `ToggleSpecialty(string specialtyId)` | — (toggles) | `Specialty` | `cfg.usp_ToggleSpecialty` |
+
+### Medical history & medical event lists (hospital config)
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListMedicalHistoryItems()` | — | `List<MedicalHistoryItem>` — `MedicalHistoryItemId, ItemName, SortOrder`; active, sorted | `cfg.usp_ListMedicalHistoryItems` |
+| `ListMedicalHistoryConfig()` | — | `List<MedicalHistoryItem>` incl. inactive | `cfg.usp_ListMedicalHistoryConfig` |
+| `CreateMedicalHistoryConfigItem(string itemName)` | — | `MedicalHistoryItem` | `cfg.usp_CreateMedicalHistoryConfigItem` |
+| `UpdateMedicalHistoryItemStatus(string itemName, bool isActive)` | — | `void` | `cfg.usp_UpdateMedicalHistoryItemStatus` |
+| `ListMedicalEventItems()` | — | `List<MedicalEventType>` — `MedicalEventTypeId, EventTypeName` | `cfg.usp_ListMedicalEventItems` |
+
+### Vitals configuration
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListVitalsConfig()` | — | `List<VitalDefinition>` — `VitalDefinitionId, VitalCode, DisplayLabel, AllowedUnits, MinValue, MaxValue, SortOrder, IsEnabled`; sorted | `cfg.usp_ListVitalsConfig` |
+| `ListEnabledVitalsConfig()` | — | `List<VitalDefinition>`, enabled only | `cfg.usp_ListEnabledVitalsConfig` |
+| `UpdateVitalEnabled(string vitalCode, bool isEnabled)` | — | `void` | `cfg.usp_UpdateVitalEnabled` |
+| `CreateVitalConfig(CreateVitalConfigRequest request)` | `VitalCode, DisplayLabel, AllowedUnits, MinValue?, MaxValue?, SortOrder?` | `VitalDefinition` | `cfg.usp_CreateVitalConfig` |
+
+### Compliance
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListCompliances(string country)` | — | `List<Compliance>` — `ComplianceId, ComplianceName, Country, IsMandatory, DisplayLabel, PrintLabel, ValidationRegex, SortOrder`; includes `Country = ALL` rows | `cfg.usp_ListCompliances` |
+| `ListHospitalCompliances()` | — | `List<HospitalCompliance>` — `HospitalComplianceId, ComplianceId, ComplianceName, DisplayLabel, PrintLabel, IsMandatory, RegistrationNumber, IssuedOn, ExpiresOn` | `cfg.usp_ListHospitalCompliances` |
+| `SaveHospitalCompliance(SaveHospitalComplianceRequest request)` | `ComplianceId, RegistrationNumber, IssuedDate?, ExpiryDate?` | `HospitalCompliance` (upserted) | `cfg.usp_SaveHospitalCompliance` |
+
+---
+
+## 4. Patients — patients and their records
+
+Feature: `patients` (ADMIN, DOCTOR, RECEPTIONIST, BILLING, NURSE).
+
+### Patients
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `SearchPatients(string term)` | `term` under 2 characters returns the hospital's list unfiltered | `List<PatientSummary>` — `PatientId, Mrn, FullName, Gender, Dob, Phone, Email, IsActive` | `opd.usp_SearchPatients` |
+| `GetPatient(string patientId)` | — | `Patient` — summary members plus `Address, NationalHealthId, InsuranceProvider, InsurancePolicyNo, Photo (byte[]), EmergencyContactName, EmergencyContactPhone` | `opd.usp_GetPatient`. **Audited: READ** |
+| `CreatePatient(CreatePatientRequest request)` | `FullName, Gender, Dob, Phone, Email?, Address?, NationalHealthId?, InsuranceProvider?, InsurancePolicyNo?, EmergencyContactName?, EmergencyContactPhone?` | `Patient` (server generates `Mrn`) | `opd.usp_CreatePatient`. **Audited: CREATE** |
+| `UpdatePatient(string patientId, UpdatePatientRequest request)` | `FullName?, Phone?, Email?, Address?, NationalHealthId?, InsuranceProvider?, InsurancePolicyNo?, EmergencyContactName?, EmergencyContactPhone?` | `Patient` | `opd.usp_UpdatePatient`. **Audited: UPDATE** |
 
 ### Allergies
 
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/patients/{id}/allergies` | — | `[ Allergy ]` — `{patientAllergyId, hospitalId, patientId, allergyType, allergyName, reaction, severity, status, onsetDate}` | `opd.usp_ListAllergies` — *api.js: `listAllergies`* |
-| POST | `/patients/{id}/allergies` | `{ hospitalId, allergyType, allergyName, reactionType?, reactionDescription?, severity, isTreated?, isFamilyHistory?, sinceWhen?, notes? }` | `Allergy` (created, `status`='ACTIVE') | `opd.usp_CreateAllergy` — *api.js: `createAllergy`* |
-| PUT | `/allergies/{id}` | `{ reactionType?, reactionDescription?, severity?, status?, isTreated?, sinceWhen?, notes? }` | `Allergy` (updated) | `opd.usp_UpdateAllergy` — *api.js: `updateAllergy`* |
-| DELETE | `/allergies/{id}` | — | `{ success }` | `opd.usp_DeleteAllergy` — *api.js: `deleteAllergy`*. Soft delete: sets `Status`. |
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListAllergies(string patientId)` | — | `List<Allergy>` — `PatientAllergyId, PatientId, AllergyType, AllergyName, Reaction, Severity, Status, OnsetDate` | `opd.usp_ListAllergies` |
+| `CreateAllergy(string patientId, CreateAllergyRequest request)` | `AllergyType, AllergyName, ReactionType?, ReactionDescription?, Severity, IsTreated?, IsFamilyHistory?, SinceWhen?, Notes?` | `Allergy` (`Status = ACTIVE`) | `opd.usp_CreateAllergy` |
+| `UpdateAllergy(string allergyId, UpdateAllergyRequest request)` | `ReactionType?, ReactionDescription?, Severity?, Status?, IsTreated?, SinceWhen?, Notes?` | `Allergy` | `opd.usp_UpdateAllergy` |
+| `DeleteAllergy(string allergyId)` | — | `void` | `opd.usp_DeleteAllergy` — soft delete (sets `Status`). **Audited: UPDATE** |
 
-### Medical History (patient-level entries + hospital config lists)
+### Medical history
 
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/config/medical-history-items?hospitalId=` | `hospitalId` (`_hid()` fallback) | `[ MedicalHistoryItem ]` — `{medicalHistoryItemId, hospitalId, itemName, sortOrder}`, active only, sorted | `cfg.usp_ListMedicalHistoryItems` — *api.js: `listMedicalHistoryItems`* |
-| GET | `/config/medical-history?hospitalId=` | `hospitalId` | `[ MedicalHistoryItem ]` incl. inactive (admin view) | `cfg.usp_ListMedicalHistoryConfig` — *api.js: `listMedicalHistoryConfig`* |
-| POST | `/config/medical-history` | `{ hospitalId, itemName }` | `MedicalHistoryItem` (created) | `cfg.usp_CreateMedicalHistoryConfigItem` — *api.js: `createMedicalHistoryConfigItem`* |
-| PUT | `/config/medical-history/{itemName}/status` | `{ hospitalId, isActive }` | `{ success }` | `cfg.usp_UpdateMedicalHistoryItemStatus` — *api.js: `updateMedicalHistoryItemStatus`* |
-| GET | `/patients/{id}/medical-history` | — | `[ PatientMedicalHistory ]` — `{patientMedicalHistoryId, patientId, conditionName, sinceMonth, sinceYear, notes, createdAt}` | `opd.usp_ListPatientMedicalHistory` — *api.js: `listPatientMedicalHistory`* |
-| GET | `/patients/{id}/medical-history/all` | — | Same shape as above (data.js dual-named method) | `opd.usp_GetPatientMedicalHistory` — *api.js: `getPatientMedicalHistory`* |
-| POST | `/patients/{id}/medical-history` | `{ hospitalId, itemId?, conditionName, onsetMonth?, onsetYear?, status?, notes? }` | `PatientMedicalHistory` (created) | `opd.usp_CreatePatientMedicalHistory` — *api.js: `createPatientMedicalHistory`* |
-| PUT | `/patients/{id}/medical-history/save` | `{ hospitalId, itemId?, conditionName, onsetMonth?, onsetYear?, status?, notes? }` | `PatientMedicalHistory` (upserted by `conditionName`) | `opd.usp_SavePatientMedicalHistory` — *api.js: `savePatientMedicalHistory`* |
-| PUT | `/patients/{id}/medical-history/{conditionName}` | `{ onsetMonth?, onsetYear?, status?, notes? }` | `{ success }` | `opd.usp_UpdatePatientMedicalHistory` — *api.js: `updatePatientMedicalHistory`* |
-| DELETE | `/patients/{id}/medical-history/{conditionName}` | — | `{ success }` | `opd.usp_DeletePatientMedicalHistory` — *api.js: `deletePatientMedicalHistory`*. Soft delete (`IsActive=0`). |
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListPatientMedicalHistory(string patientId)` | — | `List<PatientMedicalHistory>` — `PatientMedicalHistoryId, PatientId, ConditionName, SinceMonth, SinceYear, Notes, CreatedAt` | `opd.usp_ListPatientMedicalHistory` |
+| `GetPatientMedicalHistory(string patientId)` | — | same shape, incl. inactive entries | `opd.usp_GetPatientMedicalHistory` |
+| `CreatePatientMedicalHistory(string patientId, MedicalHistoryRequest request)` | `ItemId?, ConditionName, OnsetMonth?, OnsetYear?, Status?, Notes?` | `PatientMedicalHistory` | `opd.usp_CreatePatientMedicalHistory` |
+| `SavePatientMedicalHistory(string patientId, MedicalHistoryRequest request)` | as above | `PatientMedicalHistory` (upserted by `ConditionName`) | `opd.usp_SavePatientMedicalHistory`. **Audited: UPDATE** |
+| `UpdatePatientMedicalHistory(string patientId, string conditionName, UpdateMedicalHistoryRequest request)` | `OnsetMonth?, OnsetYear?, Status?, Notes?` | `void` | `opd.usp_UpdatePatientMedicalHistory` |
+| `DeletePatientMedicalHistory(string patientId, string conditionName)` | — | `void` | `opd.usp_DeletePatientMedicalHistory` — soft delete (`IsActive = 0`) |
 
-### Medical Events
+### Medical events and family history
 
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/config/medical-event-items?hospitalId=` | `hospitalId` (`_hid()` fallback) | `[ MedicalEventType ]` — `{medicalEventTypeId, hospitalId, eventTypeName}` | `cfg.usp_ListMedicalEventItems` — *api.js: `listMedicalEventItems`* |
-| GET | `/patients/{id}/medical-events` | — | `[ PatientMedicalEvent ]` — `{patientMedicalEventId, patientId, eventType, eventDate, notes, createdAt}` | `opd.usp_ListPatientMedicalEvents` — *api.js: `listPatientMedicalEvents`* |
-| POST | `/patients/{id}/medical-events` | `{ hospitalId, eventId?, eventName, eventMonth?, eventYear?, notes? }` | `PatientMedicalEvent` (created) | `opd.usp_CreatePatientMedicalEvent` — *api.js: `createPatientMedicalEvent`* |
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListPatientMedicalEvents(string patientId)` | — | `List<PatientMedicalEvent>` — `PatientMedicalEventId, PatientId, EventType, EventDate, Notes, CreatedAt` | `opd.usp_ListPatientMedicalEvents` |
+| `CreatePatientMedicalEvent(string patientId, CreateMedicalEventRequest request)` | `EventId?, EventName, EventMonth?, EventYear?, Notes?` | `PatientMedicalEvent` | `opd.usp_CreatePatientMedicalEvent`. **Audited: CREATE** |
+| `ListPatientFamilyHistory(string patientId)` | — | `List<FamilyHistory>` — `PatientFamilyHistoryId, PatientId, Relation, Condition, Notes, CreatedAt` | `opd.usp_ListPatientFamilyHistory` |
+| `CreatePatientFamilyHistory(string patientId, CreateFamilyHistoryRequest request)` | `RelationshipType, ConditionName, Notes?` | `FamilyHistory` | `opd.usp_CreatePatientFamilyHistory`. **Audited: CREATE** |
 
-### Family History
+### Coverage (insurance / government scheme)
 
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/patients/{id}/family-history` | — | `[ FamilyHistory ]` — `{patientFamilyHistoryId, patientId, relation, condition, notes, createdAt}` | `opd.usp_ListPatientFamilyHistory` — *api.js: `listPatientFamilyHistory`* |
-| POST | `/patients/{id}/family-history` | `{ hospitalId, relationshipType, conditionName, notes? }` | `FamilyHistory` (created) | `opd.usp_CreatePatientFamilyHistory` — *api.js: `createPatientFamilyHistory`* |
+Feature: `patients` to manage a patient's coverages; `billing` also reaches these.
 
-### Past Visits & Previous Prescriptions (Consultation 360 Zone A)
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/patients/{id}/past-visits` | — | `[ { consultationId, visitDate, doctorName, chiefComplaint, primaryDiagnosis } ]`, LOCKED consultations only, newest first | `opd.usp_ListPatientPastVisits` — *api.js: `listPatientPastVisits`* |
-| GET | `/patients/{id}/prescriptions/previous?doctorId=` | `doctorId` | `{ found: boolean, consultation: Consultation \| null, prescriptions: [Prescription] }` (most recent LOCKED consultation with this doctor + its ACTIVE prescriptions) | `opd.usp_ListPreviousPrescriptionsByDoctor` — *api.js: `listPreviousPrescriptionsByDoctor`* |
-
-### Sketches (across all visits — see also §7 Consultations)
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/patients/{id}/sketches` | — | `[ Sketch ]`, newest first | `cln.usp_ListPatientSketches` — *api.js: `listPatientSketches`* |
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListPayers(string country, string category)` | `country` = hospital country; `category` `PRIVATE` / `GOVT_SCHEME` or `null` for both | `List<Payer>` — `PayerId, Name, Category, Country` | `cfg.usp_ListPayers` |
+| `ListPatientCoverages(string patientId, bool includeInactive)` | — | `List<Coverage>` — `CoverageId, CoverageType, PayerId, PayerName, PlanName, MemberId, PolicyNumber, GroupNumber, PolicyHolderName, Relationship, ClaimMode, GovtCardNumber, CardImageUrl, EffectiveDate, ExpiryDate, Status, Priority, IsActive, LastVerificationStatus`; empty = Self-Pay | `opd.usp_ListPatientCoverages` |
+| `SavePatientCoverage(string patientId, SaveCoverageRequest request)` | `CoverageId?` (null = new), `CoverageType` (`PRIVATE_INSURANCE` / `GOVT_SCHEME`), `PayerId, PlanName?, MemberId?, PolicyNumber?, GroupNumber?, PolicyHolderName?, Relationship?, ClaimMode?` (`CASHLESS` / `REIMBURSEMENT`), `GovtCardNumber?, CardImage? (byte[]), EffectiveDate?, ExpiryDate?, Status?` | `Coverage` | `opd.usp_SavePatientCoverage` |
+| `DeactivatePatientCoverage(string coverageId)` | — | `void` | `opd.usp_DeactivatePatientCoverage` |
 
 ---
 
-## 4. Scheduling — Appointments & Slots
+## 5. Scheduling — appointments, availability and schedule settings
 
-Role: `scheduling` feature (ADMIN, DOCTOR, RECEPTIONIST, NURSE).
+Feature: `scheduling` (ADMIN, DOCTOR, RECEPTIONIST, NURSE). Settings operations (marked ⚙)
+need `admin_scheduling` (ADMIN + DOCTOR by default) — screen: Settings → Scheduling → Schedule
+Settings (tabs Hospital Defaults · Doctors · Appointment Types · Intake & Consent).
 
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/doctors/{doctorId}/appointments/today?hospitalId=` | `hospitalId` | `[ Appointment ]` — {appointmentId, patientId, patientName, mrn, slotStart, slotEnd, timeZoneId, slotStartLocal, slotEndLocal, type, status, notes}; the hospital's today (its timezone), sorted by `slotStart`. `slotStart`/`slotEnd` are UTC; `…Local` are the same instants on the clinic's clock | `opd.usp_ListTodayAppointmentsForDoctor` — *api.js: `listTodayAppointmentsForDoctor`* |
-| GET | `/doctors/{doctorId}/appointments?hospitalId=&date=` | `hospitalId`, `date` (hospital-local date → `@AppointmentDate`) | `[ Appointment ]` — {appointmentId, patientId, patientName, mrn, slotStart, slotEnd, timeZoneId, slotStartLocal, slotEndLocal, type, status, notes, checkedInAt, consultStartedAt, completedAt} | `opd.usp_ListAppointmentsForDate` — *api.js: `listAppointmentsForDate`* |
-| GET | `/appointments?hospitalId=&date=` | `hospitalId`, `date` (hospital-local date → `@AppointmentDate`) | `[ Appointment ]` — every doctor's appointments for the date: {appointmentId, patientId, patientName, mrn, slotStart, slotEnd, timeZoneId, slotStartLocal, slotEndLocal, type, status, notes, doctorId, doctorName, doctorRoom, checkedInAt, consultStartedAt, completedAt}; sorted by `slotStart`. Front-desk (receptionist) view on Today's Patients | `opd.usp_ListAppointmentsForHospitalDate` — *api.js: `listAppointmentsForHospitalDate`* |
-| GET | `/doctors/{doctorId}/slot-config` | — | `[ SlotConfig ]` — weekly availability windows `{slotConfigId, hospitalId, doctorId, dayOfWeek, startTime, endTime}`; several per weekday allowed, none = closed | `opd.usp_ListDoctorSlotConfig` — *api.js: `listDoctorSlotConfig`* |
-| PUT | `/doctors/{doctorId}/slot-config?hospitalId=` | `[ { dayOfWeek, startTime, endTime } ]` (replaces all windows; sent as `@WindowsJson`; times are the hospital's wall clock, `HH:mm`) | `[ SlotConfig ]` | `opd.usp_SaveDoctorSlotConfig` — *api.js: `saveDoctorSlotConfig`* |
-| GET | `/doctors/{doctorId}/available-slots?hospitalId=&date=&duration=` | `hospitalId`, `date` (hospital-local → `@AppointmentDate`), optional `duration` (appointment type minutes → `@DurationMinutes`) | `[ { slotStart, slotEnd, isBooked, timeZoneId } ]` — `slotStart`/`slotEnd` are the hospital's wall-clock times (`2026-10-20T09:00:00`, no offset): pass them unchanged to `POST /appointments`. MediSlot engine: none on leave days or weekdays without windows; slot = `duration` or `APPT_SLOT_MINS` (doctor → hospital); step = slot + `APPT_BUFFER_MINS`; `isBooked` = overlaps a non-cancelled appointment (+ buffer) | `opd.usp_ListAvailableSlots` — *api.js: `listAvailableSlots`* |
-| GET | `/doctors/{doctorId}/schedule?hospitalId=&date=` | `hospitalId`, `date` | `{ dayOfWeek, windows:[{startTime,endTime}], workingDays:[…], slotMinutes, bufferMinutes, onLeave, leaveReason }` | `opd.usp_GetDoctorScheduleForDate` — *api.js: `getDoctorScheduleForDate`* |
-| POST | `/appointments` | `{ hospitalId, patientId, doctorId, slotStartLocal, slotEndLocal, type?, notes? }` — `slotStartLocal`/`slotEndLocal` are the hospital's wall-clock times (a slot from `available-slots`); stored as UTC plus the hospital's `timeZoneId` | `{ appointmentId, appointmentDate, slotStart, slotEnd, timeZoneId, slotStartLocal, slotEndLocal, status }` (`status`='BOOKED'; `slotStart`/`slotEnd` UTC) | `opd.usp_CreateAppointment` — *api.js: `createAppointment`*. Error 50050: hospital has no timezone |
-| PUT | `/appointments/{id}/status` | `{ status }` | `Appointment` `{appointmentId, status, checkedInAt, consultStartedAt, completedAt}`, or `null` (HTTP 409) when the move is not allowed. Lifecycle: `BOOKED → CHECKED_IN` (front desk) `→ IN_CONSULT` (doctor opens the consultation) `→ COMPLETED` (sign-off); `CANCELLED`/`NO_SHOW` only from `BOOKED` or `CHECKED_IN`. Stamps `checkedInAt` (+ `checkedInBy`), `consultStartedAt`, `completedAt` | `opd.usp_UpdateAppointmentStatus` — *api.js: `updateAppointmentStatus`* |
+`Appointment` members: `AppointmentId, PatientId, PatientName, Mrn, DoctorId, DoctorName, DoctorRoom, SlotStart, SlotEnd` (UTC), `TimeZoneId, SlotStartLocal, SlotEndLocal` (clinic clock), `Type, Status, Notes, CheckedInAt, ConsultStartedAt, CompletedAt`. Each list fills the members its procedure returns.
+
+### Appointments
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListTodayAppointmentsForDoctor(string doctorId)` | — | `List<Appointment>` — the hospital's today (its timezone), by `SlotStart` | `opd.usp_ListTodayAppointmentsForDoctor` |
+| `ListAppointmentsForDate(string doctorId, DateTime date)` | `date` = hospital-local date → `@AppointmentDate` | `List<Appointment>` incl. the check-in / consult / completed stamps | `opd.usp_ListAppointmentsForDate` |
+| `ListAppointmentsForHospitalDate(DateTime date)` | as above | `List<Appointment>` — every doctor's, with `DoctorId, DoctorName, DoctorRoom`; by `SlotStart`. Front-desk view on Today's Patients | `opd.usp_ListAppointmentsForHospitalDate` |
+| `CreateAppointment(CreateAppointmentRequest request)` | `PatientId, DoctorId, SlotStartLocal, SlotEndLocal` (wall-clock `DateTime`, a slot from `ListAvailableSlots`), `Type?, Notes?` | `Appointment` — `AppointmentId, AppointmentDate, SlotStart, SlotEnd, TimeZoneId, SlotStartLocal, SlotEndLocal, Status = BOOKED` | `opd.usp_CreateAppointment`. Stored as UTC + the hospital's `TimeZoneId`. Error 50050: hospital has no timezone |
+| `UpdateAppointmentStatus(string appointmentId, string status)` | — | `Appointment` — `AppointmentId, Status, CheckedInAt, ConsultStartedAt, CompletedAt` | `opd.usp_UpdateAppointmentStatus`. Lifecycle `BOOKED → CHECKED_IN` (front desk) `→ IN_CONSULT` (doctor opens the consultation) `→ COMPLETED` (sign-off); `CANCELLED` / `NO_SHOW` only from `BOOKED` or `CHECKED_IN`. A move the current status does not allow (procedure returns no row) is a `Conflict` fault. Stamps `CheckedInAt` (+ `@CheckedInBy`), `ConsultStartedAt`, `CompletedAt` |
+
+### Availability
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListDoctorSlotConfig(string doctorId)` | — | `List<SlotConfig>` — `SlotConfigId, DoctorId, DayOfWeek, StartTime, EndTime`; several windows per weekday allowed, none = closed | `opd.usp_ListDoctorSlotConfig` |
+| `SaveDoctorSlotConfig(string doctorId, List<SlotWindow> windows)` ⚙ | `SlotWindow` = `DayOfWeek, StartTime, EndTime` (`HH:mm`, hospital wall clock); replaces all windows; sent as `@WindowsJson` | `List<SlotConfig>` | `opd.usp_SaveDoctorSlotConfig` |
+| `ListAvailableSlots(string doctorId, DateTime date, int? durationMinutes)` | `date` hospital-local; `durationMinutes` = the appointment type's | `List<AvailableSlot>` — `SlotStart, SlotEnd` (wall clock, no offset — pass unchanged to `CreateAppointment`), `IsBooked, TimeZoneId` | `opd.usp_ListAvailableSlots`. None on leave days or weekdays without windows; slot = `durationMinutes` or `APPT_SLOT_MINS` (doctor → hospital); step = slot + `APPT_BUFFER_MINS`; `IsBooked` = overlaps a non-cancelled appointment (+ buffer) |
+| `GetDoctorScheduleForDate(string doctorId, DateTime date)` | — | `DoctorSchedule` — `DayOfWeek, Windows (List<SlotWindow>), WorkingDays, SlotMinutes, BufferMinutes, OnLeave, LeaveReason` | `opd.usp_GetDoctorScheduleForDate` |
+| `ListDoctorLeave(string doctorId)` | — | `List<DoctorLeave>` — `LeaveId, LeaveDate, Reason` | `opd.usp_ListDoctorLeave` |
+| `CreateDoctorLeave(string doctorId, DateTime leaveDate, string reason)` ⚙ | — | `DoctorLeave` (the existing row if that date is already leave) | `opd.usp_CreateDoctorLeave` |
+| `DeleteDoctorLeave(string leaveId)` ⚙ | — | `void` | `opd.usp_DeleteDoctorLeave` |
+
+### Doctor settings, profiles, charges and fees
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `GetDoctorSettings(string doctorId)` | — | `Dictionary<string, ResolvedSetting>` — `ResolvedSetting` = `Value, Source` (`DOCTOR` / `HOSPITAL` / `NONE`) for `APPT_SLOT_MINS, FREE_FOLLOWUP_ALLOWED, FREE_FOLLOWUP_DAYS, CHARGE_MODEL, CHARGE_UNIT_MINS, CHARGE_UNIT_RATE` | `opd.usp_GetDoctorSettings` |
+| `SaveDoctorSettings(string doctorId, Dictionary<string,string> values)` ⚙ | sent as `@ValuesJson`; `""` / `null` removes the override | same as Get | `opd.usp_SaveDoctorSettings` |
+| `ListDoctorProfiles()` | — | `List<DoctorProfile>` — `UserId, DisplayName, Prefix, FirstName, MiddleName, LastName, Qualifications, DisplayNameOverride, LicenseNumber, Email, Phone, Room, Languages, Bio, SpecialtyIds, SpecialtyNames` (never a password) | `sec.usp_ListDoctorProfiles` |
+| `SaveDoctorProfile(SaveDoctorProfileRequest request)` ⚙ | `DoctorId?` (null = new doctor login), `Email, Password?` (required for a new doctor, ignored otherwise; hashed into `@PasswordHash`), `Prefix?, FirstName?, MiddleName?, LastName?, Qualifications?, DisplayNameOverride?, LicenseNumber?, Phone?, Room?, Languages?, Bio?, SpecialtyIds?` (ordered; first = primary; sent as `@SpecialtyIdsJson`; other hospitals' ids ignored) | `SavedDoctorProfile` — `DoctorId, FullName, Email, Phone, SpecialtyId, LicenseNumber, Prefix, FirstName, MiddleName, LastName, Qualifications, DisplayNameOverride, Room, Languages, Bio, IsActive, Specialties (List<DoctorSpecialty>: SpecialtyId, SpecialtyName, IsPrimary)` | `sec.usp_SaveDoctorProfile`. `FullName` = `DisplayNameOverride`, else the hospital's `DOCTOR_NAME_TEMPLATE`. A new doctor gets 0-amount NEW / FOLLOWUP fee rows from the hospital's today. Errors 50060 email required, 50061 name required, 50062 email in use, 50063 bad `SpecialtyIds`, 50064 new doctor without a password, 50065 doctor not in this hospital. **Audited: CREATE / UPDATE** |
+| `GetDoctorCharge(string doctorId)` | — | `DoctorCharge` — `Model` (`FLAT` / `UNIT`), `NewFee, FollowupFee, UnitMinutes, UnitRate` | `opd.usp_GetDoctorSettings` + `bil.DoctorFeeSchedule` |
+| `SaveDoctorCharge(string doctorId, DoctorCharge charge)` ⚙ | as returned | `DoctorCharge` | `opd.usp_SaveDoctorSettings` + `bil.DoctorFeeSchedule` (a changed flat fee closes the current fee row and starts a new one today), in one transaction |
+| `CheckEffectiveFee(string doctorId, string consultationType, DateTime? onDate)` | `onDate` default = hospital's today | `FeeSchedule` or `null` — `FeeScheduleId, DoctorId, ConsultationType, FeeAmount, Currency, EffectiveFrom, EffectiveTo` | `bil.usp_CheckEffectiveFee` |
+| `ListDoctorFees()` | — | `List<FeeSchedule>` | `bil.usp_ListDoctorFees`. Feature `billing` also reaches this |
+
+### Appointment types
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListAppointmentTypes(bool includeInactive)` | — | `List<AppointmentType>` — `AppointmentTypeId, Code, Name, DurationMinutes` (`null` = doctor's slot), `Color, IsChargeable, FeeCategory, SortOrder, IsActive` | `cfg.usp_ListAppointmentTypes` |
+| `SaveAppointmentType(SaveAppointmentTypeRequest request)` ⚙ | `AppointmentTypeId?` (null = new), `Name, DurationMinutes?, Color, IsChargeable, FeeCategory` | `AppointmentType` (code generated from the name on create) | `cfg.usp_SaveAppointmentType` |
+| `UpdateAppointmentTypeActive(string appointmentTypeId, bool isActive)` ⚙ | — | `AppointmentType` | `cfg.usp_UpdateAppointmentTypeActive` |
+
+### Intake questions, consent and clinical conditions
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListIntakeQuestions()` | — | `List<IntakeQuestion>` — `QuestionId, Label, QuestionType` (`TEXT` / `NUMBER` / `CHOICE`), `Options` | `cfg.usp_ListIntakeQuestions` |
+| `CreateIntakeQuestion(string label, string questionType, string options)` ⚙ | — | `IntakeQuestion` | `cfg.usp_CreateIntakeQuestion` |
+| `DeleteIntakeQuestion(string questionId)` ⚙ | — | `void` | `cfg.usp_DeleteIntakeQuestion` — soft delete |
+| `GetConsentForm()` | — | `ConsentForm` — `ConsentFormId, Title, BodyText, Version` | `cfg.usp_GetConsentForm` |
+| `SaveConsentForm(string title, string bodyText)` ⚙ | — | `ConsentForm` (version bumped) | `cfg.usp_SaveConsentForm` |
+| `SubmitIntakeResponse(string appointmentId, string patientId, List<IntakeAnswer> answers)` | `IntakeAnswer` = `QuestionId, Answer` | `IntakeResponse` | `opd.usp_SubmitIntakeResponse` |
+| `RecordConsent(RecordConsentRequest request)` | `ConsentFormId, PatientId, AppointmentId?, ConsultationId?, SignedByName, Method` | `ConsentRecord` (title/text snapshotted, append-only) | `opd.usp_RecordConsent`. **Audited: CREATE** |
+| `GetVisitIntakeAndConsent(string consultationId)` | — | `VisitIntakeAndConsent` — `Appointment, IntakeResponse, ConsentForm, ConsentRecord` | `opd.usp_GetVisitIntakeAndConsent` |
+| `ListClinicalConditions()` | — | `List<ClinicalCondition>` — `ConditionId, Name, Icd10Prefixes` | `cfg.usp_ListClinicalConditions` |
+| `CreateClinicalCondition(string name, string icd10Prefixes)` ⚙ | — | `ClinicalCondition` | `cfg.usp_CreateClinicalCondition` |
+| `DeleteClinicalCondition(string conditionId)` ⚙ | — | `void` | `cfg.usp_DeleteClinicalCondition` — soft delete |
+
+Clinical conditions drive condition-linked phrases (§7 `ListPhrases` / `SearchPhrases`).
 
 ---
 
-### Schedule Settings (`admin_scheduling`, ADMIN + DOCTOR by default)
+## 6. Consultation — the consultation workspace
 
-Screen: `#/settings/scheduling` (sidebar → Scheduling → Schedule Settings) — tabs Hospital Defaults · Doctors · Appointment Types · Intake & Consent. Formats live under Settings → Hospital & Practice; condition-linked macros in the Phrase Library.
+Feature: `consultation` (ADMIN, DOCTOR).
 
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/hospitals/{hospitalId}/settings` | — | `{ APPT_SLOT_MINS, APPT_BUFFER_MINS, FREE_FOLLOWUP_ALLOWED, FREE_FOLLOWUP_DAYS, DATE_FORMAT, TIME_FORMAT, MRN_PREFIX, MRN_FORMAT, MRN_SEQ, DOCTOR_NAME_TEMPLATE }` | `cfg.usp_GetHospitalSettings` — *api.js: `getHospitalSettings`* |
-| PUT | `/hospitals/{hospitalId}/settings` | `{ key: value, … }` (sent as `@ValuesJson`; MRN_SEQ ignored); a new DOCTOR_NAME_TEMPLATE re-renders every doctor's `fullName` (in the procedure) | settings map | `cfg.usp_SaveHospitalSettings` — *api.js: `saveHospitalSettings`* |
-| GET | `/doctors/{doctorId}/settings?hospitalId=` | — | `{ key: { value, source: DOCTOR\|HOSPITAL\|NONE } }` for APPT_SLOT_MINS, FREE_FOLLOWUP_ALLOWED, FREE_FOLLOWUP_DAYS, CHARGE_MODEL, CHARGE_UNIT_MINS, CHARGE_UNIT_RATE | `opd.usp_GetDoctorSettings` — *api.js: `getDoctorSettings`* |
-| PUT | `/doctors/{doctorId}/settings?hospitalId=` | `{ key: value }` (sent as `@ValuesJson`) — `""`/`null` removes the override | same as GET | `opd.usp_SaveDoctorSettings` — *api.js: `saveDoctorSettings`* |
-| GET | `/doctors/{doctorId}/leave?hospitalId=` | — | `[ { leaveId, leaveDate, reason } ]` | `opd.usp_ListDoctorLeave` — *api.js: `listDoctorLeave`* |
-| POST | `/doctors/{doctorId}/leave` | `{ hospitalId, leaveDate, reason }` | leave row (existing row if that date is already leave) | `opd.usp_CreateDoctorLeave` — *api.js: `createDoctorLeave`* |
-| DELETE | `/doctor-leave/{leaveId}` | — | `{ success }` | `opd.usp_DeleteDoctorLeave` — *api.js: `deleteDoctorLeave`* |
-| GET | `/appointment-types?hospitalId=&includeInactive=` | — | `[ { appointmentTypeId, code, name, durationMinutes (null = doctor's slot), color, isChargeable, feeCategory, sortOrder, isActive } ]` | `cfg.usp_ListAppointmentTypes` — *api.js: `listAppointmentTypes`* |
-| POST/PUT | `/appointment-types` | `{ appointmentTypeId?, name, durationMinutes?, color, isChargeable, feeCategory }` | type (code generated from the name on create) | `cfg.usp_SaveAppointmentType` — *api.js: `saveAppointmentType`* |
-| PUT | `/appointment-types/{id}/active` | `{ isActive }` | type | `cfg.usp_UpdateAppointmentTypeActive` — *api.js: `updateAppointmentTypeActive`* |
-| GET | `/hospitals/{hospitalId}/doctors` | — | `[ DoctorProfile ]` — `{ userId, displayName, prefix, firstName, middleName, lastName, qualifications, displayNameOverride, licenseNumber, email, phone, room, languages, bio, specialtyIds, specialtyNames }` (no password) | `sec.usp_ListDoctorProfiles` — *api.js: `listDoctorProfiles` / `getDoctorProfile`* |
-| POST / PUT | `/doctors` · `/doctors/{id}` | `{ hospitalId, email, passwordHash?, prefix?, firstName?, middleName?, lastName?, qualifications?, displayNameOverride?, licenseNumber?, phone?, room?, languages?, bio?, specialtyIds? }` — POST creates a DOCTOR login (`passwordHash` required); PUT updates (`{id}` → `@DoctorId`, password ignored). `specialtyIds` is an ordered array sent as `@SpecialtyIdsJson`: the first becomes the primary specialty; another hospital's ids are ignored | DoctorProfile — `{doctorId, hospitalId, fullName, email, phone, specialtyId, licenseNumber, prefix, firstName, middleName, lastName, qualifications, displayNameOverride, room, languages, bio, isActive}` plus `[ { specialtyId, specialtyName, isPrimary } ]`. `fullName` = `displayNameOverride`, else the hospital's `DOCTOR_NAME_TEMPLATE`. A new doctor gets 0-amount NEW / FOLLOWUP fee rows from the hospital's today | `sec.usp_SaveDoctorProfile` — *api.js: `saveDoctorProfile`*. Errors 50060 email required, 50061 name required, 50062 email in use, 50063 bad `specialtyIds`, 50064 new doctor without `passwordHash`, 50065 doctor not found in this hospital |
-| GET/PUT | `/doctors/{doctorId}/charge?hospitalId=` | PUT `{ model: FLAT\|UNIT, newFee, followupFee, unitMinutes, unitRate }` (a changed flat fee closes the current fee row and starts a new one today) | `{ model, newFee, followupFee, unitMinutes, unitRate }` | via `opd.usp_SaveDoctorSettings` + `bil.DoctorFeeSchedule` — *api.js: `getDoctorCharge` / `saveDoctorCharge`* |
-| GET | `/consultations/{id}/charge` | — | `{ consultationType, appointmentTypeName, durationMinutes, chargeModel, baseFee, feeAmount, isFreeFollowup, anchorDate, basis, note, description }` — used when the invoice is generated | `bil.usp_GetConsultationCharge` — *api.js: `getConsultationCharge`* |
-| GET | `/intake-questions?hospitalId=` | — | `[ { questionId, label, questionType: TEXT\|NUMBER\|CHOICE, options } ]` | `cfg.usp_ListIntakeQuestions` — *api.js: `listIntakeQuestions`* |
-| POST / DELETE | `/intake-questions` · `/intake-questions/{id}` | `{ label, questionType, options }` | question / `{ success }` (soft delete) | `cfg.usp_CreateIntakeQuestion` / `cfg.usp_DeleteIntakeQuestion` — *api.js: `createIntakeQuestion` / `deleteIntakeQuestion`* |
-| GET / PUT | `/consent-form?hospitalId=` | PUT `{ title, bodyText }` (bumps version) | `{ consentFormId, title, bodyText, version }` | `cfg.usp_GetConsentForm` / `cfg.usp_SaveConsentForm` — *api.js: `getConsentForm` / `saveConsentForm`* |
-| POST | `/appointments/{id}/intake` | `{ hospitalId, patientId, answers }` | intake response | `opd.usp_SubmitIntakeResponse` — *api.js: `submitIntakeResponse`* |
-| POST | `/consent-records` | `{ hospitalId, consentFormId, patientId, appointmentId?, consultationId?, signedByName, method }` | consent record (title/text snapshotted, append-only) | `opd.usp_RecordConsent` — *api.js: `recordConsent`* |
-| GET | `/consultations/{id}/intake-consent` | — | `{ appointment, intakeResponse, consentForm, consentRecord }` | `opd.usp_GetVisitIntakeAndConsent` — *api.js: `getVisitIntakeAndConsent`* |
-| GET / POST / DELETE | `/clinical-conditions` · `/clinical-conditions/{id}` | GET `?hospitalId=`; POST `{ hospitalId, name, icd10Prefixes }`; DELETE by `{id}` (`@ConditionId`) | conditions (soft delete) | `cfg.usp_ListClinicalConditions` / `cfg.usp_CreateClinicalCondition` / `cfg.usp_DeleteClinicalCondition` — *api.js: `listClinicalConditions` / `createClinicalCondition` / `deleteClinicalCondition`* |
+### Consultation
 
-Phrases (`listPhrases`, `searchPhrases`) take an optional `consultationId`: condition-linked phrases are returned only when one of the consultation's ICD-10 diagnoses matches the condition, and a doctor's phrase hides a broader phrase with the same trigger.
+`Consultation` members: `ConsultationId, PatientId, DoctorId, AppointmentId, VisitDate` (UTC), `TimeZoneId, VisitLocalDate, Status, IsLocked`, plus for `GetConsultationById`: `SubjectiveText, ObjectiveText, PlanText, SubjectivePersonal, ObjectivePersonal, PlanPersonal, FollowupDate, FollowupNotes, SkippedSteps`.
 
-## 5. Consultations — Core
-
-Role: `consultation` feature (ADMIN, DOCTOR).
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| POST | `/consultations` | `{ patientId, doctorId, hospitalId, appointmentId? }` | `Consultation` — `{consultationId, hospitalId, patientId, doctorId, appointmentId, visitDate, timeZoneId, visitLocalDate, status, isLocked}` (existing IN_PROGRESS one, or newly created with `visitDate` = now in UTC, the hospital's `timeZoneId` and its local `visitLocalDate`) | `cln.usp_GetOrCreateConsultation` — *api.js: `getOrCreateConsultation`* |
-| GET | `/consultations/{id}` | — | `Consultation` — `{consultationId, hospitalId, patientId, doctorId, appointmentId, visitDate, timeZoneId, visitLocalDate, status, isLocked, subjectiveText, objectiveText, planText, subjectivePersonal, objectivePersonal, planPersonal, followupDate, followupNotes, skippedSteps}` | `cln.usp_GetConsultationById` — *api.js: `getConsultationById`*. AUDIT: caller must also call `POST /audit/logs` (Action=`READ`). |
-| PUT | `/consultations/{id}/soap` | `{ subjectiveText?, objectiveText?, planText?, subjectivePersonal?, objectivePersonal?, planPersonal?, skippedSteps? }` | `{ success }` (no-op if `isLocked`) | `cln.usp_SaveSoapNotes` — *api.js: `saveSoapNotes`* |
-| PUT | `/consultations/{id}/followup` | `{ followUpDate?, followUpNotes? }` | `{ success }` | `cln.usp_SaveFollowup` — *api.js: `saveFollowup`* |
-| POST | `/consultations/{id}/sign-off` | `{ doctorId }` (+ `signatureHash`, computed by the API over the signed content) | `Attestation` — `{attestationId, signedAt}`; in one transaction: deducts the stocked items listed in Services & Procedures (earliest-expiry batch first), locks the consultation (`status`='LOCKED') and completes its appointment (`IN_CONSULT → COMPLETED`) | `cln.usp_ConfirmSignOff` — *api.js: `confirmSignOff`*. Error 50040 ("Not enough stock: …") rolls the whole sign-off back; check `GET /consultations/{id}/stock-shortages` first. AUDIT: caller must also call `POST /audit/logs` (Action=`SIGNOFF`). |
-| GET | `/consultations?hospitalId=&date=` | `hospitalId`, `date` (hospital-local visit date → `@VisitDate`, matched on `visitLocalDate`) | `[ Consultation ]` — `{consultationId, patientId, doctorId, appointmentId, visitDate, status}` | `cln.usp_ListConsultationsForDate` — *api.js: `listConsultationsForDate`* |
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `GetOrCreateConsultation(string patientId, string doctorId, string appointmentId)` | `appointmentId` optional | `Consultation` — the existing IN_PROGRESS one, or a new one with `VisitDate` = now (UTC), the hospital's `TimeZoneId` and its `VisitLocalDate` | `cln.usp_GetOrCreateConsultation` |
+| `GetConsultationById(string consultationId)` | — | `Consultation` (full) | `cln.usp_GetConsultationById`. **Audited: READ** |
+| `ListConsultationsForDate(DateTime visitDate)` | hospital-local date, matched on `VisitLocalDate` | `List<Consultation>` — `ConsultationId, PatientId, DoctorId, AppointmentId, VisitDate, Status` | `cln.usp_ListConsultationsForDate` |
+| `SaveSoapNotes(string consultationId, SoapNotes notes)` | `SubjectiveText?, ObjectiveText?, PlanText?, SubjectivePersonal?, ObjectivePersonal?, PlanPersonal?, SkippedSteps?` | `void` (no change once `IsLocked`) | `cln.usp_SaveSoapNotes` |
+| `SaveFollowup(string consultationId, DateTime? followUpDate, string followUpNotes)` | — | `void` | `cln.usp_SaveFollowup` |
+| `ConfirmSignOff(string consultationId)` | — (doctor = caller; the service computes `@SignatureHash` over the signed content) | `Attestation` — `AttestationId, SignedAt` | `cln.usp_ConfirmSignOff`. In one transaction: deducts the stocked items listed under Services & Procedures (earliest-expiry batch first, `inv.usp_RecordStockConsumption`), locks the consultation (`Status = LOCKED`) and completes its appointment (`IN_CONSULT → COMPLETED`). Error 50040 ("Not enough stock: …") rolls everything back — call `ListStockShortages` first. **Audited: SIGNOFF** |
+| `ListPatientPastVisits(string patientId)` | — | `List<PastVisit>` — `ConsultationId, VisitDate, DoctorName, ChiefComplaint, PrimaryDiagnosis`; LOCKED only, newest first | `opd.usp_ListPatientPastVisits` |
 
 ### Vitals
 
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/consultations/{id}/vitals` | — | `Vitals` — `{consultationVitalId, tempValue, bpSystolic, bpDiastolic, pulseBpm, spO2, respRate, heightCm, weightKg, bmi, painScale, waistCircCm, headCircCm}` | `cln.usp_GetConsultationVitals` — *api.js: `getConsultationVitals`* |
-| POST | `/consultations/{id}/vitals` | `{ hospitalId, tempValue, bpSystolic, bpDiastolic, pulseBpm, spO2, respRate, heightCm, weightKg, painScale, waistCircCm, headCircCm, customValuesJson? }` | `Vitals` (upserted; `bmi` computed server-side from height+weight) | `cln.usp_SaveVitals` — *api.js: `saveVitals`* |
-| GET | `/config/vitals?hospitalId=` | `hospitalId` (`_hid()` fallback) | `[ VitalDefinition ]` — `{vitalDefinitionId, hospitalId, vitalCode, displayLabel, allowedUnits, minValue, maxValue, sortOrder, isEnabled}`, sorted | `cfg.usp_ListVitalsConfig` — *api.js: `listVitalsConfig`* |
-| GET | `/config/vitals/enabled?hospitalId=` | `hospitalId` | `[ VitalDefinition ]`, `isEnabled=true` only | `cfg.usp_ListEnabledVitalsConfig` — *api.js: `listEnabledVitalsConfig`* |
-| PUT | `/config/vitals/{vitalCode}/enabled` | `{ hospitalId, isEnabled }` | `{ success }` | `cfg.usp_UpdateVitalEnabled` — *api.js: `updateVitalEnabled`* |
-| POST | `/config/vitals` | `{ hospitalId, vitalCode, displayLabel, allowedUnits, minValue?, maxValue?, sortOrder? }` | `VitalDefinition` (created) | `cfg.usp_CreateVitalConfig` — *api.js: `createVitalConfig`* |
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `GetConsultationVitals(string consultationId)` | — | `Vitals` — `ConsultationVitalId, TempValue, BpSystolic, BpDiastolic, PulseBpm, SpO2, RespRate, HeightCm, WeightKg, Bmi, PainScale, WaistCircCm, HeadCircCm` | `cln.usp_GetConsultationVitals` |
+| `SaveVitals(string consultationId, SaveVitalsRequest request)` | `TempValue?, BpSystolic?, BpDiastolic?, PulseBpm?, SpO2?, RespRate?, HeightCm?, WeightKg?, PainScale?, WaistCircCm?, HeadCircCm?, CustomValues? (Dictionary<string,string> → @CustomValuesJson)` — values in base units | `Vitals` (upserted; `Bmi` computed from height + weight) | `cln.usp_SaveVitals`. Also reachable with `patients` (NURSE, from Nurse Vitals) |
+
+Vitals configuration is in the Hospital & configuration region (§3).
 
 ### Symptoms
 
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/catalog/symptoms?hospitalId=` | `hospitalId` (`_hid()` fallback) | `[ Symptom ]` — `{symptomCatalogId, symptomName, category}` | `cfg.usp_ListSymptomCatalog` — *api.js: `listSymptomCatalog`* |
-| GET | `/catalog/symptoms/quick-picks?hospitalId=` | `hospitalId` | `[ Symptom ]`, `category`='QUICK_PICK' | `cfg.usp_ListSymptomQuickPicks` — *api.js: `listSymptomQuickPicks`* |
-| GET | `/catalog/symptoms/others?hospitalId=` | `hospitalId` | `[ Symptom ]`, `category`='OTHER' | `cfg.usp_ListSymptomOthers` — *api.js: `listSymptomOthers`* |
-| POST | `/catalog/symptoms` | `{ hospitalId, displayLabel }` | `Symptom` (created, or existing row if name already present) | `cfg.usp_CreateCustomSymptom` — *api.js: `createCustomSymptom`* |
-| GET | `/consultations/{id}/symptoms` | — | `[ ConsultationSymptom ]` — `{consultationSymptomId, consultationId, symptomName, state}` | `cln.usp_ListConsultationSymptoms` — *api.js: `listConsultationSymptoms`* |
-| PUT | `/consultations/{id}/symptoms/{symptomName}/state` | `{ hospitalId, state: 'YES'\|'NO'\|'NOT_ASKED' }` | `{ success }` | `cln.usp_UpdateSymptomState` — *api.js: `updateSymptomState`* (upsert) |
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListSymptomCatalog()` | — | `List<Symptom>` — `SymptomCatalogId, SymptomName, Category` | `cfg.usp_ListSymptomCatalog` |
+| `ListSymptomQuickPicks()` | — | `List<Symptom>`, `Category = QUICK_PICK` | `cfg.usp_ListSymptomQuickPicks` |
+| `ListSymptomOthers()` | — | `List<Symptom>`, `Category = OTHER` | `cfg.usp_ListSymptomOthers` |
+| `CreateCustomSymptom(string displayLabel)` | — | `Symptom` (or the existing row with that name) | `cfg.usp_CreateCustomSymptom` |
+| `ListConsultationSymptoms(string consultationId)` | — | `List<ConsultationSymptom>` — `ConsultationSymptomId, ConsultationId, SymptomName, State` | `cln.usp_ListConsultationSymptoms` |
+| `UpdateSymptomState(string consultationId, string symptomName, string state)` | `state` `YES` / `NO` / `NOT_ASKED` | `void` (upsert) | `cln.usp_UpdateSymptomState` |
+
+### Diagnoses
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `SearchIcd10Catalog(string term)` | — | `List<Icd10>` — `Icd10CatalogId, Code, Description, Synonyms`; code-prefix / description / synonym match | `cfg.usp_SearchIcd10Catalog` |
+| `ListConsultationDiagnoses(string consultationId)` | — | `List<Diagnosis>` — `ConsultationDiagnosisId, Icd10Code, Description, IsPrimary, Laterality, Chronicity, SequenceOrder`; sorted | `cln.usp_ListConsultationDiagnoses` |
+| `CreateDiagnosis(string consultationId, CreateDiagnosisRequest request)` | `Icd10Code, Icd10Description, ClinicalNotes?, Laterality?, AcuteChronic?` | `Diagnosis` (the first on a consultation is primary) | `cln.usp_CreateDiagnosis` |
+| `DeleteDiagnosis(string diagnosisId)` | — | `void` | `cln.usp_DeleteDiagnosis` — soft delete |
+
+### Prescriptions
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListPrescriptions(string consultationId)` | — | `List<Prescription>`, `Status = ACTIVE` | `cln.usp_ListPrescriptions` |
+| `ListActiveMedicationsForPatient(string patientId)` | — | `List<Prescription>`, ACTIVE across all visits | `cln.usp_ListActiveMedicationsForPatient` |
+| `ListPreviousPrescriptionsByDoctor(string patientId, string doctorId)` | — | `PreviousPrescriptions` — `Found, Consultation` (most recent LOCKED visit with this doctor, or `null`), `Prescriptions` (its ACTIVE ones) | `opd.usp_ListPreviousPrescriptionsByDoctor` |
+| `CreatePrescription(string consultationId, CreatePrescriptionRequest request)` | `PatientId, Source?, SourceDetail?, MedicineName, Strength?, GenericClass?, TherapeuticClass?, DrugForm?, DeliveryRoute?, Category?, TakeInQty, TimesPerDay?, DurationValue?, DurationUnit?, Instructions?, Prn?, TimingBf?, TimingAn?, TimingNi?, TimingEm?, ValidityDays?, RepeatedFromConsultationId?` | `Prescription` | `cln.usp_CreatePrescription`. **Audited: CREATE** |
+| `CancelPrescription(string prescriptionId)` | — | `void` (`Status = DISCONTINUED`) | `cln.usp_CancelPrescription` |
+| `CheckDrugAllergyConflicts(string patientId, string medicineName, string composition)` | `composition` optional | `List<DrugAllergyAlert>` — `Severity, AllergyName, AllergySeverity, Message` | `cln.usp_CheckDrugAllergyConflicts`. When the doctor overrides an alert, the page calls `RecordAuditEntry` (Action `OVERRIDE`) |
+
+### Investigation orders and referrals
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `CreateInvestigationOrder(string consultationId, CreateOrderRequest request)` | `PatientId, TestId?, TestName, TestType?` | `InvestigationOrder` (`Status = ORDERED`) | `cln.usp_CreateInvestigationOrder` |
+| `ListInvestigationOrders(string consultationId)` | — | `List<InvestigationOrder>` | `cln.usp_ListInvestigationOrders` |
+| `CreateReferral(string consultationId, CreateReferralRequest request)` | `PatientId, Specialty, DoctorName?, Urgency?, Reason?` | `Referral` | `cln.usp_CreateReferral` |
+| `ListReferrals(string consultationId)` | — | `List<Referral>` | `cln.usp_ListReferrals` |
+
+### Sketches, confidential notes and addendums
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `SaveSketch(string consultationId, SaveSketchRequest request)` | `PatientId, Title?, ImageData (byte[], PNG)` | `Sketch` (always a new row) | `cln.usp_SaveSketch` |
+| `ListSketches(string consultationId)` | — | `List<Sketch>`, newest first | `cln.usp_ListSketches` |
+| `ListPatientSketches(string patientId)` | — | `List<Sketch>` across all visits, newest first | `cln.usp_ListPatientSketches` |
+| `GetConfidentialNote(string consultationId)` | — (author = caller) | `ConfidentialNote` or `null` | `cln.usp_GetConfidentialNote`. Only ever returned to its author |
+| `SaveConfidentialNote(string consultationId, string noteText)` | — | `ConfidentialNote` (upserted, author-scoped) | `cln.usp_SaveConfidentialNote` |
+| `CreateAddendum(string consultationId, string category, string addendumText)` | `category` optional | `Addendum` (append-only) | `cln.usp_CreateAddendum` |
+| `ListAddendums(string consultationId)` | — | `List<Addendum>`, chronological | `cln.usp_ListAddendums` |
+
+### Services & procedures (with optional stocked item)
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListConsultationServiceItems(string consultationId)` | — | `List<ServiceItem>` — `ConsultationServiceId, ConsultationId, PatientId, ServiceChargeId, ServiceName, Category, Qty, InventoryItemId, ItemName, ItemUnit, ItemQty, Notes, AddedByUserId, CreatedAt` | `cln.usp_ListConsultationServiceItems` |
+| `CreateConsultationServiceItem(string consultationId, CreateServiceItemRequest request)` | `ServiceChargeId, Qty?, InventoryItemId?, ItemQty?, Notes?` — the item must be linked to the service (`ListItemsForService`); `ItemQty` may not exceed what is available less what this visit already lists | `ServiceItem` — `ConsultationServiceId, ServiceName, Qty, ItemName, ItemQty` | `cln.usp_CreateConsultationServiceItem`. Stock is checked here and deducted at sign-off; the service and the item are billed on separate invoice lines. Errors 50030 consultation not found or signed off, 50031 not enough stock, 50032 service not found, 50033 item not used with this service |
+| `DeleteConsultationServiceItem(string consultationId, string consultationServiceId)` | — | `void` (before sign-off only) | `cln.usp_DeleteConsultationServiceItem` — hard delete |
+| `ListStockShortages(string consultationId)` | — | `List<StockShortage>` — `InventoryItemId, ItemName, Unit, Needed, Available`; empty = sign-off can proceed | `inv.usp_ListStockShortages` |
+
+---
+
+## 7. Catalog — formulary, lab tests, phrases
+
+Feature: `consultation`. Formulary changes (`CreateDrug`, `UpdateDrugStatus`) need
+`admin_formulary`; `CreateLabTest` needs `admin_hospital`; `CreatePhrase` is reachable with
+`consultation` (a doctor's own phrase, from the SOAP card) or `admin_phrases` (any scope), and
+`DeletePhrase` needs `admin_phrases` unless the caller wrote the phrase.
+
+### Drug formulary
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `SearchFormulary(string term)` | — | `List<Drug>` — `DrugFormularyId, BrandName, GenericName, TherapeuticClass, GenericClass, Composition, Strength, DrugForm, DeliveryRoute, DefaultDosage, DefaultFrequency, DefaultDuration, DefaultInstructions, IsControlled, IsActive` | `cfg.usp_SearchFormulary` |
+| `GetDrugByName(string name)` | — | `Drug` or `null` | `cfg.usp_GetDrugByName` |
+| `CreateDrug(CreateDrugRequest request)` | `BrandName, GenericName?, Composition?, TherapeuticClass?, GenericClass?, DrugForm?, DefaultRoute?, DefaultDosage?, DefaultFrequency?, DefaultDurationDays?, DefaultInstructions?, IsControlledSubstance?` | `Drug` | `cfg.usp_CreateDrug` |
+| `UpdateDrugStatus(string drugFormularyId)` | — (toggles) | `Drug` | `cfg.usp_UpdateDrugStatus` |
+
+### Lab tests and favorites
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `SearchLabTests(string term, string specialtyId)` | `specialtyId` optional | `List<LabTest>` — `LabTestCatalogId, TestName, TestType, DefaultSampleType` | `cfg.usp_SearchLabTests` |
+| `CreateLabTest(CreateLabTestRequest request)` | `TestName, TestType?, Category?, SpecialtyIds?` | `LabTest` | `cfg.usp_CreateLabTest` |
+| `ListDoctorLabFavorites(string doctorId, string specialtyId)` | `specialtyId` optional | `List<LabTest>` | `cln.usp_ListDoctorLabFavorites` |
+| `CreateLabFavorite(string doctorId, string testId)` | — | `LabFavorite` (created or existing) | `cln.usp_CreateLabFavorite` |
+| `DeleteLabFavorite(string doctorId, string testId)` | — | `void` | `cln.usp_DeleteLabFavorite` — hard delete (junction row) |
 
 ### Phrases (SOAP quick-insert)
 
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/phrases?hospitalId=&section=&specialtyId=&doctorId=` | `hospitalId`, `section` (S/O/A/P), `specialtyId?`, `doctorId?` | `[ Phrase ]` — `{phraseBankId, hospitalId, userId, category, triggerCode, phraseText}`, DOCTOR > SPECIALTY > GLOBAL scope priority | `cfg.usp_ListPhrases` — *api.js: `listPhrases`* |
-| GET | `/phrases/search?term=&hospitalId=&section=&specialtyId=&doctorId=` | as above + `term` | `[ Phrase ]`, top 5, trigger/text match | `cfg.usp_SearchPhrases` — *api.js: `searchPhrases`* |
-| POST | `/phrases` | `{ hospitalId, scope?, specialtyId?, doctorId?, conditionId?, section?, triggerKeyword?, phraseText }` | `Phrase` (created) | `cfg.usp_CreatePhrase` — *api.js: `createPhrase`* |
-| DELETE | `/phrases/{id}` | — | `{ success }` | `cfg.usp_DeletePhrase` — *api.js: `deletePhrase`*. Soft delete (`IsActive=0`); data.js hard-deletes in-memory. |
-
-### Diagnoses / ICD-10
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/catalog/icd10/search?term=` | `term` | `[ Icd10 ]` — `{icd10CatalogId, code, description, synonyms}`, code-prefix/description/synonym match | `cfg.usp_SearchIcd10Catalog` — *api.js: `searchIcd10`* |
-| GET | `/consultations/{id}/diagnoses` | — | `[ Diagnosis ]` — `{consultationDiagnosisId, icd10Code, description, isPrimary, laterality, chronicity, sequenceOrder}`, sorted | `cln.usp_ListConsultationDiagnoses` — *api.js: `listConsultationDiagnoses`* |
-| POST | `/consultations/{id}/diagnoses` | `{ hospitalId, icd10Code, icd10Description, clinicalNotes?, laterality?, acuteChronic? }` | `Diagnosis` (created; first diagnosis on a consultation defaults `isPrimary`=true) | `cln.usp_CreateDiagnosis` — *api.js: `createDiagnosis`* |
-| DELETE | `/diagnoses/{id}` | — | `{ success }` | `cln.usp_DeleteDiagnosis` — *api.js: `deleteDiagnosis`*. Soft delete. |
-
-### Prescriptions & Drug Formulary
-
-Role: prescribing requires `consultation` feature.
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/formulary/search?term=&hospitalId=` | `term`, `hospitalId` (`_hid()` fallback) | `[ Drug ]` — `{drugFormularyId, brandName, genericName, therapeuticClass, composition, strength, drugForm, deliveryRoute, defaultDosage, defaultFrequency, defaultDuration, defaultInstructions, isControlled}` | `cfg.usp_SearchFormulary` — *api.js: `searchFormulary`*. TODO: schema lacks `targetSpecialties`/`isGeneralMedicine`/`genericClass` fields present in data.js — see stored-procedures.sql §11 note. |
-| GET | `/formulary/lookup?name=` | `name` | `Drug \| null` | `cfg.usp_GetDrugByName` — *api.js: `getDrugByName`* |
-| POST | `/formulary` | `{ hospitalId, brandName, genericName?, composition?, therapeuticClass?, genericClass?, drugForm?, defaultRoute?, defaultDosage?, defaultFrequency?, defaultDurationDays?, defaultInstructions?, isControlledSubstance? }` | `Drug` (created) | `cfg.usp_CreateDrug` — *api.js: `createDrug`* |
-| PUT | `/formulary/{id}/status` | — (toggles current value) | `Drug` (updated) | `cfg.usp_UpdateDrugStatus` — *api.js: `updateDrugStatus`* |
-| GET | `/consultations/{id}/prescriptions` | — | `[ Prescription ]`, `status`='ACTIVE' only | `cln.usp_ListPrescriptions` — *api.js: `listPrescriptions`* |
-| GET | `/patients/{id}/active-medications` | — | `[ Prescription ]`, `status`='ACTIVE', across all visits | `cln.usp_ListActiveMedicationsForPatient` — *api.js: `listActiveMedicationsForPatient`* |
-| POST | `/consultations/{id}/prescriptions` | `{ hospitalId, source?, patientId, sourceDetail?, medicineName, strength?, genericClass?, therapeuticClass?, drugForm?, deliveryRoute?, category?, takeInQty, timesPerDay?, durationValue?, durationUnit?, instructions?, prn?, timingBf?, timingAn?, timingNi?, timingEm?, validityDays?, repeatedFromConsultationId? }` | `Prescription` (created) | `cln.usp_CreatePrescription` — *api.js: `createPrescription`*. AUDIT: caller must also call `POST /audit/logs` (Action=`CREATE`). |
-| PUT | `/prescriptions/{id}/cancel` | — | `{ success }` | `cln.usp_CancelPrescription` — *api.js: `cancelPrescription`*. Sets `status`='DISCONTINUED'. |
-| GET | `/patients/{id}/drug-allergy-check?medicineName=&composition=` | `medicineName`, `composition?` | `[ { severity, allergyName, allergySeverity, message } ]` | `cln.usp_CheckDrugAllergyConflicts` — *api.js: `checkDrugAllergyConflicts`*. AUDIT: if an alert is overridden, caller must also call `POST /audit/logs` (Action=`OVERRIDE`). |
-
-### Lab / Investigations
-
-Role: ordering requires `consultation`; lab portal endpoints require `lab_portal` (LAB_PARTNER, ADMIN).
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/doctors/{doctorId}/lab-favorites?specialtyId=` | `specialtyId?` | `[ LabTest ]` — `{labTestCatalogId, testName, testType, defaultSampleType}` | `cln.usp_ListDoctorLabFavorites` — *api.js: `listDoctorLabFavorites`* |
-| GET | `/catalog/lab-tests/search?term=&specialtyId=` | `term`, `specialtyId?` | `[ LabTest ]` | `cfg.usp_SearchLabTests` — *api.js: `searchLabTests`* |
-| POST | `/catalog/lab-tests` | `{ hospitalId, testName, testType?, category?, specialtyIds? }` | `LabTest` (created) | `cfg.usp_CreateLabTest` — *api.js: `createLabTest`* |
-| POST | `/doctors/{doctorId}/lab-favorites` | `{ testId }` | `Favorite` (created or existing) | `cln.usp_CreateLabFavorite` — *api.js: `createLabFavorite`* |
-| DELETE | `/doctors/{doctorId}/lab-favorites/{testId}` | — | `{ success }` | `cln.usp_DeleteLabFavorite` — *api.js: `deleteLabFavorite`*. Hard delete (junction table, no soft-delete column). |
-| POST | `/consultations/{id}/investigation-orders` | `{ hospitalId, patientId, testId?, testName, testType? }` | `InvestigationOrder` (created, `status`='ORDERED') | `cln.usp_CreateInvestigationOrder` — *api.js: `createInvestigationOrder`* |
-| GET | `/consultations/{id}/investigation-orders` | — | `[ InvestigationOrder ]` | `cln.usp_ListInvestigationOrders` — *api.js: `listInvestigationOrders`* |
-| GET | `/lab-portal/pending-orders?hospitalId=` | `hospitalId` | `[ InvestigationOrder ]` incl. `patientName`, `patientMrn`, `status`='ORDERED' | `cln.usp_ListPendingLabOrders` — *api.js: `listPendingLabOrders`* |
-| PUT | `/lab-portal/orders/{id}/status` | `{ status }` | `{ success }` | `cln.usp_UpdateOrderStatus` — *api.js: `updateOrderStatus`* |
-| POST | `/lab-portal/results` | `{ orderId, hospitalId, labPartnerId?, resultSummary?, resultValue?, referenceRange?, interpretation?, technician?, notes? }` | `LabResult` (created, `status`='UPLOADED'); also sets the order's `status`='COMPLETED' | `cln.usp_SubmitLabResult` — *api.js: `submitLabResult`*. AUDIT: caller must also call `POST /audit/logs` (Action=`SUBMIT`). |
-| GET | `/patients/{id}/lab-results` | — | `[ LabResult ]`, newest first | `cln.usp_ListLabResultsForPatient` — *api.js: `listLabResultsForPatient`* |
-| GET | `/lab-results/pending-review?hospitalId=` | `hospitalId` | `[ LabResult ]` incl. `patientName`/`patientMrn`, `status`='UPLOADED' | `cln.usp_ListPendingReviewResults` — *api.js: `listPendingReviewResults`* |
-| PUT | `/lab-results/{id}/review` | `{ reviewNotes? }` | `{ success }` | `cln.usp_UpdateLabResultStatus` — *api.js: `updateLabResultStatus`*. Sets `status`='REVIEWED'. AUDIT: caller must also call `POST /audit/logs` (Action=`APPROVE`). |
-
-### Referrals
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| POST | `/consultations/{id}/referrals` | `{ hospitalId, patientId, specialty, doctorName?, urgency?, reason? }` | `Referral` (created) | `cln.usp_CreateReferral` — *api.js: `createReferral`* |
-| GET | `/consultations/{id}/referrals` | — | `[ Referral ]` | `cln.usp_ListReferrals` — *api.js: `listReferrals`* |
-
-### Sketches / Drawing Pad
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| POST | `/consultations/{id}/sketches` | `{ hospitalId, patientId, doctorId, title?, imageData }` | `Sketch` (created — always inserts a new row, never updates, despite the "save" verb) | `cln.usp_SaveSketch` — *api.js: `saveSketch`* |
-| GET | `/consultations/{id}/sketches` | — | `[ Sketch ]`, newest first | `cln.usp_ListSketches` — *api.js: `listSketches`* |
-
-### Confidential Notes & Addendums
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/consultations/{id}/confidential-note?doctorId=` | `doctorId` | `ConfidentialNote \| null` — author-only: only ever returned to `createdBy`=`doctorId` | `cln.usp_GetConfidentialNote` — *api.js: `getConfidentialNote`* |
-| POST | `/consultations/{id}/confidential-note` | `{ hospitalId, doctorId, noteText }` | `ConfidentialNote` (upserted, author-scoped) | `cln.usp_SaveConfidentialNote` — *api.js: `saveConfidentialNote`* |
-| POST | `/consultations/{id}/addendums` | `{ hospitalId, doctorId, category?, addendumText }` | `Addendum` (created; append-only, never updated) | `cln.usp_CreateAddendum` — *api.js: `createAddendum`* |
-| GET | `/consultations/{id}/addendums` | — | `[ Addendum ]`, chronological | `cln.usp_ListAddendums` — *api.js: `listAddendums`* |
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListPhrases(PhraseQuery query)` | `Section` (S/O/A/P), `SpecialtyId?, DoctorId?, ConsultationId?` | `List<Phrase>` — `PhraseBankId, UserId, Category, TriggerCode, PhraseText`; priority DOCTOR > SPECIALTY > GLOBAL | `cfg.usp_ListPhrases`. With `ConsultationId`, condition-linked phrases appear only when one of the visit's ICD-10 diagnoses matches the condition; a doctor's phrase hides a broader one with the same trigger |
+| `SearchPhrases(PhraseQuery query, string term)` | as above + `term` | `List<Phrase>`, top 5, trigger / text match | `cfg.usp_SearchPhrases` |
+| `CreatePhrase(CreatePhraseRequest request)` | `Scope?, SpecialtyId?, DoctorId?, ConditionId?, Section?, TriggerKeyword?, PhraseText` | `Phrase` | `cfg.usp_CreatePhrase` |
+| `DeletePhrase(string phraseBankId)` | — | `void` | `cfg.usp_DeletePhrase` — soft delete (`IsActive = 0`) |
 
 ---
 
-### Services & Procedures (with optional stocked item)
+## 8. Lab — lab portal and results
 
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/consultations/{id}/services` | — | `[ ServiceItem ]` — `{consultationServiceId, consultationId, patientId, serviceChargeId, serviceName, category, qty, inventoryItemId, itemName, itemUnit, itemQty, notes, addedByUserId, createdAt}` | `cln.usp_ListConsultationServiceItems` |
-| POST | `/consultations/{id}/services` | `{ serviceChargeId, qty?, inventoryItemId?, itemQty?, notes? }` — the item is optional and must be linked to the service (`GET /service-charges/{id}/items`); `itemQty` may not exceed what is available less what this visit already lists | `{ consultationServiceId, serviceName, qty, itemName, itemQty }` | `cln.usp_CreateConsultationServiceItem`. Stock is only checked here; it is deducted at sign-off. Errors 50030 consultation not found or signed off, 50031 not enough stock, 50032 service not found, 50033 item not used with this service. At sign-off the service and the item are billed on separate invoice lines. |
-| DELETE | `/consultations/{id}/services/{serviceId}` | — | `{ success }` (before sign-off only; nothing to reverse) | `cln.usp_DeleteConsultationServiceItem` |
-| GET | `/consultations/{id}/stock-shortages` | — | `[ { inventoryItemId, itemName, unit, needed, available } ]` — stocked items the visit lists more of than is in stock; empty = sign-off can proceed | `inv.usp_ListStockShortages` |
+Feature: `lab_portal` (LAB_PARTNER, ADMIN) for the portal operations; `consultation` for
+results review (marked 🩺).
 
----
-
-## 6. Billing
-
-Role: `billing` feature (ADMIN, RECEPTIONIST, BILLING).
-
-### Fee Schedule
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/doctors/{doctorId}/fee?type=&onDate=` | `type` (`consultationType`), `onDate?` | `FeeSchedule \| null` — `{feeScheduleId, doctorId, consultationType, feeAmount, currency, effectiveFrom, effectiveTo}` | `bil.usp_CheckEffectiveFee` — *api.js: `checkEffectiveFee`* and *api.js: `getDoctorFee`* (both call the same underlying SP) |
-| GET | `/fee-schedule?hospitalId=` | `hospitalId` (`_hid()` fallback) | `[ FeeSchedule ]` | `bil.usp_ListDoctorFees` — *api.js: `listDoctorFees`* |
-
-### Service Charge Master
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/service-charges?hospitalId=` | `hospitalId` (`_hid()` fallback) | `[ ServiceCharge ]` — `{serviceChargeId, serviceCode, serviceName, category, defaultAmount, taxPercent, currency}` | `bil.usp_ListServiceCharges` — *api.js: `listServiceCharges`* |
-| GET | `/service-charges/{id}` | — | `ServiceCharge` | `bil.usp_GetServiceCharge` — *api.js: `getServiceCharge`* |
-| GET | `/service-charges/search?term=&hospitalId=` | `term`, `hospitalId` (`_hid()` fallback) | `[ ServiceCharge ]` | `bil.usp_SearchServiceCharges` — *api.js: `searchServiceCharges`* |
-| POST | `/service-charges` | `{ hospitalId, serviceCode, serviceName, category, defaultAmount, taxPercent }` | `ServiceCharge` (created) | `bil.usp_CreateServiceCharge` — *api.js: `createServiceCharge`* |
-
-### Invoices
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| POST | `/invoices` | `{ hospitalId, consultationId?, patientId, doctorId?, consultationType?, isFreeFollowup?, chargeNote?, currency? }` | `Invoice` (created, `status`='PENDING', server-generated `invoiceNumber`) | `bil.usp_CreateInvoice` — *api.js: `createInvoice`* |
-| GET | `/consultations/{cid}/invoice` | — | `Invoice \| null`, excludes `status`='CANCELLED' | `bil.usp_GetInvoiceForConsultation` — *api.js: `getInvoiceForConsultation`* |
-| GET | `/invoices?hospitalId=` | `hospitalId` | `[ Invoice ]`, newest first | `bil.usp_ListInvoices` — *api.js: `listInvoices`* |
-| GET | `/invoices/{id}` | — | `Invoice` | `bil.usp_GetInvoice` — *api.js: `getInvoice`* |
-| PUT | `/invoices/{id}` | `{ status?, subTotal?, discountAmount?, taxAmount?, totalAmount? }` | `Invoice` (updated) | `bil.usp_UpdateInvoice` — *api.js: `updateInvoice`* |
-| POST | `/invoices/{id}/cancel` | `{ reason, issuedBy }` | `CreditNote` (created for the full invoice amount); sets invoice `status`='CANCELLED' | `bil.usp_CancelInvoice` — *api.js: `cancelInvoice`* |
-| GET | `/invoices/{id}/credit-notes` | — | `[ CreditNote ]` | `bil.usp_ListCreditNotes` — *api.js: `listCreditNotes`* |
-
-### Invoice Line Items
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| POST | `/invoices/{id}/line-items` | `{ serviceChargeId?, inventoryItemId?, description, category, qty?, unitAmount, discountPercent?, taxPercent? }` — `inventoryItemId` for a stocked item billed from Clinic Inventory | `LineItem` (created; server computes `discountAmount`, `taxAmount`, `lineTotal`) | `bil.usp_CreateInvoiceLineItem` — *api.js: `createInvoiceLineItem`* |
-| GET | `/invoices/{id}/line-items` | — | `[ LineItem ]`, sorted by `sortOrder` | `bil.usp_ListInvoiceLineItems` — *api.js: `listInvoiceLineItems`* |
-| DELETE | `/invoices/{id}/line-items/{lid}` | — | `{ success }` | `bil.usp_DeleteInvoiceLineItem` — *api.js: `deleteInvoiceLineItem`*. Hard delete (no soft-delete column on this table). |
-| POST | `/invoices/{id}/recalculate` | — | `Invoice` (updated `subTotal`/`discountAmount`/`taxAmount`/`totalAmount`, recomputed from line items) | `bil.usp_RecalculateInvoiceTotals` — *api.js: `recalculateInvoiceTotals`* |
-
-### Payments
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| POST | `/invoices/{id}/payments` | `{ hospitalId, componentType? (PATIENT\|INSURANCE), coverageLineId? (required for INSURANCE — the claim being settled), paymentMethod, amount, reference?, receivedBy? }` | `Payment` (created; recalculates the split — `paidAmount`, `patientPaidAmount`, coverage `settledAmount`, `status`) | `bil.usp_CreatePayment` — *api.js: `createPayment`* |
-| GET | `/invoices/{id}/payments` | — | `[ Payment ]`, newest first | `bil.usp_ListPaymentsForInvoice` — *api.js: `listPaymentsForInvoice`* |
-| GET | `/payments?hospitalId=` | `hospitalId` | `[ Payment ]`, newest first | `bil.usp_ListPayments` — *api.js: `listPayments`* |
-| PUT | `/payments/{id}/void` | `{ voidReason, voidedBy }` | `{ success }` — cannot delete, only void; recalculates invoice | `bil.usp_UpdatePaymentVoid` — *api.js: `updatePaymentVoid`* |
-
-### Receipts
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| POST | `/invoices/{id}/receipt` | `{ hospitalId, patientId?, totalAmount, currency? }` | `Receipt` (created, server-generated `receiptNumber`) | `bil.usp_CreateReceipt` — *api.js: `createReceipt`*. AUDIT: caller must also call `POST /audit/logs` (Action=`PRINT`) when the receipt is printed. |
-| GET | `/invoices/{id}/receipt` | — | `Receipt \| null` | `bil.usp_GetReceiptForInvoice` — *api.js: `getReceiptForInvoice`* |
-
-### Coverage & Bill Split (insurance / govt scheme — ported from MediSlot)
-
-`Charge (invoice totalAmount) = Σ verified coverage liabilities + Patient share`. Supports Self-Pay (no coverage), Private insurance only, Govt scheme only (CGHS / Aarogyasri, NHF, Medicare …), and Private + Govt together. Each coverage is verified per invoice (eligibility status + authorization + approved % or fixed amount); liabilities are allocated in coverage `priority` order and capped so their sum never exceeds the charge. `PERCENT` approvals follow the invoice total when charges are added/removed. The invoice becomes `PAID` once the **patient share** is settled (or everything is paid) — covered amounts are receivables from the payer, settled later with `INSURANCE` payments against the coverage line. Screen: `#/billing/checkout/:consultationId` → *Coverage & bill split* card. Role: `billing`.
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/payers?country=&category=` | `country` (hospital country), optional `category` `PRIVATE\|GOVT_SCHEME` | `[ { payerId, name, category, country } ]` | `cfg.usp_ListPayers` — *api.js: `listPayers`* |
-| GET | `/patients/{id}/coverages?includeInactive=` | optional `includeInactive` | `[ Coverage ]` — `{coverageId, coverageType, payerId, payerName, planName, memberId, policyNumber, groupNumber, policyHolderName, relationship, claimMode, govtCardNumber, cardImageUrl, effectiveDate, expiryDate, status, priority, isActive, lastVerificationStatus}`; none = Self-Pay | `opd.usp_ListPatientCoverages` — *api.js: `listPatientCoverages`* |
-| POST / PUT | `/patients/{id}/coverages[/{coverageId}]` | `{ coverageType (PRIVATE_INSURANCE\|GOVT_SCHEME), payerId, planName?, memberId?, policyNumber?, groupNumber?, policyHolderName?, relationship?, claimMode? (CASHLESS\|REIMBURSEMENT), govtCardNumber?, cardImage?, effectiveDate?, expiryDate?, status? }` | `Coverage` | `opd.usp_SavePatientCoverage` — *api.js: `savePatientCoverage`* |
-| PUT | `/coverages/{id}/deactivate` | — | `{ success }` | `opd.usp_DeactivatePatientCoverage` — *api.js: `deactivatePatientCoverage`* |
-| GET | `/coverages/{id}/verifications` | — | `[ { verificationId, invoiceId, status, authorizationNumber, approvedType, approvedValue, notes, verifiedBy, verifiedAt } ]`, oldest first | `bil.usp_ListEligibilityVerifications` — *api.js: `listEligibilityVerifications`* |
-| POST | `/invoices/{id}/coverage` | `{ coverageId, status (VERIFIED\|PENDING\|REJECTED), authorizationNumber?, approvedType (PERCENT\|AMOUNT), approvedValue, notes? }` | `BillingSplit` — records the verification; `VERIFIED` applies / updates the coverage line, otherwise removes it. 409 if the invoice is cancelled or the payer already settled against the line | `bil.usp_ApplyCoverageToInvoice` — *api.js: `applyCoverageToInvoice`*. AUDIT: caller also calls `POST /audit/logs` (Action=`UPDATE`, EntityType=`Invoice`). |
-| PUT | `/invoice-coverage-lines/{id}` | `{ liability }` | `BillingSplit` — manual override, still capped to the charge | `bil.usp_EditInvoiceCoverageLine` — *api.js: `editInvoiceCoverageLine`* |
-| DELETE | `/invoice-coverage-lines/{id}` | — | `BillingSplit`; 409 once settled by the payer | `bil.usp_RemoveInvoiceCoverageLine` — *api.js: `removeInvoiceCoverageLine`* |
-| GET | `/invoices/{id}/billing-split` | — | `BillingSplit` — `{grossAmount, insuranceLiability, govtLiability, coveredAmount, patientLiability, patientPaid, patientDue, patientOverpaid, payerOutstanding, status, lines:[{coverageLineId, coverageId, payerName, coverageType, priority, authorizationNumber, approvedType, approvedValue, isManualAmount, liability, settledAmount}]}` | `bil.usp_GetInvoiceBillingSplit` — *api.js: `getInvoiceBillingSplit`* |
-| — | (internal) | — | Re-derives liabilities, patient share, paid amounts and status; run by line-item recalculation, payments, voids and every coverage change | `bil.usp_RecalculateInvoiceSplit` |
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListPendingLabOrders()` | — | `List<InvestigationOrder>` incl. `PatientName, PatientMrn`; `Status = ORDERED` | `cln.usp_ListPendingLabOrders` |
+| `UpdateOrderStatus(string orderId, string status)` | — | `void` | `cln.usp_UpdateOrderStatus` |
+| `SubmitLabResult(SubmitLabResultRequest request)` | `OrderId, LabPartnerId?, ResultSummary?, ResultValue?, ReferenceRange?, Interpretation?, Technician?, Notes?` | `LabResult` (`Status = UPLOADED`; the order becomes `COMPLETED`) | `cln.usp_SubmitLabResult`. **Audited: SUBMIT** |
+| `ListLabResultsForPatient(string patientId)` 🩺 | — | `List<LabResult>`, newest first | `cln.usp_ListLabResultsForPatient` |
+| `ListPendingReviewResults()` 🩺 | — | `List<LabResult>` incl. `PatientName, PatientMrn`; `Status = UPLOADED` | `cln.usp_ListPendingReviewResults` |
+| `UpdateLabResultStatus(string labResultId, string reviewNotes)` 🩺 | `reviewNotes` optional | `void` (`Status = REVIEWED`) | `cln.usp_UpdateLabResultStatus`. **Audited: APPROVE** |
 
 ---
 
-## 7. Reports
+## 9. Billing — charges, invoices, payments, coverage
 
-Role: `reports` feature (ADMIN, DOCTOR, BILLING).
+Feature: `billing` (ADMIN, RECEPTIONIST, BILLING).
 
-| Verb | Endpoint | Params | Returns | SP / View |
-|------|----------|--------|---------|-----------|
-| GET | `/reports/consultation-volume?hospitalId=&fromDate=&toDate=` | `hospitalId`, `fromDate`, `toDate` | `[ { date, consultationCount } ]` | `cln.usp_ListConsultationVolumeReport` — *api.js: `listConsultationVolumeReport`* |
-| GET | `/reports/diagnosis-frequency?hospitalId=&fromDate=&toDate=` | as above | `[ { icd10Code, description, diagnosisCount } ]`, ranked desc | `cln.usp_ListDiagnosisFrequencyReport` — *api.js: `listDiagnosisFrequencyReport`* |
-| GET | `/reports/prescribing-patterns?hospitalId=&fromDate=&toDate=` | as above | `[ { medicineName, prescriptionCount } ]`, ranked desc | `cln.usp_ListPrescribingReport` — *api.js: `listPrescribingReport`* |
-| GET | `/reports/no-show-rate?hospitalId=&fromDate=&toDate=` | as above | `{ total, noShows, noShowRate }` + `[ { status, statusCount } ]` | `opd.usp_ListNoShowReport` — *api.js: `listNoShowReport`* |
-| GET | `/reports/revenue?hospitalId=&fromDate=&toDate=` | as above | `[ { doctorId, invoiceCount, totalInvoiced, totalPaid } ]` | `bil.usp_ListRevenueReport` — *api.js: `listRevenueReport`* |
-| GET | `/reports/revenue-by-service?hospitalId=&fromDate=&toDate=` | as above | `[ { category, totalRevenue, invoiceCount, invoiceDate } ]` | `bil.vw_RevenueByServiceCategory` (view) |
-| GET | `/reports/day-end?hospitalId=&date=` | `hospitalId`, `date` | `{ invoiceCount, totalBilled, totalCollected, totalOutstanding }` + `[ { componentType, paymentMethod, totalAmount, paymentCount } ]` | `bil.vw_DayEndSummary` + `bil.vw_PaymentsByComponent` (views) |
+### Consultation charge and service charge master
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `GetConsultationCharge(string consultationId)` | — | `ConsultationCharge` — `ConsultationType, AppointmentTypeName, DurationMinutes, ChargeModel, BaseFee, FeeAmount, IsFreeFollowup, AnchorDate, Basis, Note, Description` | `bil.usp_GetConsultationCharge`. Used when the invoice is generated |
+| `ListServiceCharges()` | — | `List<ServiceCharge>` — `ServiceChargeId, ServiceCode, ServiceName, Category, DefaultAmount, TaxPercent, Currency` | `bil.usp_ListServiceCharges` |
+| `GetServiceCharge(string serviceChargeId)` | — | `ServiceCharge` | `bil.usp_GetServiceCharge` |
+| `SearchServiceCharges(string term)` | — | `List<ServiceCharge>` | `bil.usp_SearchServiceCharges` |
+| `CreateServiceCharge(CreateServiceChargeRequest request)` | `ServiceCode, ServiceName, Category, DefaultAmount, TaxPercent` | `ServiceCharge` | `bil.usp_CreateServiceCharge` |
+
+### Invoices and line items
+
+`Invoice` members: `InvoiceId, InvoiceNumber, ConsultationId, PatientId, DoctorId, ConsultationType, IsFreeFollowup, ChargeNote, Currency, SubTotal, DiscountAmount, TaxAmount, TotalAmount, PaidAmount, PatientPaidAmount, Status, CreatedAt`.
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `CreateInvoice(CreateInvoiceRequest request)` | `ConsultationId?, PatientId, DoctorId?, ConsultationType?, IsFreeFollowup?, ChargeNote?, Currency?` | `Invoice` (`Status = PENDING`, server-generated `InvoiceNumber`) | `bil.usp_CreateInvoice` |
+| `GetInvoiceForConsultation(string consultationId)` | — | `Invoice` or `null`; ignores CANCELLED | `bil.usp_GetInvoiceForConsultation` |
+| `ListInvoices()` | — | `List<Invoice>`, newest first | `bil.usp_ListInvoices` |
+| `GetInvoice(string invoiceId)` | — | `Invoice` | `bil.usp_GetInvoice` |
+| `UpdateInvoice(string invoiceId, UpdateInvoiceRequest request)` | `Status?, SubTotal?, DiscountAmount?, TaxAmount?, TotalAmount?` | `Invoice` | `bil.usp_UpdateInvoice` |
+| `CancelInvoice(string invoiceId, string reason)` | — | `CreditNote` (for the full amount; invoice `Status = CANCELLED`) | `bil.usp_CancelInvoice`. **Audited: CANCEL** |
+| `ListCreditNotes(string invoiceId)` | — | `List<CreditNote>` | `bil.usp_ListCreditNotes` |
+| `CreateInvoiceLineItem(string invoiceId, CreateLineItemRequest request)` | `ServiceChargeId?, InventoryItemId?` (a stocked item from Clinic Inventory), `Description, Category, Qty?, UnitAmount, DiscountPercent?, TaxPercent?` | `LineItem` (server computes `DiscountAmount, TaxAmount, LineTotal`) | `bil.usp_CreateInvoiceLineItem` |
+| `ListInvoiceLineItems(string invoiceId)` | — | `List<LineItem>`, by `SortOrder` | `bil.usp_ListInvoiceLineItems` |
+| `DeleteInvoiceLineItem(string invoiceId, string lineItemId)` | — | `void` | `bil.usp_DeleteInvoiceLineItem` — hard delete |
+| `RecalculateInvoiceTotals(string invoiceId)` | — | `Invoice` (totals recomputed from line items) | `bil.usp_RecalculateInvoiceTotals` |
+
+### Payments and receipts
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `CreatePayment(string invoiceId, CreatePaymentRequest request)` | `ComponentType?` (`PATIENT` / `INSURANCE`), `CoverageLineId?` (required for INSURANCE — the claim being settled), `PaymentMethod, Amount, Reference?` | `Payment` (recalculates `PaidAmount`, `PatientPaidAmount`, coverage `SettledAmount`, `Status`) | `bil.usp_CreatePayment`. Errors 50120 INSURANCE without a coverage line on this invoice, 50121 invoice cancelled (`Conflict`) |
+| `ListPaymentsForInvoice(string invoiceId)` | — | `List<Payment>`, newest first | `bil.usp_ListPaymentsForInvoice` |
+| `ListPayments()` | — | `List<Payment>`, newest first | `bil.usp_ListPayments` |
+| `UpdatePaymentVoid(string paymentId, string voidReason)` | — | `void` — payments are voided, never deleted; recalculates the invoice | `bil.usp_UpdatePaymentVoid`. **Audited: VOID** |
+| `CreateReceipt(string invoiceId, CreateReceiptRequest request)` | `PatientId?, TotalAmount, Currency?` | `Receipt` (server-generated `ReceiptNumber`) | `bil.usp_CreateReceipt`. When the receipt is printed the page calls `RecordAuditEntry` (Action `PRINT`) |
+| `GetReceiptForInvoice(string invoiceId)` | — | `Receipt` or `null` | `bil.usp_GetReceiptForInvoice` |
+
+### Coverage and bill split
+
+`Charge (invoice TotalAmount) = Σ verified coverage liabilities + patient share`. Supports
+Self-Pay, private insurance only, government scheme only (CGHS / Aarogyasri, NHF, Medicare …),
+and private + government together. Each coverage is verified per invoice (eligibility status +
+authorization + approved % or fixed amount); liabilities are allocated in coverage `Priority`
+order and capped so their sum never exceeds the charge. `PERCENT` approvals follow the invoice
+total when charges change. The invoice is `PAID` once the patient share is settled (or
+everything is paid); covered amounts are receivables from the payer, settled later with
+`INSURANCE` payments against the coverage line. Screen: Billing Checkout → *Coverage & bill
+split*.
+
+`BillingSplit` members: `GrossAmount, InsuranceLiability, GovtLiability, CoveredAmount, PatientLiability, PatientPaid, PatientDue, PatientOverpaid, PayerOutstanding, Status, Lines (List<CoverageLine>: CoverageLineId, CoverageId, PayerName, CoverageType, Priority, AuthorizationNumber, ApprovedType, ApprovedValue, IsManualAmount, Liability, SettledAmount)`.
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListEligibilityVerifications(string coverageId)` | — | `List<EligibilityVerification>` — `VerificationId, InvoiceId, Status, AuthorizationNumber, ApprovedType, ApprovedValue, Notes, VerifiedBy, VerifiedAt`; oldest first | `bil.usp_ListEligibilityVerifications` |
+| `ApplyCoverageToInvoice(string invoiceId, ApplyCoverageRequest request)` | `CoverageId, Status` (`VERIFIED` / `PENDING` / `REJECTED`), `AuthorizationNumber?, ApprovedType` (`PERCENT` / `AMOUNT`), `ApprovedValue, Notes?` | `BillingSplit` — records the verification; `VERIFIED` applies / updates the coverage line, otherwise removes it | `bil.usp_ApplyCoverageToInvoice`. `Conflict` (50121 / 50122) if the invoice is cancelled or the payer already settled the line. **Audited: UPDATE** (`EntityType = Invoice`) |
+| `EditInvoiceCoverageLine(string coverageLineId, decimal liability)` | — | `BillingSplit` — manual override, still capped to the charge | `bil.usp_EditInvoiceCoverageLine` |
+| `RemoveInvoiceCoverageLine(string coverageLineId)` | — | `BillingSplit` | `bil.usp_RemoveInvoiceCoverageLine`. `Conflict` once the payer has settled |
+| `GetInvoiceBillingSplit(string invoiceId)` | — | `BillingSplit` | `bil.usp_GetInvoiceBillingSplit` |
+
+`bil.usp_RecalculateInvoiceSplit` is internal (not an operation): it re-derives liabilities,
+patient share, paid amounts and status, and runs inside line-item recalculation, payments, voids
+and every coverage change.
 
 ---
 
-## 8. Compliance
+## 10. Inventory — clinic inventory
 
-Role: `admin_hospital` feature (ADMIN).
+Feature: `admin_inventory` (ADMIN by default); `ListItemsForService` is also reachable with
+`consultation`.
 
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/compliances?country=` | `country` | `[ Compliance ]` — `{complianceId, complianceName, country, isMandatory, displayLabel, printLabel, validationRegex, sortOrder}`, includes country='ALL' rows | `cfg.usp_ListCompliances` — *api.js: `listCompliances`* |
-| GET | `/hospital-compliances?hospitalId=` | `hospitalId` | `[ HospitalCompliance ]` — `{hospitalComplianceId, hospitalId, complianceId, complianceName, displayLabel, printLabel, isMandatory, registrationNumber, issuedOn, expiresOn}` | `cfg.usp_ListHospitalCompliances` — *api.js: `listHospitalCompliances`* |
-| PUT | `/hospital-compliances` | `{ hospitalId, complianceId, registrationNumber, issuedDate?, expiryDate? }` | `HospitalCompliance` (upserted) | `cfg.usp_SaveHospitalCompliance` — *api.js: `saveHospitalCompliance`* |
-
----
-
-## 9. Notifications / Messaging
-
-Role: `admin_hospital` for config/templates (ADMIN); queue/log used by the NotificationEngine.
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/notifications/templates?hospitalId=` | `hospitalId` | `[ MessageTemplate ]` — `{messageTemplateId, hospitalId, name, triggerEvent, channel, templateText, isEnabled}` | `cfg.usp_ListMessageTemplates` — *api.js: `listMessageTemplates`* |
-| PUT | `/notifications/templates/{id}/status` | — (toggles current value) | `{ success }` | `cfg.usp_UpdateMessageTemplateStatus` — *api.js: `updateMessageTemplateStatus`* |
-| PATCH | `/notifications/templates/{id}` | `{ name?, trigger?, channel?, text?, isEnabled? }` — partial update, only supplied fields change | `MessageTemplate` (updated) | `cfg.usp_UpdateMessageTemplate` — *api.js: `updateMessageTemplate`*. Distinct from the status-only toggle above. |
-| GET | `/notifications/config?hospitalId=` | `hospitalId` | `[ { channel, provider, configJson, isEnabled } ]` — `apiKey` never returned (ENCRYPTION: RANDOMIZED, write-only) | `msg.usp_GetNotificationConfig` — *api.js: `getNotificationConfig`* |
-| PUT | `/notifications/config/{channel}` | `{ hospitalId, provider?, apiKey?, phoneNumberId?, businessAccountId?, smtpHost?, smtpPort?, fromEmail?, fromName?, enabled? }` | `{ success }` (upserted) | `msg.usp_SaveNotificationConfig` — *api.js: `saveNotificationConfig`* |
-| POST | `/notifications/queue` | `{ hospitalId, patientId?, channel, templateName?, patientName?, patientPhone?, messageText? }` | `Message` (created; `status`='QUEUED' if channel enabled, else 'SIMULATED') | `msg.usp_CreateQueuedMessage` — *api.js: `createQueuedMessage`* |
-| POST | `/notifications/send` | `{ hospitalId }` | `{ success }` — batch-transitions QUEUED/SIMULATED rows to SENT | `msg.usp_SubmitQueuedMessages` — *api.js: `submitQueuedMessages`* |
-| GET | `/notifications/log?hospitalId=` | `hospitalId` | `[ Message ]`, newest first | `msg.usp_ListMessageLog` — *api.js: `listMessageLog`* |
-| GET | `/notifications/stats?hospitalId=` | `hospitalId` | `{ total, sent, simulated, failed }` | `msg.usp_GetMessageStats` — *api.js: `getMessageStats`* |
-
----
-
-## 10. Audit Log & Data Export
-
-Role: `audit_log` / `data_export` features (ADMIN only).
-
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| POST | `/audit/logs` | `{ hospitalId, userId?, action, entityType, entityId?, details?, ipAddress?, userAgent? }` | `AuditEntry` (created; append-only) | `sec.usp_RecordAuditEntry` — *api.js: `recordAuditEntry`* |
-| GET | `/audit/logs?hospitalId=` | `hospitalId` | `[ AuditEntry ]`, newest first | `sec.usp_ListAuditLogs` — *api.js: `listAuditLogs`* |
-| GET | `/audit/logs/filtered?hospitalId=&action=&entityType=&userId=&fromDate=&toDate=&top=200` | filters, `top` default 200 | `[ AuditEntry ]`, newest first | `sec.usp_ListAuditLogsFiltered` — *api.js: `listAuditLogsFiltered`* |
-| GET | `/export/tables?hospitalId=` | `hospitalId` | `[ { tableKey, rowCount } ]` for the allow-listed exportable tables | `sec.usp_ListExportTables` — *api.js: `listExportTables`* |
-| GET | `/export/{tableKey}?hospitalId=&format=csv` | `hospitalId`; `tableKey` one of `patients\|appointments\|consultations\|prescriptions\|invoices\|paymentTransactions\|receipts\|auditLogs` | CSV file download (header row + quoted values, server-serialized) | `sec.usp_ListExportData_{TableKey}` — *api.js: `listExportData`, `exportTableCsv`*. One fixed procedure per allow-listed table (no dynamic SQL against a client-supplied table name — see architecture §8 rule 5). `exportTableCsv(tableName)` is a same-behavior alias of `listExportData(tableName)` added on the client during a bug-fix pass (a Settings-Hub CSV-export button was calling a method name that didn't exist yet) — both names route to the same endpoint/procedure, no separate SP. AUDIT: caller must also call `POST /audit/logs` (Action=`EXPORT`, Details=`tableKey`, never the exported rows themselves). |
-
----
-
-## 11. Clinic Inventory (`admin_inventory`, ADMIN by default)
-
-Stock the clinic uses during a visit, kept apart from the Drug Formulary. Stock is held per
+Stock the clinic uses during a visit, kept apart from the drug formulary. Stock is held per
 batch (batch number + expiry); a batch is usable through its expiry date (the hospital's
 calendar date) and used earliest-expiry first. Every change is a row in the stock ledger.
 
-| Verb | Endpoint | Body / Params | Returns | SP |
-|------|----------|---------------|---------|-----|
-| GET | `/inventory/items?hospitalId=&includeInactive=` | `hospitalId`, optional `includeInactive` | `[ InventoryItem ]` — `{inventoryItemId, itemCode, itemName, category, unit, unitPrice, taxPercent, reorderLevel, isActive, available, expired, nextExpiry}`; `available` counts unexpired batches only | `inv.usp_ListInventoryItems` |
-| GET | `/inventory/items/{id}` | — | `InventoryItem` — `{inventoryItemId, hospitalId, itemCode, itemName, category, unit, unitPrice, taxPercent, reorderLevel, isActive}` | `inv.usp_GetInventoryItem` |
-| POST / PUT | `/inventory/items` · `/inventory/items/{id}` | `{ hospitalId, itemCode, itemName, category, unit, unitPrice, taxPercent?, reorderLevel? }` — `category` MEDICATION / INJECTION / CONSUMABLE / OTHER; `itemCode` unique per hospital | `{ inventoryItemId, itemName }` | `inv.usp_SaveInventoryItem` (inserts when `@InventoryItemId` is null) |
-| PUT | `/inventory/items/{id}/active` | `{ isActive }` | `{ inventoryItemId, isActive }` | `inv.usp_UpdateInventoryItemActive` |
-| GET | `/inventory/items/{id}/services` | — | `[ { serviceChargeId, serviceName } ]` — the services the item is used with | `inv.usp_ListItemServices` |
-| PUT | `/inventory/items/{id}/services` | `{ serviceChargeIds: [ … ] }` (sent comma-separated as `@ServiceChargeIds`; replaces the list; empty = linked to nothing) | same as GET | `inv.usp_SaveItemServices` |
-| GET | `/service-charges/{id}/items?hospitalId=` | `hospitalId` | `[ { inventoryItemId, itemName, category, unit, available } ]` — active items linked to the service: the Item field in Services & Procedures | `inv.usp_ListItemsForService` |
-| GET | `/inventory/items/{id}/batches?includeEmpty=` | optional `includeEmpty` | `[ StockBatch ]` — `{stockBatchId, inventoryItemId, batchNo, expiryDate, qtyReceived, qtyOnHand, unitCost, supplier, receivedByUserId, receivedAt, isExpired}`, earliest expiry first | `inv.usp_ListStockBatches` |
-| POST | `/inventory/items/{id}/receipts` | `{ hospitalId, batchNo, expiryDate, qty, unitCost?, supplier? }` — a batch number already on file is topped up (same expiry only) | `[ StockBatch ]` (the item's batches) | `inv.usp_RecordStockReceipt`. Errors 50020 qty < 1, 50021 item not found, 50022 batch on file with another expiry |
-| POST | `/inventory/batches/{id}/adjustments` | `{ delta, reason }` — signed quantity (negative for expiry write-off, damage, count short) | `{ success }` | `inv.usp_RecordStockAdjustment`. Errors 50023 delta 0, 50024 would go below zero |
-| GET | `/inventory/items/{id}/movements?take=` | optional `take` (default 50) | `[ StockMovement ]` — `{stockMovementId, movementType, qty, reason, consultationId, userId, createdAt, stockBatchId, batchNo}`, newest first; `movementType` RECEIPT / CONSUMPTION / ADJUSTMENT, `qty` signed | `inv.usp_ListStockMovements` |
-| — | *(internal, not an endpoint)* | — | Deducts a consultation's stocked items earliest-expiry first, all or nothing; error 50040 lists the shortages; a second call is a no-op | `inv.usp_RecordStockConsumption` — called by `cln.usp_ConfirmSignOff` |
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListInventoryItems(bool includeInactive)` | — | `List<InventoryItemSummary>` — `InventoryItemId, ItemCode, ItemName, Category, Unit, UnitPrice, TaxPercent, ReorderLevel, IsActive, Available, Expired, NextExpiry`; `Available` counts unexpired batches only | `inv.usp_ListInventoryItems` |
+| `GetInventoryItem(string inventoryItemId)` | — | `InventoryItem` — `InventoryItemId, ItemCode, ItemName, Category, Unit, UnitPrice, TaxPercent, ReorderLevel, IsActive` | `inv.usp_GetInventoryItem` |
+| `SaveInventoryItem(SaveInventoryItemRequest request)` | `InventoryItemId?` (null = new), `ItemCode, ItemName, Category` (`MEDICATION` / `INJECTION` / `CONSUMABLE` / `OTHER`), `Unit, UnitPrice, TaxPercent?, ReorderLevel?`; `ItemCode` unique per hospital | `SavedInventoryItem` — `InventoryItemId, ItemName` | `inv.usp_SaveInventoryItem` |
+| `UpdateInventoryItemActive(string inventoryItemId, bool isActive)` | — | `InventoryItemActiveState` — `InventoryItemId, IsActive` | `inv.usp_UpdateInventoryItemActive` |
+| `ListItemServices(string inventoryItemId)` | — | `List<LinkedService>` — `ServiceChargeId, ServiceName` | `inv.usp_ListItemServices` |
+| `SaveItemServices(string inventoryItemId, List<string> serviceChargeIds)` | replaces the list (sent comma-separated as `@ServiceChargeIds`); empty = linked to nothing | `List<LinkedService>` | `inv.usp_SaveItemServices` |
+| `ListItemsForService(string serviceChargeId)` | — | `List<ServiceStockItem>` — `InventoryItemId, ItemName, Category, Unit, Available`; active items linked to the service (the Item field in Services & Procedures) | `inv.usp_ListItemsForService` |
+| `ListStockBatches(string inventoryItemId, bool includeEmpty)` | — | `List<StockBatch>` — `StockBatchId, InventoryItemId, BatchNo, ExpiryDate, QtyReceived, QtyOnHand, UnitCost, Supplier, ReceivedByUserId, ReceivedAt, IsExpired`; earliest expiry first | `inv.usp_ListStockBatches` |
+| `RecordStockReceipt(string inventoryItemId, StockReceiptRequest request)` | `BatchNo, ExpiryDate, Qty, UnitCost?, Supplier?` — a batch number already on file is topped up (same expiry only) | `List<StockBatch>` (the item's batches) | `inv.usp_RecordStockReceipt`. Errors 50020 qty < 1, 50021 item not found, 50022 batch on file with another expiry |
+| `RecordStockAdjustment(string stockBatchId, int delta, string reason)` | signed `delta` (negative for expiry write-off, damage, count short) | `void` | `inv.usp_RecordStockAdjustment`. Errors 50023 delta 0, 50024 would go below zero |
+| `ListStockMovements(string inventoryItemId, int? take)` | `take` default 50 | `List<StockMovement>` — `StockMovementId, MovementType` (`RECEIPT` / `CONSUMPTION` / `ADJUSTMENT`), `Qty` (signed), `Reason, ConsultationId, UserId, CreatedAt, StockBatchId, BatchNo`; newest first | `inv.usp_ListStockMovements` |
+
+`inv.usp_RecordStockConsumption` is internal: `ConfirmSignOff` (§6) calls it to deduct a
+consultation's stocked items earliest-expiry first, all or nothing (error 50040 lists the
+shortages; a second call is a no-op).
 
 ---
 
-## Endpoint Count Summary
+## 11. Reports
 
-| Section | Endpoints |
-|---------|-----------|
-| 1. Authentication, Sessions & Users | 11 |
-| 2. Hospitals & Specialties | 8 |
-| 3. Patients + Sub-resources | 26 |
-| 4. Scheduling — Appointments & Slots | 30 |
-| 5. Consultations — Core | 60 |
-| 6. Billing | 32 |
-| 7. Reports | 7 |
-| 8. Compliance | 3 |
-| 9. Notifications / Messaging | 9 |
-| 10. Audit Log & Data Export | 5 |
-| 11. Clinic Inventory (`admin_inventory`, ADMIN by default) | 11 |
-| **Total** | **202** |
+Feature: `reports` (ADMIN, DOCTOR, BILLING). `fromDate` / `toDate` / `date` are hospital-local
+calendar dates.
 
-*(Some `api.js` methods share one endpoint/procedure — e.g. `checkEffectiveFee`
-and `getDoctorFee` both resolve to `GET /doctors/{doctorId}/fee`; `listAllergies`-
-style duplicate method definitions in `api.js` collapse to their single
-last-defined signature per the project's "later definition wins" rule;
-`exportTableCsv`/`listExportData` share one endpoint. All 150 current
-`api.js` methods are accounted for above or in `docs/stored-procedures.sql`'s
-method→SP list.)*
+| Operation | Input | Returns | Procedure / view |
+|-----------|-------|---------|------------------|
+| `ListConsultationVolumeReport(DateTime fromDate, DateTime toDate)` | — | `List<ConsultationVolumeRow>` — `Date, ConsultationCount` | `cln.usp_ListConsultationVolumeReport` |
+| `ListDiagnosisFrequencyReport(DateTime fromDate, DateTime toDate)` | — | `List<DiagnosisFrequencyRow>` — `Icd10Code, Description, DiagnosisCount`; ranked | `cln.usp_ListDiagnosisFrequencyReport` |
+| `ListPrescribingReport(DateTime fromDate, DateTime toDate)` | — | `List<PrescribingRow>` — `MedicineName, PrescriptionCount`; ranked | `cln.usp_ListPrescribingReport` |
+| `ListNoShowReport(DateTime fromDate, DateTime toDate)` | — | `NoShowReport` — `Total, NoShows, NoShowRate, ByStatus (List<StatusCountRow>: Status, StatusCount)` | `opd.usp_ListNoShowReport` |
+| `ListRevenueReport(DateTime fromDate, DateTime toDate)` | — | `List<RevenueRow>` — `DoctorId, InvoiceCount, TotalInvoiced, TotalPaid` | `bil.usp_ListRevenueReport` |
+| `ListRevenueByServiceReport(DateTime fromDate, DateTime toDate)` | — | `List<RevenueByServiceRow>` — `Category, TotalRevenue, InvoiceCount, InvoiceDate` | `bil.vw_RevenueByServiceCategory` (view, filtered by the service) |
+| `GetDayEndSummary(DateTime date)` | — | `DayEndSummary` — `InvoiceCount, TotalBilled, TotalCollected, TotalOutstanding, ByComponent (List<PaymentComponentRow>: ComponentType, PaymentMethod, TotalAmount, PaymentCount)` | `bil.vw_DayEndSummary` + `bil.vw_PaymentsByComponent` (views). Feature `billing` also reaches this |
+
+---
+
+## 12. Notifications — message templates and the outbound queue
+
+Feature: `admin_hospital` (ADMIN) for templates and channel config. `CreateQueuedMessage` and
+`SubmitQueuedMessages` (appointment reminders, no-show messages), `ListMessageLog` and
+`GetMessageStats` (the Message Log screen) are also reachable with `scheduling`.
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `ListMessageTemplates()` | — | `List<MessageTemplate>` — `MessageTemplateId, Name, TriggerEvent, Channel, TemplateText, IsEnabled` | `cfg.usp_ListMessageTemplates` |
+| `UpdateMessageTemplateStatus(string messageTemplateId)` | — (toggles) | `void` | `cfg.usp_UpdateMessageTemplateStatus` |
+| `UpdateMessageTemplate(string messageTemplateId, UpdateTemplateRequest request)` | `Name?, Trigger?, Channel?, Text?, IsEnabled?` — only supplied members change | `MessageTemplate` | `cfg.usp_UpdateMessageTemplate` |
+| `GetNotificationConfig()` | — | `List<ChannelConfig>` — `Channel, Provider, ConfigJson, IsEnabled`; the API key is never returned | `msg.usp_GetNotificationConfig` |
+| `SaveNotificationConfig(string channel, SaveChannelConfigRequest request)` | `Provider?, ApiKey?` (write-only; encrypted column), `PhoneNumberId?, BusinessAccountId?, SmtpHost?, SmtpPort?, FromEmail?, FromName?, Enabled?` | `void` (upserted) | `msg.usp_SaveNotificationConfig`. **Audited: UPDATE** (never logs the key) |
+| `CreateQueuedMessage(QueueMessageRequest request)` | `PatientId?, Channel, TemplateName?, PatientName?, PatientPhone?, MessageText?` | `QueuedMessage` (`Status = QUEUED` if the channel is enabled, else `SIMULATED`) | `msg.usp_CreateQueuedMessage` |
+| `SubmitQueuedMessages()` | — | `void` — moves QUEUED / SIMULATED rows to SENT | `msg.usp_SubmitQueuedMessages` |
+| `ListMessageLog()` | — | `List<QueuedMessage>`, newest first | `msg.usp_ListMessageLog` |
+| `GetMessageStats()` | — | `MessageStats` — `Total, Sent, Simulated, Failed` | `msg.usp_GetMessageStats` |
+
+---
+
+## 13. Audit & export — audit log and data export
+
+Features: `audit_log` for reading the log, `data_export` for exports (ADMIN only).
+`RecordAuditEntry` is open to any signed-in user.
+
+| Operation | Input | Returns | Procedure / notes |
+|-----------|-------|---------|-------------------|
+| `RecordAuditEntry(AuditEntryRequest request)` | `Action, EntityType, EntityId?, Details?` — user, IP and user agent come from the call (`CallerContext` and the message properties) | `AuditEntry` (append-only) | `sec.usp_RecordAuditEntry`. For screen-level events; operations marked **Audited** already record their own |
+| `ListAuditLogs()` | — | `List<AuditEntry>`, newest first | `sec.usp_ListAuditLogs` |
+| `ListAuditLogsFiltered(AuditFilter filter)` | `Action?, EntityType?, UserId?, FromDate?, ToDate?, Top?` (default 200) | `List<AuditEntry>`, newest first | `sec.usp_ListAuditLogsFiltered` |
+| `ListExportTables()` | — | `List<ExportTableInfo>` — `TableKey, RowCount` for the allow-listed tables | `sec.usp_ListExportTables` |
+| `ListExportData(string tableKey)` | `tableKey`: `patients` / `appointments` / `consultations` / `prescriptions` / `invoices` / `paymentTransactions` / `receipts` / `auditLogs` | `ExportFile` — `FileName, ContentType = text/csv, Content (byte[], UTF-8 CSV: header row + quoted values)` | One fixed procedure per table: `sec.usp_ListExportData_Patients`, `sec.usp_ListExportData_Appointments`, `sec.usp_ListExportData_Consultations`, `sec.usp_ListExportData_Prescriptions`, `sec.usp_ListExportData_Invoices`, `sec.usp_ListExportData_PaymentTransactions`, `sec.usp_ListExportData_Receipts`, `sec.usp_ListExportData_AuditLogs`. An unknown key is a `Validation` fault — the service never builds SQL from it (architecture §8 rule 5). **Audited: EXPORT** (`Details = tableKey`, never the rows) |
+
+---
+
+## Operation Count Summary
+
+All operations are on the one contract `IDOCNyleUnifiedAPI` (`DOCNyleUnifiedAPI.svc`).
+
+| § | Region | Operations |
+|---|--------|-----------|
+| 1 | Auth | 3 |
+| 2 | Users & permissions | 8 |
+| 3 | Hospital & configuration | 22 |
+| 4 | Patients | 22 |
+| 5 | Scheduling | 34 |
+| 6 | Consultation | 40 |
+| 7 | Catalog | 13 |
+| 8 | Lab | 6 |
+| 9 | Billing | 27 |
+| 10 | Inventory | 11 |
+| 11 | Reports | 7 |
+| 12 | Notifications | 9 |
+| 13 | Audit & export | 5 |
+| | **Total** | **207** |
+
+Every procedure and view in `stored-procedures.sql` backs an operation above, except the
+internal helpers (`cfg.fn_*`, `bil.usp_RecalculateInvoiceSplit`,
+`inv.usp_RecordStockConsumption`), noted where they run.
 
 ---
 
 ## Known Gaps / TODOs
 
-The five schema-vs-data.js gaps listed in v2.1 (allergy `INACTIVE` status, per-hospital
-symptom and lab-test catalogs, formulary `GenericClass`, medical-history `ItemId`) were
-resolved by schema v4.0 and its procedures; v2.3 added the two missing procedures
-(`sec.usp_SaveDoctorProfile`, `cfg.usp_UpdateHospital`). Notes:
-
-1. **Hard deletes** (`bil.usp_DeleteInvoiceLineItem`, `cln.usp_DeleteLabFavorite`,
+1. **No procedures yet** for features the Web Forms app already has in memory, so they have no
+   operations here: the consultation form designer (`ConsultationConfigService` — sections,
+   fields, units, draft/publish, custom values), in-app user notifications
+   (`UserNotificationService` / `notifications.ashx`), lab result attachments and patient
+   consent documents (file upload/download in `LabService` / `PatientService`), lab partners,
+   payer administration, social history, outside medications, appointment reschedule /
+   recurring booking, and the patient CSV import. Each needs its procedure(s) in
+   `stored-procedures.sql` before it gets an operation; file transfers should then use a
+   streamed (`transferMode="Streamed"`) endpoint with a `Stream`-based message contract.
+2. **Pure logic stays in-process.** `ContradictionEngine`, `RxReconciler`, `SoapComposer`,
+   `BranchedFlowEngine`, `VitalUnitService`, `PhoneService` and `TimeZoneService` formatting
+   helpers have no data access and are not services; the Web Forms app keeps calling them
+   directly.
+3. **Hard deletes** (`bil.usp_DeleteInvoiceLineItem`, `cln.usp_DeleteLabFavorite`,
    `cln.usp_DeleteConsultationServiceItem` before sign-off) are intentional: those rows have no
    `IsActive` column, or nothing has happened to them yet.
-
-Every procedure in `stored-procedures.sql` is listed above, except the internal helpers (`cfg.fn_*`, `bil.usp_RecalculateInvoiceSplit`, `inv.usp_RecordStockConsumption`, noted where used).
+4. **Password hashing.** `AuthenticateUser`, `CreateUser` and `SaveDoctorProfile` take the
+   plain `Password` over HTTPS; the service hashes it (PBKDF2, per-user salt) into the
+   procedures' `@PasswordHash`. Because a salted hash cannot be recomputed from the password
+   alone, sign-in needs a procedure that returns the stored hash for an email (proposed
+   `sec.usp_GetUserCredential`) so the service can verify it before calling
+   `sec.usp_AuthenticateUser` — see `WCF-MIGRATION-GUIDE.md` §7.5. The password is never
+   logged, audited or returned.
 
 ---
 
-*Version 2.3 — checked against docs/stored-procedures.sql v3.3 (212 procedures, 3 views, 4 functions)*
-*and docs/schema.sql (80 tables: 75 application + 5 reserved). Supersedes v2.1 (136 endpoints / 157 SPs).*
+*Version 3.1 (WCF, DOCNyleUnifiedAPI) — checked against docs/stored-procedures.sql v3.3 (212 procedures, 3 views,
+4 functions) and docs/schema.sql. Supersedes v2.3 (REST endpoints).*

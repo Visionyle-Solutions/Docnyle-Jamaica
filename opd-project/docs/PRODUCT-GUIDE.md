@@ -276,12 +276,16 @@ phases:
   `reject`, `record`), so each method's future HTTP verb and endpoint is
   already implied by its name (documented in full in
   `docs/API-SPECIFICATION.md`).
-- **Phase 4 (target)** — an ASP.NET Core / Blazor application backed by
-  SQL Server 2019, with the same method names becoming controller
-  actions and the same array shapes becoming Entity Framework models —
+- **Current** — the application has since been ported to ASP.NET Web
+  Forms (.NET Framework 4.8); the in-memory data now lives in
+  `Services/DataStore.cs` behind the C# service classes.
+- **Phase 4 (target)** — the DOCNyleUnifiedAPI WCF service backed by SQL
+  Server 2019, with each stored procedure becoming an operation of the same
+  name on its one contract (`IDOCNyleUnifiedAPI`) and the Web Forms pages
+  unchanged (`docs/API-SPECIFICATION.md`, `docs/WCF-MIGRATION-GUIDE.md`) —
   the intent is that migrating requires no change to method signatures,
-  naming, or behavioral contracts, only a change in what sits behind
-  them. Stored procedures for the full data layer already exist in
+  naming, or behavioral contracts, only a change in what sits behind them.
+  Stored procedures for the full data layer already exist in
   `docs/stored-procedures.sql`.
 
 Because data lives only in memory in Phase 1, nothing entered in the

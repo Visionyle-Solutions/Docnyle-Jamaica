@@ -1,9 +1,11 @@
 # OPD Consultation Module
 
-Pure HTML/CSS/JS single-page application, architected as a running
-specification for a future Blazor/ASP.NET Core migration — see
-`PROJECT_ARCHITECTURE_RULES_V3_0.md` in `docs/` for the governing rules,
-and `docs/roadmap.md` for what's built vs. what's next.
+ASP.NET Web Forms application (.NET Framework 4.8) with an in-memory data
+layer, built as a running specification for its Phase 4 back end: the
+DOCNyleUnifiedAPI WCF service over SQL Server 2019 — see
+`docs/WCF-MIGRATION-GUIDE.md`, `docs/API-SPECIFICATION.md` and
+`docs/DATA-LAYER-ARCHITECTURE.md`, and `../PROJECT-HANDOFF.md` for the full
+project context.
 
 ## Run it locally
 
@@ -151,5 +153,6 @@ for every domain, whether built yet or not.
 | `schema.sql` | Full SQL Server 2019 DDL, 61 tables |
 | `schema.md` | How to read the schema — append-only tables, server-populated fields, confidential-notes handling |
 | `api-contract.md` | Every `API.xxx()` method and its Phase 4 HTTP destination |
-| `migration-map.md` | JS → Blazor migration tracker, updated as each module completes |
+| `WCF-MIGRATION-GUIDE.md` | Phase 4 plan: in-memory services → DOCNyleUnifiedAPI WCF service + SQL Server |
+| `API-SPECIFICATION.md` | The WCF contract `IDOCNyleUnifiedAPI` (one `.svc`, 207 operations) |
 | `PROJECT_ARCHITECTURE_RULES_V3_0.md` | The governing architecture rules (as provided) |

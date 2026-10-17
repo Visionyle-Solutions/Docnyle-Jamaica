@@ -3,16 +3,24 @@
 **Purpose of this document.** This is the single entry point for resuming
 work on this project in a fresh conversation with no prior context. Read
 this file first, in full, before touching code or any other doc. It
-explains what the product is, the architecture adopted (current and
-target), what every file/folder is for, how the codebase will translate
-during the ASP.NET Core migration, which documents are authoritative vs.
-historical, and exactly what was done in the engagement that produced the
-current state — so you don't have to re-derive any of it.
+explains what the product is, the architecture in place today and the
+target one (WCF services over SQL Server), what every folder is for, how the
+codebase translates during the WCF migration, which documents are
+authoritative vs. historical, and what was done to reach the current state.
 
-**Document status:** authoritative, current as of this handoff. If a claim
+**Document status:** authoritative, current as of October 2026. If a claim
 here ever conflicts with the actual code or another doc, the code wins for
-runtime behavior and this doc's "Documentation Index" section (§6) says
-which other doc wins for planning/architecture questions.
+runtime behavior and this doc's "Documentation Index" (§6) says which other
+doc wins for planning/architecture questions.
+
+**Architecture note.** Earlier versions of this handoff described a
+vanilla-JS single-page app (`js/api.js`, `js/data.js`) whose Phase 4 target
+was an ASP.NET Core Web API with MVC-style controllers. Both are out of date:
+the app is now **ASP.NET Web Forms on .NET Framework 4.8**, and the Phase 4
+service layer is **WCF**. It is the `DOCNyleUnifiedAPI` solution: one `.svc`,
+one interface (`IDOCNyleUnifiedAPI`) and a `DOCNyleUnifiedAPI.DAL` project.
+Anything that still says ASP.NET Core, MVC, Web API, Blazor, `api.js` or
+`data.js` is describing the old plan.
 
 ---
 
@@ -22,474 +30,345 @@ Consult360 is an outpatient (OPD) consultation and small-clinic management
 application for practices with one to a few doctors. It covers the full
 visit lifecycle: patient registration/search, the doctor's daily queue, a
 structured consultation workspace (vitals, complaints, diagnosis, SOAP
-notes, prescriptions, lab orders, referrals, follow-up, sign-off),
-scheduling, billing, lab result exchange with external lab partners, and
-hospital-level administration (users, permissions, formulary, phrase
-library, compliance registrations, notifications). It is explicitly
-multi-tenant (per-hospital) and multi-country (two seeded demo hospitals:
-India and Jamaica), with country-specific behavior driven by hospital
-settings rather than hard-coded.
+notes, prescriptions, lab orders, referrals, services & procedures,
+follow-up, sign-off), scheduling, billing with insurance / government-scheme
+bill splitting, clinic inventory, lab result exchange with external lab
+partners, and hospital-level administration (users, permissions, formulary,
+phrase library, consultation form setup, compliance registrations,
+notifications). It is multi-tenant (per hospital) and multi-country (two
+seeded demo hospitals: India and Jamaica), with country-specific behavior
+and the hospital's time zone driven by hospital settings rather than
+hard-coded.
 
-For the full product walkthrough (workflows, roles, clinical engines),
-read `docs/PRODUCT-GUIDE.md` — it is accurate as of this handoff and does
-not need to be re-derived.
+For the full product walkthrough (workflows, roles, clinical engines), read
+`opd-project/docs/PRODUCT-GUIDE.md`.
 
 ---
 
-## 2. Architecture Adopted — Current State (Phase 1) and Purpose
+## 2. Architecture — Current State
 
-### 2.1 Why this architecture
+### 2.1 Phases
 
-The project is deliberately built in **four phases**, and every Phase 1
-design decision exists to make Phase 4 (the real backend) a mechanical
-translation rather than a rewrite:
+- **Phase 1 (done, historical):** a vanilla HTML/CSS/JS single-page app with
+  an in-memory data layer (`js/data.js`) behind a service facade
+  (`js/api.js`). Its rules — the 14-verb naming taxonomy, PascalCase fields
+  matching SQL columns, `HospitalId` on every tenant table — still govern the
+  data layer.
+- **Current (running today):** the same product ported to **ASP.NET Web
+  Forms, .NET Framework 4.8**, served by IIS / IIS Express. Pages and user
+  controls render on the server; data lives in an in-memory store in C#
+  (`Services/DataStore.cs`) behind static service classes
+  (`Services/*Service.cs`). No database connection yet.
+- **Phase 4 (designed, not built):** the **DOCNyleUnifiedAPI** WCF service
+  (one `.svc`, one interface, IIS-hosted, .NET 4.8) and its
+  `DOCNyleUnifiedAPI.DAL` project calling the SQL Server 2019 stored
+  procedures; the Web Forms app calls it through a service reference. The pages
+  are not rewritten. See §3 and `opd-project/docs/WCF-MIGRATION-GUIDE.md`.
 
-- **Phase 1 (current, complete):** a vanilla HTML/CSS/JS single-page app
-  with an **in-memory data layer** (`js/data.js`) standing in for a
-  database, and a thin **service layer** (`js/api.js`) standing in for a
-  REST API. No framework, no build step, no dependencies — runs from any
-  static file server.
-- **Phase 4 (designed, not yet built):** ASP.NET Core Web API + SQL
-  Server 2019, replacing `data.js` with real stored-procedure-backed
-  services and `api.js`'s bodies with real `fetch()` calls — **the
-  browser SPA itself does not get rewritten.** This is the single most
-  important architectural decision in the project and is explained fully
-  in §3 and in `docs/ASPNETCORE-MIGRATION-GUIDE.md`.
-
-The mechanism that makes this possible: `js/api.js` was written from day
-one with the exact method names, parameters, and return shapes that the
-eventual REST API will have. Every UI module calls `window.API.xxx(...)`,
-never `window.Data.xxx(...)` directly (one sanctioned exception — see
-§2.4). When Phase 4 lands, only `api.js`'s method **bodies** change (from
-`ok(window.Data.xxx())` to `await fetch(...)`); nothing that calls
-`window.API` needs to change at all.
+The mechanism that keeps Phase 4 a contained change: every page reaches data
+only through the static service classes. In Phase 4 those classes stay as a
+**facade** — their bodies switch from `DataStore` to WCF calls, module by
+module, while the 242 call sites in `templates/**` keep calling the same
+methods.
 
 ### 2.2 The governing naming/architecture rules
 
-`docs/DATA-LAYER-ARCHITECTURE.md` is the binding rulebook for this
-mechanism and must be read before adding or changing any data-layer code.
-Key rules, summarized (see that doc for the complete, authoritative
-version):
+`opd-project/docs/DATA-LAYER-ARCHITECTURE.md` is the binding rulebook for the
+data layer. Read it before adding or changing data-layer code. Summary:
 
-- **14-verb method taxonomy.** Every `data.js`/`api.js` method name starts
-  with exactly one of: `get`, `list`, `search`, `check`, `create`, `save`,
-  `update`, `delete`, `submit`, `confirm`, `cancel`, `approve`, `reject`,
-  `record`. This verb determines the HTTP verb it becomes in Phase 4 (a
-  mapping table is in that doc, §2).
-- **`api.js` is a pure pass-through.** No business logic, no DOM access.
-  Every method calls exactly one `window.Data` method and wraps it in
-  `ok()` (a `Promise` with a simulated 30ms network delay). In Phase 4,
-  the body becomes a `fetch()` call with the identical signature.
-- **`data.js` arrays are SQL tables.** Every in-memory array has a `// →
-  SQL Table: X` comment pointing at its `schema.sql` counterpart.
-  Properties are PascalCase and match real SQL column names exactly (no
-  camelCase in data objects — this is different from typical JS style,
-  and deliberate).
-- **Multi-tenancy via `HospitalId`.** Every hospital-scoped array/table
-  has a `HospitalId` column; `api.js` methods that touch hospital-scoped
-  data accept a `hospitalId` parameter with an `|| _hid()` fallback to the
-  current session's hospital.
-- **SQL Server schema namespaces:** `opd` (core OPD), `cln` (clinical),
-  `bil` (billing), `cfg` (config/reference data), `sec` (security/audit),
-  `msg` (messaging). Table/column/constraint naming conventions are all
-  specified in that doc, §5.
+- **14-verb taxonomy.** Stored procedures and WCF operations start with one
+  of: `Get`, `List`, `Search`, `Check`, `Create`, `Save`, `Update`, `Delete`,
+  `Submit`, `Confirm`, `Cancel`, `Approve`, `Reject`, `Record`. A WCF operation
+  is named after its procedure without schema and `usp_`
+  (`opd.usp_SearchPatients` → `SearchPatients`).
+- **Models are SQL tables.** `Models/*.cs` properties are PascalCase and match
+  `schema.sql` column names; every `DataStore` list mirrors one table.
+- **Multi-tenancy via `HospitalId`.** Every hospital-scoped table has a
+  `HospitalId`. In Phase 4 it comes only from the caller's validated session,
+  never from a message, and SQL Server Row-Level Security filters on
+  `SESSION_CONTEXT('HospitalId')`.
+- **Schema namespaces:** `opd` (core OPD), `cln` (clinical), `bil` (billing),
+  `cfg` (config/reference), `sec` (security/audit), `msg` (messaging), `inv`
+  (clinic inventory).
+- **No ad-hoc SQL.** Every database access is a named stored procedure.
 
-### 2.3 Layer map (Phase 1, as it runs today)
+### 2.3 Layer map (as it runs today)
 
 ```
-Browser (single page, no build step)
-┌────────────────────────────────────────────────────────────┐
-│ index.html                                                  │
-│  → js/app.js          boot: registers routes, starts router │
-│  → js/router.js       hash router (#/...), permission guard │
-│  → js/session-manager.js   client-side session/token         │
-│  → js/app-context.js  current hospital/user context helpers │
-│  → js/layout.js       sidebar/topbar chrome, nav rendering  │
-│  → js/template-engine.js   fetches & renders templates/*.html│
+Browser
+┌────────────────────────────────────────────────────────────────┐
+│ server-rendered HTML · css/** · js/site.js                     │
+│ js/engines/engine-voice-soap.js (Web Speech API dictation)     │
+│ js/components/component-drawing-pad.js (sketch canvas)         │
+│ notifications.ashx polling (in-app notifications)              │
+└───────────────────────────────┬────────────────────────────────┘
+                                │ page requests / postbacks
+                                ▼
+OpdProject — ASP.NET Web Forms, .NET 4.8 (IIS Express :8095)
+┌────────────────────────────────────────────────────────────────┐
+│ Global.asax · Web/RouteConfig.cs (friendly URLs, 43 routes)    │
+│ Site.Master · index.aspx                                       │
+│ templates/**/*.aspx, *.ascx + code-behind — one per screen     │
+│ Web/BasePage.cs — sign-in + RequiredPermission guard, toasts   │
+│ Web/AppSession.cs — signed-in user in InProc session (15 min)  │
 │                                                                │
-│  → js/modules/**/*.js      one module per screen/feature     │
-│     (patients, consultation, scheduling, billing, lab,       │
-│      reports, settings, communications)                      │
-│  → js/engines/*.js         client-side clinical logic         │
-│     (branched-flow, voice-soap, soap-composer,                │
-│      rx-reconciler, contradiction) — see §2.5, none of these  │
-│      need a server port                                       │
-│  → js/components/*.js      shared UI widgets (modal, toast,   │
-│      patient-strip, drawer, drawing-pad, print-generator)     │
-│                                                                │
-│  → js/api.js    ←—— the ONLY layer that changes in Phase 4    │
-│  → js/data.js   ←—— deleted entirely in Phase 4 (replaced by  │
-│                      the real SQL Server database)             │
-└────────────────────────────────────────────────────────────┘
+│ Services/*Service.cs  ←— the facade; bodies switch in Phase 4  │
+│ Services/ClinicalEngines.cs, VitalUnitService, PhoneService,   │
+│   TimeZoneService — pure logic, stays in-process               │
+│ Services/DataStore.cs ←— in-memory tables + seed; deleted in   │
+│   Phase 4 (replaced by SQL Server behind WCF)                  │
+└────────────────────────────────────────────────────────────────┘
 ```
 
-`templates/**/*.html` are fragment templates fetched at runtime by
-`template-engine.js` and injected into `#main-content` by each module;
-they are not full pages and are Phase-4-agnostic (they stay exactly as
-they are — see §4).
+### 2.4 Clinical engines — stay in-process
 
-### 2.4 The one sanctioned `window.Data` bypass
+`Services/ClinicalEngines.cs` (`ContradictionEngine`, `RxReconciler`,
+`SoapComposer`, `BranchedFlowEngine`) holds advisory, non-blocking logic over
+data the page already loaded; it has no data access and stays in the Web Forms
+app. Voice SOAP and the drawing pad are browser APIs. The one clinical safety
+check that is server-side is the drug-allergy check
+(`cln.usp_CheckDrugAllergyConflicts`), which Phase 4 runs inside
+`CreatePrescription` so it cannot be skipped
+(`WCF-MIGRATION-GUIDE.md` §5.4, §8).
 
-Per `DATA-LAYER-ARCHITECTURE.md` §3 Rule 4 (as corrected during this
-engagement — see §7): the only method allowed to be called directly as
-`window.Data.hasPermission(...)` instead of through `window.API` is
-`hasPermission`, called from both `js/router.js` (route guard) and
-`js/layout.js` (sidebar rendering). Every other data access goes through
-`window.API`. This was actually enforced as of the last fix pass — 8 other
-violation sites were found and corrected (see §7.3).
+---
 
-### 2.5 Client-side clinical engines — none need a server port
+## 3. Architecture — Target State (Phase 4, designed but not built)
 
-`js/engines/*.js` are pure client-side advisory logic, never called
-through `api.js`/`data.js`, with no backing stored procedure:
+**Stack:** WCF on .NET Framework 4.8, hosted in IIS, over SQL Server 2019.
+The Web Forms app is retained; only the bodies of its `Services/*Service.cs`
+facade change.
 
-| Engine | Stays client-only because |
+```
+Solution 'DOCNyleUnifiedAPI'
+├─ DOCNyleUnifiedAPI             WCF Service Application
+│  ├─ DOCNyleUnifiedAPI.svc(.cs) the one service: class DOCNyleUnifiedAPI —
+│  │                             every operation, Run/Authorize/Audit helpers
+│  ├─ IDOCNyleUnifiedAPI.cs      the one [ServiceContract] (13 regions),
+│  │                             all [DataContract]s, ServiceFault
+│  └─ Web.config                 binding, DOCNyle connection string
+└─ DOCNyleUnifiedAPI.DAL         class library
+   ├─ DataRepository.cs          one method per stored procedure
+   └─ Helper.cs                  connection + SESSION_CONTEXT, parameters, retry
+
+OpdProject.sln (this repository)
+└─ opd-project/                  Web Forms site: Connected Services →
+                                 DocNyleApi.DOCNyleUnifiedAPIClient; Web/DocNyle.cs
+                                 adds the session header; facade calls it
+db/ (DbUp migrator), tests/      Phase 4 additions
+```
+
+- **Contract:** `opd-project/docs/API-SPECIFICATION.md` v3.1 — one contract,
+  `IDOCNyleUnifiedAPI`, 207 operations in 13 regions, each naming its stored
+  procedure (and the `DataRepository` method of the same name); data-contract
+  conventions, faults, audit rules.
+- **Binding:** `basicHttpBinding` over HTTPS with MTOM (50 MB quotas, matching
+  the site's upload limit) at `https://{host}/DOCNyleUnifiedAPI.svc`; optional
+  `netNamedPipeBinding` when site and service share a machine. `PerCall`
+  instancing, no WCF sessions.
+- **Auth:** sign-in through the `AuthenticateUser` / `CreateUserSession`
+  operations; the site keeps a session token in `AppSession` and sends it as a
+  `SessionToken` SOAP header; each operation calls `Authorize(feature)`, which
+  validates the token (`sec.usp_CheckSessionValid`), builds a `CallerContext`
+  (`UserId`, `HospitalId`, roles) and checks `sec.PermissionMatrix`. Passwords
+  are PBKDF2-hashed in the service.
+- **Data access:** ADO.NET stored-procedure calls in `DataRepository` /
+  `Helper`, not Entity Framework — the project is fully stored-procedure based
+  (`WCF-MIGRATION-GUIDE.md` §4).
+- **Rollout:** a `DataSource:{Module}` app setting per module (`InProc` /
+  `Wcf`) so modules switch one at a time and parity can be tested side by
+  side; `DataStore` is deleted at the end.
+
+**The schema and procedures already exist and are not being redesigned** —
+`schema.sql` (80 tables), `stored-procedures.sql` (212 procedures, 3 views,
+4 functions) and `audit-log.sql`. Read `WCF-MIGRATION-GUIDE.md` in full before
+starting Phase 4 work: it has the project layout, worked examples taken from
+the current C# services, phase gates P0–P6 and the risk table.
+
+---
+
+## 4. File & Folder Translation Map — Current → Phase 4
+
+| Current path | Phase 4 fate |
 |---|---|
-| `engine-voice-soap.js` | Wraps the browser's native Web Speech API directly — literally unportable to a server |
-| `engine-branched-flow.js` | Pure function over data already in the browser, advisory only |
-| `engine-soap-composer.js` | Same — pure function, advisory only |
-| `engine-rx-reconciler.js` | Same — pure function, advisory only |
-| `engine-contradiction.js` | Same — pure function, advisory only |
-
-This was verified by reading each file, not assumed — full reasoning is in
-`docs/ASPNETCORE-MIGRATION-GUIDE.md` §8. The one clinical **safety** check
-that *is* server-backed (and must remain non-bypassable) is
-`checkDrugAllergyConflicts` (`cln.usp_CheckDrugAllergyConflicts`), which is
-a real `data.js`/`api.js`/SQL method, not an "engine."
-
----
-
-## 3. Architecture Adopted — Target State (Phase 4, designed but not built)
-
-**Stack:** ASP.NET Core (current LTS, e.g. net8.0) Web API + SQL Server
-2019. Not ASP.NET Framework, not Blazor, not a front-end rewrite — the
-existing vanilla-JS SPA is retained; **only `js/api.js` changes.**
-
-**Important scope correction carried in this handoff:** two older planning
-docs (`docs/migration-map.md` and parts of `docs/PRODUCT-GUIDE.md`'s
-predecessor content) describe the Phase 4 target as "ASP.NET Core /
-Blazor" — a full front-end rewrite with `.razor` pages. **That is not the
-target.** `docs/ASPNETCORE-MIGRATION-GUIDE.md` explicitly supersedes that
-framing (see its own header note) and is the authoritative target
-architecture. If you encounter the Blazor framing anywhere else, treat it
-as stale.
-
-**Solution structure (from the migration guide):**
-
-```
-Consult360.sln
-├─ Consult360.Api             Web API host — Controllers, Program.cs,
-│                              appsettings.json, JWT auth, CORS, DI wiring
-├─ Consult360.Application     Business logic ported module-by-module from
-│                              data.js, DTOs (from types.js)
-├─ Consult360.Infrastructure  Dapper repositories calling the existing
-│                              stored-procedures.sql (152→157 procedures),
-│                              auth/session plumbing
-├─ Consult360.Domain          Shared domain types/enums
-└─ Consult360.Tests           xUnit — parity tests against
-                               docs/testing-guide.md's scenarios
-```
-
-**Data access:** Dapper, not EF Core — justified in the migration guide
-§4: the project is already 100% stored-procedure-based, and EF Core's
-change tracking/Code-First migrations would fight that design rather than
-help it.
-
-**The schema and stored procedures already exist and are not being
-redesigned** — `docs/schema.sql` (51 tables, SQL Server 2019 DDL) and
-`docs/stored-procedures.sql` (157 procedures) were purpose-built for this
-migration and are deploy-ready as-is. The migration work is: standing up
-the ASP.NET Core solution, porting `data.js`'s actual business logic into
-C# services module-by-module, wiring controllers to match
-`docs/API-SPECIFICATION.md`'s 136 documented endpoints, and implementing
-real auth (JWT + the existing-but-unused `sec.UserSession`/permission
-tables) in place of the current client-only session.
-
-For the full step-by-step (auth design, migrations/deployment strategy,
-testing/parity strategy, phase gates P0–P7, risks/mitigations, worked C#
-examples pulled from real `data.js` logic), read
-`docs/ASPNETCORE-MIGRATION-GUIDE.md` in full — it is long (1,487 lines)
-specifically so it doesn't need to be re-derived or re-asked-for.
+| `templates/**/*.aspx`, `*.ascx` + code-behind | **Unchanged**, except where a facade method's shape changes (e.g. symptom cycling) and where a page's own `Audit(...)` call duplicates an audited operation — those calls are removed when the module switches. |
+| `Site.Master`, `index.aspx`, `Global.asax`, `Web/RouteConfig.cs`, `Web/Navigation.cs` | **Unchanged.** |
+| `css/**`, `assets/**`, `js/**` | **Unchanged.** |
+| `Web/BasePage.cs` | **Small change:** turns `FaultException<ServiceFault>` into toasts / redirects; `Can(...)` reads the permission matrix from `IUserService`. |
+| `Web/AppSession.cs` | **Small change:** also keeps the WCF session token; sign-out ends it. |
+| Connected Services → `DocNyleApi` | **New** — service reference to `DOCNyleUnifiedAPI.svc` (generated client and data contracts; update it whenever `IDOCNyleUnifiedAPI.cs` changes). |
+| `Web/DocNyle.cs` | **New** — the only way the site calls the service: creates the client, adds the `SessionToken` header, closes / aborts. |
+| `Services/*Service.cs` | **Become the facade.** Method bodies switch from `DataStore` to `DocNyle.Call(api => api.Xxx(…))` per module; models are mapped from the generated data contracts. |
+| `Services/ClinicalEngines.cs`, `VitalUnitService.cs`, `PhoneService.cs`, `TimeZoneService.cs` | **Stay in-process** (§2.4). |
+| `Services/DataStore.cs` | **Deleted** at the end (P6). Its seed becomes `db/Scripts/0005_SeedDemoData.sql`. |
+| `Models/*.cs` | **Kept during the migration**; replaced by the contracts' data types once nothing maps between them. |
+| `notifications.ashx` | **Unchanged** until in-app notifications get procedures (spec Known Gaps). |
+| `App_Data/consent-forms/**`, `App_Data/lab-reports/**` | **Move** to the services' file store once attachment/consent-document procedures and a streamed endpoint exist. |
+| `docs/schema.sql`, `docs/audit-log.sql` | **Become the deployed database**, versioned with DbUp. |
+| `docs/stored-procedures.sql` | **Become the deployed procedures** ("always run" DbUp scripts), called only from `DOCNyleUnifiedAPI.DAL/DataRepository.cs`. |
+| `docs/API-SPECIFICATION.md` | **The literal WCF contract.** Every row is one `[OperationContract]` on `IDOCNyleUnifiedAPI` and one `DataRepository` method. |
+| `docs/DATA-LAYER-ARCHITECTURE.md` | **Naming and tenancy reference** for the contracts and procedures. |
+| `docs/WCF-MIGRATION-GUIDE.md` | **The execution plan**; not a living doc after Phase 4 ships. |
+| `docs/testing-guide.md` | **The parity contract** — its scenarios become integration / parity tests or a manual pass before cutover. |
+| `docs/PRODUCT-GUIDE.md` | **Stays the product reference**; update only if Phase 4 changes visible behavior. |
+| `README.md`, `START-SERVER.bat/.sh` | **Updated** to start both the site and `DOCNyleUnifiedAPI`. |
 
 ---
 
-## 4. File & Folder Translation Map — Phase 1 → Phase 4
+## 5. Current File Inventory
 
-This is the direct answer to "how files and folders finally translate
-during or after migration." Every current path, and what happens to it.
+Paths are relative to `opd-project/`.
 
-| Phase 1 path | Phase 4 fate |
-|---|---|
-| `index.html` | **Unchanged.** Still the SPA shell. (Two serving options exist — see migration guide §9 — either keep it on today's static server pointed at the new API's base URL, or serve it from the ASP.NET Core app's `wwwroot`.) |
-| `css/*.css` | **Unchanged.** No styling changes are part of this migration. |
-| `assets/*` | **Unchanged.** |
-| `js/app.js`, `router.js`, `layout.js`, `session-manager.js`, `app-context.js`, `template-engine.js`, `types.js` | **Unchanged**, except `session-manager.js`/`app-context.js` start receiving real server-issued JWTs/session tokens instead of the current client-only session object — same call shape, real backing. |
-| `js/modules/**/*.js` | **Unchanged.** These already call `window.API`, never touch data directly (one sanctioned exception, §2.4) — nothing here needs to know Phase 4 happened. |
-| `js/engines/*.js` | **Unchanged, stay client-side.** See §2.5. |
-| `js/components/*.js` | **Unchanged**, except the print generator's `Data.listHospitalCompliances` call already goes through `API` as of the current fix pass — no further change needed. |
-| `templates/**/*.html` | **Unchanged.** Fragment templates are transport-agnostic. |
-| `js/api.js` | **Rewritten, method-by-method, same file.** Every method body changes from `ok(window.Data.xxx(...))` to `await fetch('/api/...')`. Signatures and return shapes stay identical (this is the whole point — see migration guide §9 for the before/after diff pattern). |
-| `js/routes.js` | **Retired or kept as a reference-only client-routing table.** It has no Phase-4 role (ASP.NET Core routing is server-side, defined in Controllers); it was cleaned up during this engagement to accurately reflect `router.js` (see §7.2) but has no further migration purpose beyond documenting the client hash-route surface. |
-| `js/data.js` | **Deleted entirely.** Replaced by the real SQL Server 2019 database (`docs/schema.sql`, already designed) accessed through `docs/stored-procedures.sql` (already designed) via `Consult360.Infrastructure`'s Dapper repositories. Its *business logic* (filters, computed fields, validation, status transitions) does not disappear — it gets ported into `Consult360.Application` C# services, module by module (migration guide §5 has the methodology and worked examples). |
-| `docs/schema.sql` | **Becomes the deployed database.** Version/promote it with a SQL-script migration tool (DbUp recommended, migration guide §10) rather than EF Core Code-First. |
-| `docs/stored-procedures.sql` | **Becomes the deployed stored procedures**, called from `Consult360.Infrastructure` via Dapper. |
-| `docs/API-SPECIFICATION.md` | **Becomes the literal controller/route contract** for `Consult360.Api`. Every row is one controller action. |
-| `docs/DATA-LAYER-ARCHITECTURE.md` | **Becomes the naming-convention reference** for the C# port — verb taxonomy, schema namespacing, multi-tenancy rules all carry forward unchanged into the ASP.NET Core code. |
-| `docs/ASPNETCORE-MIGRATION-GUIDE.md` | **The execution plan.** Consumed once, during the migration; not a living doc after Phase 4 ships (though its risk/mitigation table is worth keeping as an incident-postmortem checklist). |
-| `docs/testing-guide.md` | **Becomes the parity-test source.** Its scenarios (seeded patients, expected validation behavior, role-based visibility) become the xUnit integration test suite's fixtures/assertions in `Consult360.Tests`. |
-| `docs/PRODUCT-GUIDE.md` | **Stays as the product reference** — describes behavior, not implementation, so it doesn't change with the backend swap (update only if a Phase 4 auth/UX change genuinely alters user-visible behavior, e.g. real logout). |
-| `README.md`, `START-SERVER.sh/.bat` | **Superseded by the ASP.NET Core project's own run instructions** (`dotnet run`, `docker-compose`, or equivalent) once Phase 4 ships; keep them for Phase 1 standalone demo purposes until then. |
-| `docs/PROJECT_ARCHITECTURE_RULES_V3_0.md`, `docs/UNIVERSAL-ARCHITECTURE-RULEBOOK.md`, `docs/consultation-360-redesign-spec.md`, `docs/OPD_Module_Inventory.md`, `docs/workflow-gap-analysis.md`, `docs/MEDCITY-GAP-ANALYSIS.md`, `docs/ENCRYPTION-STRATEGY.md`, `docs/PEN-TEST-STRATEGY.md`, `docs/PROJECT-MASTER-v5.7.md` | **Historical/reference — not touched by this engagement.** See §6 for what each is and its trust level. `ENCRYPTION-STRATEGY.md`/`PEN-TEST-STRATEGY.md` content is folded into the migration guide's security section rather than duplicated; treat those two as still-relevant detail references. `docs/migration-map.md` specifically is **superseded** on the Blazor-vs-vanilla-JS question (§3). |
-
----
-
-## 5. Complete Current File Inventory (Phase 1, as of this handoff)
-
-### 5.1 App shell & infrastructure (`js/`, root)
+### 5.1 App shell & infrastructure
 
 | File | Purpose |
 |---|---|
-| `index.html` | SPA shell — sidebar/topbar containers, `#main-content`, script tags |
-| `js/app.js` | Boot sequence: registers all hash routes, auto-creates a demo session on fresh load (fixed during this engagement — see §7.1), starts the router |
-| `js/router.js` | Hash router; permission-guarded dispatch (`ROUTE_PERMS`); redirects to `#/login` if no valid session (added during this engagement) |
-| `js/routes.js` | A `window.Routes` constant lookup table for route strings — cleaned up to match `router.js` exactly during this engagement (§7.2); not authoritative, `router.js` is |
-| `js/layout.js` | Renders sidebar/topbar chrome; permission-filtered nav |
-| `js/session-manager.js` | Client-side session/token lifecycle, multi-tab logout, expiry modal |
-| `js/app-context.js` | Current hospital/user context accessors (`hospitalId()`, etc.) |
-| `js/template-engine.js` | Fetches `templates/*.html` fragments and interpolates them |
-| `js/types.js` | Shared JS "type" shape references (informal, no TS) |
-| `js/api.js` | Service layer — **the only file that changes in Phase 4**. 150 methods as of this handoff |
-| `js/data.js` | In-memory data layer + seed data — **deleted in Phase 4** |
+| `OpdProject.csproj` (solution `../OpdProject.sln`) | Web Forms project, .NET Framework 4.8 |
+| `Web.config` | Session timeout (15 min), upload limits (50 MB), friendly-URL routing, `c360:` control prefix |
+| `Global.asax(.cs)` | Start-up: route registration, `DataStore.Seed()` |
+| `Site.Master(.cs)` | Sidebar/topbar chrome, toasts, browser time-zone cookie |
+| `index.aspx` | Entry page |
+| `notifications.ashx` | In-app notification feed polled by the browser |
+| `Web/BasePage.cs` | Base for every page: sign-in, `RequiredPermission`, `Can(feature)`, toasts, `Audit(...)`, date/time formatting |
+| `Web/AppSession.cs` | Signed-in user in ASP.NET session; toast queue |
+| `Web/RouteConfig.cs`, `Web/Navigation.cs` | Friendly URLs; permission-filtered sidebar |
+| `Web/ConsultCards.cs`, `Web/ConsultationSection.cs`, `Web/HealthRecord.cs`, `Web/VitalUnitUi.cs`, `Web/PhoneValidator.cs` | Consultation card rendering, health-record helpers, vital-unit inputs, phone validator control |
+| `START-SERVER.bat` / `.sh` | IIS Express on port 8095 |
 
-### 5.2 Feature modules (`js/modules/**`)
+### 5.2 Data layer (in-memory, today)
 
-| Folder | Modules |
+| File | Purpose |
 |---|---|
-| `patients/` | `patient-portal.js`, `patient-list.js`, `patient-search.js`, `patient-allergies.js` |
-| `consultation/` | `consultation-360.js` — the core clinical workspace (vitals, symptoms, SOAP, diagnoses, prescriptions, labs, referrals, confidential notes, sign-off) |
-| `scheduling/` | `appointment-calendar.js`, `queue-and-nurse.js` |
-| `billing/` | `billing-checkout.js`, `billing-extras.js` |
-| `lab/` | `lab-portal.js` |
-| `reports/` | `reports-dashboard.js` |
-| `communications/` | `notification-engine.js` |
-| `settings/` | `settings-hub.js` (current unified admin screen), `admin-settings.js` (older standalone screens — Hospital Profile, Vitals Config, Specialty Config, Formulary; hospital/vitals/specialty are now dead-routed in favor of `settings-hub.js`, see §7.2), `permission-matrix.js`, `phrase-management.js`, `user-management.js` (includes the real `LoginModule`), `audit-log.js` |
+| `Services/DataStore.cs` | One `List<T>` per table + seed data (2 hospitals, demo users across all six roles, `PAT-001`…`PAT-005`) |
+| `Services/UserService.cs` | Users, sign-in, permission matrix; `AuditService` |
+| `Services/HospitalService.cs` | Hospital profile, settings, formats, compliance, vitals/specialty/history config |
+| `Services/PatientService.cs` | Patients, allergies, history, events, family/social, consent documents, payers, coverage |
+| `Services/SchedulingService.cs` | Appointments, slots, leave, doctor settings/profiles/charges, appointment types, intake & consent |
+| `Services/ConsultationService.cs` | Consultation workspace: vitals, symptoms, diagnoses, prescriptions, orders, referrals, services, notes, sketches, sign-off |
+| `Services/ConsultationConfigService.cs` | Consultation form designer (sections, fields, units, draft/publish) |
+| `Services/CatalogService.cs` | Formulary, lab tests & favorites, clinical conditions; `PhraseService` |
+| `Services/LabService.cs` | Lab partners, portal orders, results, attachments |
+| `Services/BillingService.cs` | Consultation charge, invoices, line items, coverage split, payments, receipts |
+| `Services/InventoryService.cs` | Items, batches, receipts, adjustments, consumption |
+| `Services/OperationsService.cs` | `ReportService`, `NotificationService`, `ExportService` (CSV export / patient import) |
+| `Services/UserNotificationService.cs` | In-app notifications |
+| `Services/ClinicalEngines.cs`, `VitalUnitService.cs`, `PhoneService.cs`, `TimeZoneService.cs` | Pure logic (§2.4) |
+| `Models/*.cs` | Entity classes mirroring `schema.sql` |
 
-### 5.3 Clinical engines (`js/engines/`) — all client-side, see §2.5
+### 5.3 Screens (`templates/**`)
 
-`engine-branched-flow.js`, `engine-voice-soap.js`, `engine-soap-composer.js`,
-`engine-rx-reconciler.js`, `engine-contradiction.js`.
+| Folder | Pages / controls |
+|---|---|
+| `patients/` | today list, search, registration (+ form, history/medications/visits/family-social tabs), allergies, coverage, consent form/file |
+| `consultation/` | `consultation-360.aspx` and its cards (vitals, symptoms, diagnosis, SOAP, CPOE, labs, referral, services, follow-up, confidential notes, safety strip, context panel), print document |
+| `scheduling/` | appointment calendar, nurse vitals, queue display |
+| `billing/` | checkout (+ coverage form), invoice list/print, patient balances, day end |
+| `lab/` | lab portal, lab results, report file |
+| `reports/` | home dashboard, dashboard list, reports dashboard |
+| `communications/` | message log |
+| `portal/` | patient self-register, self-book |
+| `settings/` | login, settings hub (+ hospital profile, specialty, vitals controls), user management, permissions, schedule settings, consultation setup, formulary, phrases, inventory, audit log, data export/import |
+| `shared/` | access denied, error state, patient identifier strip |
 
-### 5.4 Shared components (`js/components/`)
-
-`component-modal.js`, `component-toast.js`, `component-patient-strip.js`,
-`component-drawer.js`, `component-drawing-pad.js`,
-`component-print-generator.js`.
-
-### 5.5 Templates (`templates/**`)
-
-Fragment HTML, one file per screen/section, organized by the same folders
-as `js/modules/` (`patients/`, `consultation/`, `scheduling/`, `billing/`,
-`settings/`, `reports/`, plus `shared/` for loading/error/empty states and
-the patient identifier strip).
-
-### 5.6 Docs (`docs/`) — see §6 for the full index with trust levels
+### 5.4 Docs (`docs/`) — see §6
 
 ---
 
 ## 6. Documentation Index — What Each Doc Is and Its Trust Level
 
-| Doc | Status | What it's for |
+| Doc (`opd-project/docs/`) | Status | What it's for |
 |---|---|---|
-| `DATA-LAYER-ARCHITECTURE.md` | **Authoritative, current** | The binding naming/architecture rulebook (§2.2 above). Read before any data-layer change. |
-| `schema.sql` | **Authoritative, current, deploy-ready** | Full SQL Server 2019 DDL, 51 tables across `opd/cln/bil/cfg/sec/msg`. |
-| `stored-procedures.sql` | **Authoritative, current, deploy-ready** | 157 procedures + 3 views, v2.1, covers all 150 `api.js` methods 1:1. |
-| `API-SPECIFICATION.md` | **Authoritative, current** | 136 documented REST endpoints, v2.1, matches `api.js`/`stored-procedures.sql` exactly. |
-| `ASPNETCORE-MIGRATION-GUIDE.md` | **Authoritative, current** | The Phase 4 execution plan — read this before starting any ASP.NET Core work. Explicitly corrects the Blazor framing in older docs. |
-| `PRODUCT-GUIDE.md` | **Authoritative, current** | Rewritten during this engagement, grounded in the live code (not the accumulated phase drift the original had). |
-| `testing-guide.md` | **Authoritative, current** | Rewritten during this engagement; matches the real router/permission matrix; the fixed-boot-behavior callout reflects the current, fixed code. |
-| `ENCRYPTION-STRATEGY.md` | **Reference, not re-verified this engagement** | Always-Encrypted column strategy, deterministic vs. randomized. Still relevant; not touched. |
-| `PEN-TEST-STRATEGY.md` | **Reference, not re-verified this engagement** | Security posture notes, including the drug-allergy-conflict bypass risk referenced in the migration guide. Still relevant; not touched. |
-| `OPD_Module_Inventory.md` | **Historical reference** | Earlier module/feature inventory; superseded in accuracy by `PRODUCT-GUIDE.md` and this handoff, but may have detail not repeated elsewhere. |
-| `PROJECT-MASTER-v5.7.md` | **Historical reference** | Earlier project-state snapshot (build-numbered); not re-verified. |
-| `PROJECT_ARCHITECTURE_RULES_V3_0.md`, `UNIVERSAL-ARCHITECTURE-RULEBOOK.md` | **Historical reference, largely superseded by `DATA-LAYER-ARCHITECTURE.md`** | Earlier architecture-rule drafts; `DATA-LAYER-ARCHITECTURE.md` is the current one to follow when the two disagree. |
-| `consultation-360-redesign-spec.md` | **Historical reference** | Design spec for the current Consultation 360 screen; useful for UX rationale, not re-verified against current code. |
-| `workflow-gap-analysis.md`, `MEDCITY-GAP-ANALYSIS.md` | **Historical reference** | Earlier gap-analysis snapshots; not re-verified — the JSDOM functional-test findings (§7) are the current, verified gap list. |
-| `migration-map.md` | **Superseded on one point** | Describes Phase 4 as ASP.NET Core/Blazor — this is **wrong** per the current mandate (§3); everything else in it not re-verified. |
-| `README.md` | **Partially stale** | Says port 8080; the actual `START-SERVER.sh`/`.bat` use port 8095 — trust the scripts. |
-| `PROJECT-HANDOFF.md` (this file) | **Authoritative, current** | You're reading it. |
+| `API-SPECIFICATION.md` | **Authoritative, current (v3.1)** | The WCF contract `IDOCNyleUnifiedAPI` (`DOCNyleUnifiedAPI.svc`): 207 operations in 13 regions, data-contract and fault conventions, each operation's stored procedure. |
+| `WCF-MIGRATION-GUIDE.md` | **Authoritative, current (v2.1)** | The Phase 4 execution plan. Replaces `ASPNETCORE-MIGRATION-GUIDE.md` (renamed and rewritten). |
+| `API-INTEGRATION-GUIDE.md` | **Authoritative, current (v1.0)** | The client side of Phase 4: where static data lives in `OpdProject` (`DataStore`, facade bodies, bypasses, hard-coded lists), what stays static, the facade → operation map per service class, cut-over order, and facade methods that still have no operation. |
+| `DATA-LAYER-ARCHITECTURE.md` | **Authoritative** for naming, schema and tenancy rules | Its examples are written for the JS era; read `data.js` as `DataStore`/services and `api.js` as the WCF operations (its own header note says so). |
+| `schema.sql` | **Authoritative, deploy-ready** | SQL Server 2019 DDL, 80 tables in `opd/cln/bil/cfg/sec/msg/inv`. |
+| `stored-procedures.sql` | **Authoritative, deploy-ready** | 212 procedures, 3 views, 4 functions; every one backs a WCF operation or is a noted internal helper. |
+| `audit-log.sql` | **Authoritative** | Audit log table and procedures. |
+| `PRODUCT-GUIDE.md` | **Current for behavior** | What each screen does. Its "Phase 4" paragraph predates the WCF decision. |
+| `testing-guide.md` | **Current for behavior** | Manual QA scenarios with the seeded data; the parity contract for Phase 4. |
+| `README.md` (project root `opd-project/`) | **Partly stale** | Run instructions are current (Web Forms, port 8095); its intro and docs table still list JS-era files that are not in the repository. |
+| `PROJECT-HANDOFF.md` (repository root, this file) | **Authoritative, current** | You're reading it. |
+
+Older planning docs referenced by earlier handoffs (`migration-map.md`,
+`PROJECT_ARCHITECTURE_RULES_V3_0.md`, `ENCRYPTION-STRATEGY.md`,
+`PEN-TEST-STRATEGY.md`, `OPD_Module_Inventory.md`, …) are **not in this
+repository**. Where they described a Blazor or ASP.NET Core target, treat
+that as superseded.
 
 ---
 
-## 7. Session History — What Was Done, In Order
+## 7. History — What Was Done, In Order
 
-This section is the changelog. Read it to understand *why* the code and
-docs look the way they do, without having to reconstruct it from diffs.
+### 7.1–7.7 JS single-page-app era (summary)
 
-### 7.1 Data-layer & API documentation generation (v1 → v2.0)
+Before the Web Forms port, the project was a vanilla-JS SPA. In that period:
+the stored procedures and REST-style API spec were brought to full coverage
+of the 150 `api.js` methods; `testing-guide.md` and `PRODUCT-GUIDE.md` were
+rewritten against the live code; an ASP.NET Core migration guide was written;
+a JSDOM functional-test pass found and fixed a boot blocker, missing API
+methods, dead vitals validation, data-layer bypasses and stale routes; and the
+three layers (`api.js`, API spec, procedures) were re-synced. Those files
+(`js/api.js`, `js/data.js`, the JS modules and HTML templates) no longer
+exist; the rules they established carry forward through
+`DATA-LAYER-ARCHITECTURE.md`.
 
-Starting from the originally uploaded project (which already had a first
-draft `schema.sql`, `stored-procedures.sql` (27 SPs), `API-SPECIFICATION.md`
-(115 endpoints), and `DATA-LAYER-ARCHITECTURE.md`), the stored procedures
-and API spec were rewritten to full coverage: **152 procedures** and
-**130 endpoints**, covering all **143** `api.js` methods that existed at
-the time, verified against the real `schema.sql` tables (no invented
-objects) and against `data.js`'s actual business logic.
+### 7.8 Port to ASP.NET Web Forms (.NET Framework 4.8)
 
-### 7.2 Testing Guide & Product Guide rewrite
+The SPA was ported to server-rendered Web Forms: one `.aspx` / `.ascx` per
+screen under `templates/`, friendly URLs, `BasePage` permission guards, and
+an in-memory C# data layer (`DataStore` + `Services/*Service.cs`) seeded with
+the same demo data. Later work on this codebase added, among others: patient
+registration and coverage (insurance / government schemes) with bill
+splitting, consent forms and documents, schedule settings (availability,
+leave, appointment types, doctor charges, intake & consent), the consultation
+form designer with custom sections/fields/vitals/units, services & procedures
+with clinic inventory and stock consumption at sign-off, UTC storage with
+clinic-time-zone display, and the matching schema / procedure changes
+(schema v4.0, procedures v3.3).
 
-The original `testing-guide.md` (1,537 lines, "Build v2.9") and
-`PRODUCT-GUIDE.md` had accumulated phase drift — stale build numbers, a
-wrong server port claim, references to a "coming later" voice-dictation
-feature that was actually already implemented, and (critically) reliance
-on `js/routes.js`, which turned out to be stale for **24 of its 30**
-route constants relative to the real `router.js`. Both docs were rewritten
-from scratch grounded in the live router/module code.
+### 7.9 WCF service layer specified (October 2026)
 
-### 7.3 ASP.NET Core Migration Guide
-
-`docs/ASPNETCORE-MIGRATION-GUIDE.md` was written (1,487 lines),
-structured similarly to an unrelated sample migration doc the user
-provided for formatting reference only (that sample's product-specific
-content was not reused). Key decisions: Dapper over EF Core; none of the
-5 client engines need a server port (verified by reading each file); a
-hybrid JWT + server-tracked session (using the schema's already-designed
-but unused `sec.UserSession` tables); and an explicit correction of the
-Blazor-vs-vanilla-JS scope conflict found in older planning docs.
-
-### 7.4 JSDOM functional test pass
-
-A real Node.js + JSDOM harness (static file server + `runScripts:
-"dangerously"`, real DOM events dispatched on real elements, not
-function calls) was built and run against the live app. Findings: **1
-Blocker, 5 High, 4 Medium, 4 Low** — full detail was delivered separately
-as `JSDOM-FUNCTIONAL-TEST-FINDINGS.md` (not re-included in this handoff;
-see that file if you need the original evidence/repro steps). Headline
-findings:
-
-- **Blocker:** the app booted into a permanently blank content area — the
-  boot path never created a session, and the router's session guard
-  silently blocked every route.
-- **High:** 8 UI call sites invoked `window.API` methods that didn't
-  exist; vitals range validation was dead code (the DOM element it
-  checked for was never rendered); 8 call sites bypassed `window.API`
-  in violation of the architecture doc's own rule; `routes.js` was stale
-  for 24/30 entries; a stale-render race threw uncaught exceptions on
-  fast navigation.
-- Plus assorted Medium/Low findings (duplicate route registrations,
-  duplicate `api.js` method definitions, browser-API polyfill gaps).
-
-### 7.5 Bug-fix pass 1
-
-All findings from §7.4 were fixed and re-verified (both harness runs
-clean, zero console errors):
-
-- `app.js` now creates a real demo session before the initial route
-  dispatch; `router.js` redirects to `#/login` instead of silently
-  blocking when no session exists.
-- Added the 7 missing `window.API` methods, each backed by real logic
-  (not stubs): `updatePermission`, `createVitalConfig`, `createDrug`,
-  `updateDrugStatus`, `toggleSpecialty` (new `data.js` method), `naming
-  fix for `saveConsultationVitals`→`saveVitals`, and `updateMessageTemplate`.
-- Added the missing `vital-err-{code}` DOM elements so range/cross-field
-  vitals validation actually fires and blocks bad saves.
-- Converted the 8 `window.Data` bypass call sites to go through
-  `window.API`; corrected `DATA-LAYER-ARCHITECTURE.md`'s "only exception"
-  claim to accurately name `hasPermission` (used by both `router.js` and
-  `layout.js`).
-- Rewrote `routes.js`: 12 corrected paths, 13 orphaned entries removed.
-- Null-checked ~10 stale-render `.innerHTML` sites in
-  `consultation-360.js` and `reports-dashboard.js`.
-- Removed the dead duplicate route registrations in `app.js` and the
-  shadowed duplicate method definitions in `api.js`.
-
-### 7.6 Bug-fix pass 2 — two pre-existing bugs surfaced during pass 1
-
-Pass 1 surfaced (but deliberately didn't fix, to stay scoped) two bugs in
-the standalone `SpecialtyConfigModule` (`js/modules/settings/admin-settings.js`):
-a dead feature-detection check (`if (!window.Data.addSpecialty)` — a
-method that never existed, so "Add specialty" always silently no-op'd),
-and a signature mismatch between `api.js`'s `createSpecialty(record)`
-wrapper and the actual live (shadowed-duplicate-winner) `data.js`
-implementation, which took `(hospitalId, name)`. Both were fixed:
-the dead check was removed, and `api.js`'s wrapper now matches
-`(hospitalId, name)` — which, it turned out, is also what
-`stored-procedures.sql`'s `cfg.usp_CreateSpecialty` already expected, so
-this fix aligned the client with an already-correct SQL/API-spec design,
-not the other way around. Verified with a targeted JSDOM script that
-drove the real "Add specialty" button end-to-end (row count went 3→4,
-correct field values, zero errors).
-
-Note: `SpecialtyConfigModule` itself is currently **unreachable from any
-route** (superseded by `settings-hub.js`'s unified screen in an earlier
-fix) — it was fixed anyway since it's still shipped, loaded code, but this
-is worth a decision (delete the dead module, or re-wire it) before Phase 4
-porting work reaches the Specialty Config area.
-
-### 7.7 Cross-layer sync fix (v2.0 → v2.1)
-
-Bug-fix passes 1 and 2 grew `api.js` from 143 to **150** methods (7 new:
-`toggleSpecialty`, `createVitalConfig`, `createDrug`, `updateDrugStatus`,
-`updateMessageTemplate`, `exportTableCsv`, plus wiring up the
-previously-unused `updatePermission`). This was caught by explicitly
-checking rather than assuming, and closed out:
-
-- **5 new stored procedures** added to `stored-procedures.sql` (152→157):
-  `cfg.usp_ToggleSpecialty`, `cfg.usp_CreateVitalConfig`,
-  `cfg.usp_CreateDrug`, `cfg.usp_UpdateDrugStatus`,
-  `cfg.usp_UpdateMessageTemplate`. (`exportTableCsv` needed no new
-  procedure — it's a same-behavior alias of `listExportData`, sharing the
-  existing `sec.usp_ListExportData_*` set. `updatePermission`'s procedure
-  already existed, just wasn't wired to a documented endpoint.)
-- **7 new/corrected endpoint entries** added to `API-SPECIFICATION.md`
-  (130→136 endpoints), and the false "not currently called from api.js"
-  note on `updatePermission` corrected.
-- Verified: 157 `CREATE OR ALTER PROCEDURE` statements with 157 matched
-  `BEGIN`/`END` pairs (no syntax drift), every table the 5 new procedures
-  touch confirmed to exist in `schema.sql`, all 7 methods confirmed
-  traceable in the updated `API-SPECIFICATION.md`.
-
-**Current state: all three layers (`api.js`, `API-SPECIFICATION.md`,
-`stored-procedures.sql`) are in lockstep at 150 methods / 136 endpoints /
-157 procedures.**
+The service layer was fixed as **WCF** rather than ASP.NET Core / MVC.
+`API-SPECIFICATION.md` was rewritten from REST endpoints to WCF operations
+aligned with the existing service classes (v3.0), then matched to the
+`DOCNyleUnifiedAPI` solution — one `.svc`, one interface
+(`IDOCNyleUnifiedAPI`, 207 operations in 13 regions) and a DAL project with
+`DataRepository` / `Helper` (v3.1) — with tenancy and actor fields taken from the session, SOAP faults
+instead of HTTP status codes, and audit entries written by the operations
+themselves. `ASPNETCORE-MIGRATION-GUIDE.md` was replaced by
+`WCF-MIGRATION-GUIDE.md` (v2.0), and this handoff was updated to match.
 
 ---
 
-## 8. Current State Snapshot (key numbers, as of this handoff)
+## 8. Current State Snapshot
 
 | Metric | Value |
 |---|---|
-| `api.js` public methods | 150 |
-| `stored-procedures.sql` procedures | 157 (+ 3 reporting views) |
-| `API-SPECIFICATION.md` documented endpoints | 136 |
-| `schema.sql` tables | 51, across 6 schemas (`opd/cln/bil/cfg/sec/msg`) |
-| `router.js` registered routes | 30 |
+| Front end | ASP.NET Web Forms, .NET Framework 4.8, IIS Express port 8095 |
+| Data layer today | In-memory (`DataStore`), re-seeded on every app-domain start |
+| Friendly routes (`Web/RouteConfig.cs`) | 43 |
+| `schema.sql` tables | 80 (7 schemas) |
+| `stored-procedures.sql` | 212 procedures, 3 views, 4 functions |
+| WCF contract (`API-SPECIFICATION.md`) | `IDOCNyleUnifiedAPI` — 1 service, 207 operations — designed, not built |
 | Seeded demo hospitals | 2 (`HOSP-001` India / INR, `HOSP-002` Jamaica / JMD) |
-| Seeded demo patients | 5 (`PAT-001`…`PAT-005`; `PAT-003` has the richest demo data) |
-| Seeded demo users/roles | 7 users across ADMIN, DOCTOR, RECEPTIONIST, BILLING, NURSE, LAB_PARTNER |
-| Known open item | `SpecialtyConfigModule` is fixed but unreachable from routing — decide keep/delete before Phase 4 touches that area (§7.6) |
-| JSDOM regression status | Clean — both full harness runs, zero console errors, as of the last fix pass |
+| Seeded demo patients | 5 (`PAT-001`…`PAT-005`) |
+| Roles | ADMIN, DOCTOR, RECEPTIONIST, BILLING, NURSE, LAB_PARTNER |
+| Features with no procedures yet | Consultation form designer, in-app notifications, lab attachments, consent documents, lab claim-by-mobile, duplicate-patient check, payer admin, patient import (spec Known Gaps #1) |
 
 ---
 
 ## 9. How to Resume Work — Suggested Entry Points
 
-- **Continuing Phase 4 (ASP.NET Core) work:** read
-  `docs/ASPNETCORE-MIGRATION-GUIDE.md` in full, then
-  `docs/DATA-LAYER-ARCHITECTURE.md`. Start with the P0/P1 phase gates in
-  the migration guide §12.
-- **Making a Phase 1 code change:** read `docs/DATA-LAYER-ARCHITECTURE.md`
-  §2–4 first (naming rules), find the relevant module in §5 of this doc,
-  and re-run the JSDOM harness pattern from §7.4 (harness files are
-  scratch tooling, not shipped in the project — rebuild per that
-  section's method if needed) to confirm no regression.
-- **Adding a new `api.js` method:** always add the matching stored
-  procedure and `API-SPECIFICATION.md` entry in the same change — §7.7 is
-  a cautionary example of what happens when that's skipped even briefly.
-- **Deciding the `SpecialtyConfigModule` question (§7.6, §8):** either
-  delete the dead standalone module and its template, or re-wire a route
-  to it — whichever, do it before porting the Specialty Config area to
-  C#, so the port has one canonical implementation to work from.
-- **Any question about "what does the app currently do"**: trust
-  `docs/PRODUCT-GUIDE.md` and `docs/testing-guide.md` over any older doc
-  in the historical-reference list (§6) — those two were rewritten
-  against the live code, the others were not re-verified this engagement.
+- **Starting Phase 4 (WCF):** read `WCF-MIGRATION-GUIDE.md` in full, then
+  `API-SPECIFICATION.md` §0 and `DATA-LAYER-ARCHITECTURE.md`. The service code
+  lives in the separate `DOCNyleUnifiedAPI` solution, not in this repository. Begin with the
+  P0/P1 gates (guide §13).
+- **Changing the current app:** find the screen in §5.3 and its service in
+  §5.2; follow `DATA-LAYER-ARCHITECTURE.md`'s naming rules; open the solution
+  in Visual Studio 2022 and run with F5 (or `START-SERVER.bat`).
+- **Adding data behavior:** add the stored procedure to
+  `stored-procedures.sql`, the operation to `API-SPECIFICATION.md` (then
+  `IDOCNyleUnifiedAPI.cs` and `DataRepository.cs`) in the same change as the in-memory service method, so the three never drift.
+- **"What does the app currently do?":** trust the code first, then
+  `PRODUCT-GUIDE.md` and `testing-guide.md`.

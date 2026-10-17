@@ -12,9 +12,9 @@ This document defines the binding rules for three tightly coupled layers:
 data.js (in-memory arrays)  →  api.js (async service)  →  SQL Server 2019 (production)
 ```
 
-The goal is that migration from Phase 1 (JavaScript) to Phase 4 (ASP.NET / Blazor + SQL Server) requires **zero changes to method signatures, naming, or behavior contracts**. The `api.js` method names become ASP.NET controller action names. The data.js array shapes become Entity Framework models. The schema is encryption-ready and pen-test-ready from day one.
+The goal is that migration to Phase 4 (the DOCNyleUnifiedAPI WCF service + SQL Server) requires **zero changes to method signatures, naming, or behavior contracts**. The stored procedure names become WCF operation names (`opd.usp_SearchPatients` → `IDOCNyleUnifiedAPI.SearchPatients`) and `DataRepository` method names. The model shapes become WCF data contracts. The schema is encryption-ready and pen-test-ready from day one.
 
-**Current state (October 2026).** Phase 1 has since been ported to ASP.NET Web Forms. The in-memory data layer is now `Services/DataStore.cs` (one `List<T>` per table, models in `Models/*.cs`) with the service methods in `Services/*Service.cs`; `js/data.js` and `js/api.js` no longer exist. The database design lives in `docs/schema.sql`, `docs/stored-procedures.sql` and `docs/audit-log.sql`, and the endpoints in `docs/API-SPECIFICATION.md`. Every rule below applies to those files: wherever a section says `data.js`, read `DataStore.cs` / the services; wherever it says `api.js`, read the stored procedures and endpoints. The JavaScript examples show the original form of each rule.
+**Current state (October 2026).** Phase 1 has since been ported to ASP.NET Web Forms. The in-memory data layer is now `Services/DataStore.cs` (one `List<T>` per table, models in `Models/*.cs`) with the service methods in `Services/*Service.cs`; `js/data.js` and `js/api.js` no longer exist. The database design lives in `docs/schema.sql`, `docs/stored-procedures.sql` and `docs/audit-log.sql`, and the WCF service contract `IDOCNyleUnifiedAPI` in `docs/API-SPECIFICATION.md` (Phase 4 is WCF, not ASP.NET Core / MVC — see `docs/WCF-MIGRATION-GUIDE.md`). Every rule below applies to those files: wherever a section says `data.js`, read `DataStore.cs` / the services; wherever it says `api.js`, read the stored procedures and WCF operations. The JavaScript examples show the original form of each rule.
 
 ---
 
@@ -91,7 +91,7 @@ The same 14 verbs name every stored procedure: `{schema}.usp_{Verb}{Entity}{Qual
 `{schema}.vw_{Name}`, generated audit triggers `trg_Audit_{Table}`.
 
 **Legacy exceptions** — procedures from before this rule was enforced; rename them during cleanup (together
-with their endpoint in API-SPECIFICATION.md):
+with their WCF operation in API-SPECIFICATION.md):
 
 | Procedure | Rename to |
 |-----------|-----------|
@@ -110,9 +110,9 @@ rename table when the services are cleaned up.
 
 ## 3. api.js — Service Layer Rules
 
-> Now: the stored procedures (`docs/stored-procedures.sql`) and the endpoints in `docs/API-SPECIFICATION.md` play
-> this role — one procedure per endpoint, request fields named after the procedure's parameters (camelCase), the
-> hospital taken from the session, never trusted from the body alone.
+> Now: the stored procedures (`docs/stored-procedures.sql`) and the WCF operations in `docs/API-SPECIFICATION.md` play
+> this role — one procedure per operation, request data-contract members named after the procedure's parameters
+> (PascalCase), the hospital taken from the caller's session, never from the message.
 
 ### Structure
 
@@ -144,20 +144,23 @@ window.API = {
 
 ### Phase 4 migration
 
-In ASP.NET, each `api.js` method becomes a controller action:
+In Phase 4 each data operation becomes an `[OperationContract]` on the one WCF contract `IDOCNyleUnifiedAPI`
+(`DOCNyleUnifiedAPI.svc`), named after its stored procedure, with a `DataRepository` method of the same name in
+`DOCNyleUnifiedAPI.DAL`. The Web Forms facade (`Services/*Service.cs`) calls it through the generated client:
 
 ```
-api.js                          →  ASP.NET Controller
-─────────────────────────────────────────────────────
-getPatient(id)                  →  [HttpGet("{id}")] GetPatient(Guid id)
-listPatients(hid)               →  [HttpGet] ListPatients([FromQuery] Guid hospitalId)
-searchPatients(term, hid)       →  [HttpGet("search")] SearchPatients([FromQuery] string term)
-createPatient(record)           →  [HttpPost] CreatePatient([FromBody] PatientDto dto)
-updatePatient(id, patch)        →  [HttpPut("{id}")] UpdatePatient(Guid id, [FromBody] PatchDto dto)
-deletePatient(id)               →  [HttpDelete("{id}")] DeletePatient(Guid id)
+facade (Services/*Service.cs)        →  IDOCNyleUnifiedAPI operation                       →  procedure
+───────────────────────────────────────────────────────────────────────────────────────────────────────────
+PatientService.Get(id)               →  Patient GetPatient(string patientId)                →  opd.usp_GetPatient
+PatientService.Search(hid, term)     →  List<PatientSummary> SearchPatients(string term)    →  opd.usp_SearchPatients
+PatientService.Create(record)        →  Patient CreatePatient(CreatePatientRequest request) →  opd.usp_CreatePatient
+PatientService.Update(id, changes)   →  Patient UpdatePatient(string id, UpdatePatientRequest request)
+                                                                                            →  opd.usp_UpdatePatient
 ```
 
-The `api.js` body changes from `ok(window.Data.xxx())` to `fetch('/api/patients/xxx')`. Method names, parameter names, and return shapes stay identical. UI modules require zero changes.
+The facade body changes from `DataStore` to `DocNyle.Call(api => api.GetPatient(id))`. Method names, parameter
+names and return shapes the pages use stay the same; `hospitalId` is no longer sent — the service takes the
+hospital from the caller's session.
 
 ---
 
@@ -364,7 +367,7 @@ CREATE TABLE opd.Patient (
    on a table with triggers (error 334). Always `OUTPUT … INTO @Out` (a table variable), then `SELECT … FROM @Out`.
 3. **Never write NULL into `CreatedBy`.** Pass the acting user, or fall back to the System user:
    `ISNULL(@CreatedBy, '00000000-0000-0000-0000-000000000000')`. `ModifiedBy` may be NULL.
-4. **Errors are `THROW 50xxx` with a readable message**, documented next to the endpoint. Multi-statement writes
+4. **Errors are `THROW 50xxx` with a readable message**, documented next to the WCF operation. Multi-statement writes
    use `SET XACT_ABORT ON` and one transaction; "all or nothing" rules (stock deduction at sign-off) run inside it.
 5. **Hospital scope.** Every procedure that reads or writes hospital data filters on `@HospitalId` (or a row's own
    `HospitalId`), and rejects ids that belong to another hospital.
@@ -627,32 +630,33 @@ There is no `IsDeleted`, `DeletedAt`, `UpdatedAt` or `UpdatedBy`.
 
 ## 11. Phase 4 Migration Mapping
 
-### data.js → Entity Framework
+Phase 4 is the DOCNyleUnifiedAPI WCF service over SQL Server (`WCF-MIGRATION-GUIDE.md`); data access is ADO.NET in
+`DOCNyleUnifiedAPI.DAL` calling stored procedures, not Entity Framework.
 
-| data.js | EF Core |
+### In-memory store → stored procedures (DataRepository)
+
+| Today (`DataStore`) | Phase 4 (`DOCNyleUnifiedAPI.DAL/DataRepository.cs`) |
 |---------|---------|
-| `const patients = [...]` | `DbSet<Patient> Patients` |
-| `patients.find(p => p.PatientId === id)` | `await _db.Patients.FindAsync(id)` |
-| `patients.filter(p => p.HospitalId === hid)` | `await _db.Patients.Where(p => p.HospitalId == hid).ToListAsync()` |
-| `patients.push(row)` | `_db.Patients.Add(entity); await _db.SaveChangesAsync()` |
-| `Object.assign(existing, patch)` | `_db.Entry(entity).CurrentValues.SetValues(dto); await _db.SaveChangesAsync()` |
+| `DataStore.Patients.FirstOrDefault(p => p.PatientId == id)` | `DataRepository.GetPatient(id)` → `opd.usp_GetPatient` |
+| `DataStore.Patients.Where(p => p.HospitalId == hid)` | `DataRepository.SearchPatients(term)` → `opd.usp_SearchPatients` — `@HospitalId` from the session |
+| `DataStore.Patients.Add(row)` | `DataRepository.CreatePatient(input)` → `opd.usp_CreatePatient` (`OUTPUT inserted.*`) |
+| update properties in place | `DataRepository.UpdatePatient(id, input)` → `opd.usp_UpdatePatient` |
 
-### api.js → ASP.NET Controller
+### Service class → WCF operation
 
-| api.js | ASP.NET |
+| Today | Phase 4 |
 |--------|---------|
-| `getPatient: (id) => ok(...)` | `[HttpGet("{id}")] public async Task<ActionResult<PatientDto>> GetPatient(Guid id)` |
-| `listPatients: (hid) => ok(...)` | `[HttpGet] public async Task<ActionResult<List<PatientDto>>> ListPatients()` |
-| `createPatient: (record) => ok(...)` | `[HttpPost] public async Task<ActionResult<PatientDto>> CreatePatient(CreatePatientDto dto)` |
-| `_hid()` fallback | `User.Claims.First(c => c.Type == "HospitalId").Value` from JWT |
+| `PatientService.Get(id)` (static, in-process) | `IDOCNyleUnifiedAPI.GetPatient(string patientId)` on `DOCNyleUnifiedAPI.svc` — `[OperationContract]`, `[FaultContract(typeof(ServiceFault))]` |
+| `hospitalId` parameter / `BasePage.HospitalId` | `CallerContext.HospitalId` from the validated `SessionToken` header; `Helper.Open` sets `SESSION_CONTEXT` for RLS |
+| return `null` / `bool` for failure | `ServiceFault` (`NotFound`, `Conflict`, `BusinessRule`, …) |
 
-### Router → ASP.NET Middleware
+### Page guard → service authorization
 
-| JS router | ASP.NET |
+| Web Forms | WCF |
 |-----------|---------|
-| `ROUTE_PERMS` map | `[Authorize(Policy = "RequireConsultation")]` attribute |
-| `hasPermission(role, perm)` | Policy-based authorization with `IAuthorizationHandler` |
-| `_hid()` session guard | `HospitalIdMiddleware` reads JWT claim, sets `SESSION_CONTEXT` for RLS |
+| `BasePage.RequiredPermission`, `Can(feature)` | `Authorize("feature")` at the top of each operation, checking `sec.PermissionMatrix` |
+| `AppSession.CurrentUser` | `Authorize` validates the `SessionToken` header → `CallerContext` (`UserId`, `HospitalId`, roles) |
+| `BasePage.Audit(...)` | Audited operations record their own entry; other events call the `RecordAuditEntry` operation |
 
 ---
 
@@ -675,7 +679,7 @@ Before adding a new table to `schema.sql` (and its list to `DataStore.cs`), veri
 - [ ] No PII used as primary key, foreign key, or join column
 - [ ] Procedures use the 14 verbs (`usp_{Verb}{Entity}`), `OUTPUT … INTO`, and never write NULL into `CreatedBy`
 - [ ] A `sec.AuditConfig` row classifies the table (tier, excluded / masked columns), and the triggers are regenerated
-- [ ] Endpoints are in `API-SPECIFICATION.md` with the procedure's parameters as request fields
+- [ ] WCF operations are in `API-SPECIFICATION.md` (and `IDOCNyleUnifiedAPI.cs` / `DataRepository.cs`) with the procedure's parameters as request members
 - [ ] Audit entries use entity IDs, never PII values
 
 ---

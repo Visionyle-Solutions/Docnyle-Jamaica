@@ -1,31 +1,25 @@
 # Consult360 — OPD Consultation Module
-## Phase 4 Migration Guide: ASP.NET Core Web API + SQL Server 2019
+## Phase 4 Migration Guide: WCF (DOCNyleUnifiedAPI) + SQL Server 2019
 
-**Document version:** 1.0 — September 2026
-**Scope:** This is the final migration phase. It converts the Phase 1
-vanilla-JS SPA + in-memory data layer into a production ASP.NET Core (net8.0,
-current LTS) Web API backed by SQL Server 2019, using the schema, stored
-procedures, and REST contract already designed for this purpose.
-**Audience:** Engineers executing the migration; reviewers validating the
-plan before work begins.
-**Companion documents:** `DATA-LAYER-ARCHITECTURE.md` (binding naming/schema
-rules this guide implements), `API-SPECIFICATION.md` (the 130-endpoint
-contract), `schema.sql` (51-table DDL), `stored-procedures.sql` (152
-procedures), `PRODUCT-GUIDE.md`, `testing-guide.md`, `ENCRYPTION-STRATEGY.md`,
-`PEN-TEST-STRATEGY.md`.
+**Document version:** 2.1 — October 2026
+**Scope:** The final migration phase. It moves Consult360's data layer from the in-memory
+store inside the Web Forms application (`Services/DataStore.cs` and the static
+`Services/*Service.cs` classes) to the **DOCNyleUnifiedAPI** WCF service backed by SQL Server
+2019, using the schema, stored procedures and service contract already designed for it.
+**Audience:** Engineers doing the migration; reviewers checking the plan before work starts.
+**Companion documents:** `API-SPECIFICATION.md` (the WCF contract: one service,
+`IDOCNyleUnifiedAPI`, 207 operations), `DATA-LAYER-ARCHITECTURE.md` (naming and schema rules),
+`schema.sql` (80 tables), `stored-procedures.sql` (212 procedures, 3 views, 4 functions),
+`audit-log.sql`, `PRODUCT-GUIDE.md`, `testing-guide.md`, `API-INTEGRATION-GUIDE.md` (the
+Web Forms side of §9 in detail: static-data inventory, facade → operation map, cut-over order).
 
-**Scope correction vs. earlier planning documents.** `docs/migration-map.md`
-and parts of `docs/PRODUCT-GUIDE.md` describe the Phase 4 target as
-"ASP.NET Core / Blazor," with `.razor` pages replacing the HTML/JS front
-end. That is **not** the target this guide implements. Per the current
-mandate, the browser SPA (`index.html`, `app.js`, `router.js`, the module
-and template files) stays vanilla JS and is **not rewritten**. Only
-`js/api.js` changes — its method bodies switch from calling `window.Data.*`
-to calling `fetch()` against the new Web API. Everywhere below, "Phase 4"
-means ASP.NET Core Web API + SQL Server 2019 behind the existing SPA, not a
-Blazor rewrite. Treat this document as superseding the Blazor framing in
-those two files for planning purposes; they are not edited as part of this
-guide.
+**Change notes.** v2.1 matches the `DOCNyleUnifiedAPI` solution: one `.svc`, one interface file,
+and a `DOCNyleUnifiedAPI.DAL` project (`DataRepository.cs`, `Helper.cs`). v2.0 replaced
+`ASPNETCORE-MIGRATION-GUIDE.md`, which planned an ASP.NET Core Web API with MVC-style
+controllers behind the old vanilla-JS app. That plan no longer applies: the front end is
+**ASP.NET Web Forms on .NET Framework 4.8**, `js/api.js` and `js/data.js` no longer exist, and
+the service layer is **WCF**. Documents that describe a Blazor, ASP.NET Core or REST/MVC
+target are stale on that point.
 
 ---
 
@@ -33,1455 +27,924 @@ guide.
 
 1. [Executive Summary & Target Architecture](#1-executive-summary--target-architecture)
 2. [Guiding Principles](#2-guiding-principles)
-3. [Solution Project Structure](#3-solution-project-structure)
-4. [Data Access Strategy](#4-data-access-strategy)
-5. [Business Logic Porting](#5-business-logic-porting)
-6. [API Layer / Controllers](#6-api-layer--controllers)
+3. [Solution Structure](#3-solution-structure)
+4. [Data Access — DOCNyleUnifiedAPI.DAL](#4-data-access--docnyleunifiedapidal)
+5. [Porting the Business Logic](#5-porting-the-business-logic)
+6. [The Service — DOCNyleUnifiedAPI.svc](#6-the-service--docnyleunifiedapisvc)
 7. [Authentication, Authorization & Multi-Tenancy](#7-authentication-authorization--multi-tenancy)
-8. [Client-Side Engines Decision](#8-client-side-engines-decision)
-9. [Front-End Integration](#9-front-end-integration)
-10. [Database Deployment & Migrations Strategy](#10-database-deployment--migrations-strategy)
-11. [Testing & Parity Strategy](#11-testing--parity-strategy)
-12. [Migration Sequence & Phase Gates](#12-migration-sequence--phase-gates)
-13. [Risks & Mitigations](#13-risks--mitigations)
-14. [Appendix](#14-appendix)
+8. [Logic That Stays In-Process](#8-logic-that-stays-in-process)
+9. [Web Forms Integration](#9-web-forms-integration)
+10. [Hosting & Deployment](#10-hosting--deployment)
+11. [Database Deployment & Migrations](#11-database-deployment--migrations)
+12. [Testing & Parity Strategy](#12-testing--parity-strategy)
+13. [Migration Sequence & Phase Gates](#13-migration-sequence--phase-gates)
+14. [Risks & Mitigations](#14-risks--mitigations)
+15. [Appendix](#15-appendix)
 
 ---
 
 ## 1. Executive Summary & Target Architecture
 
-Consult360's Phase 1 build is a static HTML/CSS/vanilla-JS SPA with an
-in-memory data layer (`js/data.js`) wrapped by an async service facade
-(`js/api.js`). That facade was deliberately designed — per
-`DATA-LAYER-ARCHITECTURE.md` — so that its 143 method signatures become the
-Web API's controller actions with no renaming, and so that the SQL Server
-schema and stored procedures could be authored ahead of the .NET code. Both
-of those artifacts already exist and are frozen: `docs/schema.sql` (51
-tables across 6 schemas) and `docs/stored-procedures.sql` (152 stored
-procedures). This phase's job is to stand up the ASP.NET Core Web API that
-sits between the unchanged browser SPA and that unchanged database, and to
-port `data.js`'s business logic — which is real, non-trivial, hand-written
-JavaScript, not a declarative rules engine — into C# services that call
-those procedures.
+Today Consult360 is one ASP.NET Web Forms application (`OpdProject`, .NET Framework 4.8,
+IIS / IIS Express). Its pages and user controls (`templates/**/*.aspx`, `*.ascx`) call static
+service classes (`PatientService`, `ConsultationService`, `BillingService`, …) that read and
+write `List<T>` tables in `DataStore`, seeded at start-up and lost when the app domain
+recycles. The SQL Server schema and stored procedures were written ahead of the .NET data
+access, and `API-SPECIFICATION.md` defines the WCF contract that sits between the two.
+
+Phase 4 builds out the `DOCNyleUnifiedAPI` solution against that contract, points it at SQL
+Server, and switches the Web Forms application from the in-memory store to the service —
+module by module, without rewriting the pages.
 
 ### Target architecture
 
 ```
-┌───────────────────────────────────────────────────────────────────────┐
-│  BROWSER — unchanged Phase 1 SPA                                      │
-│  index.html · app.js · router.js · session-manager.js · app-context.js│
-│  js/modules/**  js/components/**  js/engines/** (all 5 stay here)     │
-│  ┌───────────────────────────────────────────────────────────────┐   │
-│  │  js/api.js  — ONLY FILE THAT CHANGES                          │   │
-│  │  Method bodies: ok(window.Data.xxx()) → fetch('/api/...')     │   │
-│  │  Same 143 method names, same signatures, same return shapes.  │   │
-│  └───────────────────────────────────────────────────────────────┘   │
-└──────────────────────────────┬────────────────────────────────────────┘
-                                │  HTTPS / JSON / Bearer JWT
+┌──────────────────────────────────────────────────────────────────────────┐
+│  BROWSER — server-rendered Web Forms pages (no change)                   │
+│  css/** · js/site.js · js/engines/engine-voice-soap.js ·                 │
+│  js/components/component-drawing-pad.js · notifications.ashx polling     │
+└───────────────────────────────┬──────────────────────────────────────────┘
+                                │  HTTPS — postbacks, page requests
                                 ▼
-┌───────────────────────────────────────────────────────────────────────┐
-│  Consult360.Api  — ASP.NET Core 8 Web API (Kestrel)                   │
-│  Program.cs (minimal hosting) · appsettings.{env}.json                │
-│  Middleware pipeline: HTTPS redirect → security headers → CORS →      │
-│    exception handler → authentication (JWT) → HospitalId/RLS          │
-│    context → authorization (policy) → rate limiter → endpoints        │
-│  Controllers/ — one per functional module (13), matching              │
-│    API-SPECIFICATION.md's 130 endpoints 1:1                           │
-└──────────────────────────────┬────────────────────────────────────────┘
-                                │  DTOs in/out — DI-injected services
+┌──────────────────────────────────────────────────────────────────────────┐
+│  OpdProject — ASP.NET Web Forms, .NET 4.8, IIS                           │
+│  templates/**/*.aspx/.ascx + code-behind · Site.Master · Web/BasePage    │
+│  Web/AppSession (signed-in user + service session token)                 │
+│  Services/*Service.cs — kept as the FACADE the pages call; bodies switch │
+│    from DataStore to DocNyle.Call(api => api.Xxx(…)) per module          │
+│  Connected Services → DocNyleApi.DOCNyleUnifiedAPIClient (generated)     │
+│  Services/ClinicalEngines.cs, VitalUnitService, PhoneService,            │
+│    TimeZoneService formatting — stay in-process (§8)                     │
+└───────────────────────────────┬──────────────────────────────────────────┘
+                                │  SOAP over HTTPS (basicHttpBinding, MTOM)
+                                │  SessionToken header
                                 ▼
-┌───────────────────────────────────────────────────────────────────────┐
-│  Consult360.Application  — class library, no ASP.NET/SQL dependency   │
-│  Services/  — one per module (PatientService, ConsultationService,    │
-│    SchedulingService, PrescriptionService, BillingService, …)         │
-│    — the ported data.js business logic (validation, filters,          │
-│    upsert/soft-delete rules, slot generation, fee lookup, tri-state   │
-│    toggling, drug-allergy pre-check) lives here, as plain C#          │
-│  DTOs/ · Validators/ (FluentValidation) · Interfaces (IXxxRepository) │
-└──────────────────────────────┬────────────────────────────────────────┘
-                                │  interface calls only (no SqlClient here)
+┌──────────────────────────────────────────────────────────────────────────┐
+│  DOCNyleUnifiedAPI — WCF Service Application, .NET 4.8, IIS              │
+│  DOCNyleUnifiedAPI.svc → class DOCNyleUnifiedAPI : IDOCNyleUnifiedAPI    │
+│  IDOCNyleUnifiedAPI.cs — one [ServiceContract], 207 operations in 13     │
+│    regions, all [DataContract]s, ServiceFault                            │
+│  Each operation: Authorize(feature) → validate → DataRepository → map    │
+│    → audit, inside Run(…) which turns exceptions into ServiceFault       │
+└───────────────────────────────┬──────────────────────────────────────────┘
+                                │  project reference
                                 ▼
-┌───────────────────────────────────────────────────────────────────────┐
-│  Consult360.Infrastructure  — class library                           │
-│  Repositories/  — Dapper, one per module, each method = one           │
-│    stored-procedures.sql call (QueryAsync / QueryMultipleAsync /      │
-│    ExecuteAsync against OUTPUT inserted.* result sets)                │
-│  Auth/  — JWT issuing, ASP.NET Core Identity PasswordHasher           │
-│  Security/  — HospitalContextAccessor, SESSION_CONTEXT injector       │
-│  Resilience/  — Polly retry/circuit-breaker policies for SqlClient    │
-│  Integrations/  — WhatsApp/Email/SMS providers (msg schema, Phase 2+) │
-└──────────────────────────────┬────────────────────────────────────────┘
-                                │  ADO.NET (SqlClient) via Dapper
+┌──────────────────────────────────────────────────────────────────────────┐
+│  DOCNyleUnifiedAPI.DAL — class library, .NET 4.8                         │
+│  DataRepository.cs — one method per stored procedure                     │
+│  Helper.cs — connection, sp_set_session_context, parameters, retry       │
+└───────────────────────────────┬──────────────────────────────────────────┘
+                                │  ADO.NET (System.Data.SqlClient)
                                 ▼
-┌───────────────────────────────────────────────────────────────────────┐
-│  SQL Server 2019 — ALREADY DESIGNED, NOT REDESIGNED HERE               │
-│  docs/schema.sql — 51 tables, 6 schemas (opd/cln/bil/cfg/sec/msg)     │
-│  docs/stored-procedures.sql — 152 procedures, the ONLY write/read     │
-│    surface the application code is allowed to use (no ad-hoc SQL)     │
-│  Row-Level Security via SESSION_CONTEXT('HospitalId') — architecture  │
-│    §6; Always Encrypted on the PII columns listed in                  │
-│    ENCRYPTION-STRATEGY.md §1.2                                        │
-└───────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│  SQL Server 2019 — ALREADY DESIGNED, NOT REDESIGNED HERE                 │
+│  schema.sql — 80 tables in opd/cln/bil/cfg/sec/msg/inv                   │
+│  stored-procedures.sql — the only read/write surface (no ad-hoc SQL)     │
+│  audit-log.sql · Row-Level Security on SESSION_CONTEXT('HospitalId')     │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-**What does not change:** the SPA's HTML/CSS/JS modules, templates,
-routing, the 5 clinical engines, the schema, and the stored procedures.
-**What is net-new:** the four .NET projects (`Api`, `Application`,
-`Infrastructure`, plus a `Domain`/shared-model layer folded into
-`Application`) and a real authentication/session system replacing
-`session-manager.js`'s client-only enforcement.
+**What does not change:** the pages, user controls, master page, routes
+(`Web/RouteConfig.cs`), CSS, the browser scripts, the schema and the stored procedures.
+**What is built out:** `DOCNyleUnifiedAPI` (the `.svc`, its code-behind, `IDOCNyleUnifiedAPI.cs`)
+and `DOCNyleUnifiedAPI.DAL` (`DataRepository.cs`, `Helper.cs`), plus the database migrator and
+test projects.
+**What changes in `OpdProject`:** a service reference in Connected Services, the bodies of the
+`Services/*Service.cs` facade methods, `AppSession` (it also keeps the service session token),
+`BasePage`'s fault handling, and the seeding in `DataStore` (retired at the end).
 
 ---
 
 ## 2. Guiding Principles
 
-1. **The UI barely changes.** Only `js/api.js`'s method bodies change, from
-   `ok(window.Data.xxx())` to `fetch('/api/...')`. No other SPA file is
-   edited as part of this migration. This was the entire point of building
-   the `api.js` facade in Phase 1 (`DATA-LAYER-ARCHITECTURE.md` §3).
-
-2. **The controller contract is not designed here — it is implemented
-   here.** `api.js`'s 143 method names/signatures and
-   `docs/API-SPECIFICATION.md`'s 130 REST endpoints were already derived
-   from the 14-verb taxonomy in `DATA-LAYER-ARCHITECTURE.md` §2. This
-   guide's job is to produce ASP.NET Core controller actions that match
-   that contract exactly — not to redesign the API surface.
-
-3. **The schema and stored procedures are frozen inputs, not redesign
-   targets.** `schema.sql` (51 tables) and `stored-procedures.sql` (152
-   procedures) already exist, are SQL Server 2019-compatible, and already
-   implement most of the persistence-side business rules (upserts via
-   `MERGE`, soft deletes, `OUTPUT inserted.*`, BMI computed in
-   `cln.usp_SaveVitals`, etc.). This migration deploys and versions them —
-   it does not rewrite them, except to fix the handful of documented gaps
-   in API-SPECIFICATION.md's "Known Gaps" section if the business decides
-   to close them.
-
-4. **`data.js`'s business logic is real work, not a mechanical
-   translation.** Unlike a fully data-driven rules engine, `data.js`
-   contains genuine hand-written algorithms — the slot-generation loop,
-   the tri-state symptom cycle, the effective-dated fee lookup, the
-   drug-allergy substring/class matcher, the MRN/ID generation scheme. A
-   large fraction of these already have equivalent (and sometimes more
-   complete — see the BMI example in §5) logic baked into the stored
-   procedures. The porting work is therefore **verification and thin
-   service-layer wrapping** for procedures that already encode the rule,
-   and **genuine C# reimplementation** for the handful of behaviors that
-   are UI-orchestration logic never pushed into a procedure (see §5's
-   module-by-module methodology). Treat this as a real engineering task
-   with its own test plan — not a copy-paste exercise.
-
-5. **No ad-hoc SQL from application code.** Every database access goes
-   through a named stored procedure from `stored-procedures.sql`. This
-   was already a stated pen-test requirement (`PEN-TEST-STRATEGY.md` §3.3)
-   and is easy to enforce once Dapper repositories are the only call site.
-
-6. **Trust nothing the client sends for tenant scoping.** `_hid()` in
-   `api.js` is a convenience fallback in Phase 1, not a security boundary
-   — `PEN-TEST-STRATEGY.md` §3.4 flags this explicitly. In Phase 4, the
-   `HospitalId` used for every query comes from the validated JWT claim,
-   never from a request body/query parameter, even if the client sends
-   one.
-
-7. **Additive, not a rewrite of decided architecture.** Table names,
-   schema namespaces (`opd`/`cln`/`bil`/`cfg`/`sec`/`msg`), the 14-verb
-   method taxonomy, and the dual-key pattern (`Id` internal /
-   `{Table}Id` external `UNIQUEIDENTIFIER`) are binding and are not
-   revisited here.
+1. **The pages barely change.** The static service classes the pages already call
+   (242 call sites in `templates/**`) stay as a facade. Their bodies move from `DataStore` to the
+   service; where a facade method's signature already matches an operation, nothing that calls
+   it changes. Where it does not (for example `ConsultationService.CycleSymptom`, §5.2), the
+   facade adapts.
+2. **The contract is implemented here, not designed here.** `API-SPECIFICATION.md` already
+   names every operation, data contract, fault and backing procedure. Changes go through that
+   document first, then `IDOCNyleUnifiedAPI.cs`, then the service reference is updated.
+3. **The schema and procedures are frozen inputs.** `schema.sql` and `stored-procedures.sql`
+   already hold most persistence rules (upserts via `MERGE`, soft deletes, `OUTPUT inserted.*`,
+   BMI in `cln.usp_SaveVitals`, stock consumption in `cln.usp_ConfirmSignOff`). The migration
+   deploys and versions them. New procedures are added only for the gaps listed in
+   `API-SPECIFICATION.md` "Known Gaps".
+4. **The in-memory services hold real business logic.** `SchedulingService.ListAvailableSlots`,
+   `ConsultationService.CheckDrugAllergyConflicts`, `BillingService.RecalculateTotals`,
+   `InventoryService.ConsumeForConsultation` are hand-written algorithms. Many already have a
+   T-SQL twin; each one still needs a parity test (§12).
+5. **No ad-hoc SQL.** Every database call is a named stored procedure, made from
+   `DataRepository` through `Helper` — the only code that references `SqlClient`.
+6. **The client never decides the tenant.** `HospitalId` comes from the validated session, never
+   from a message member. `BasePage.HospitalId`'s `"HOSP-001"` fallback is a demo convenience and
+   must not reach the service.
+7. **Additive, not a redesign.** Table names, schema namespaces, the 14-verb naming taxonomy
+   and the dual-key pattern (`Id` internal / `{Table}Id` external `UNIQUEIDENTIFIER`) are not
+   revisited.
 
 ---
 
-## 3. Solution Project Structure
+## 3. Solution Structure
 
 ```
-Consult360.sln
-├── src/
-│   ├── Consult360.Api/                  ← ASP.NET Core Web API host (net8.0)
-│   │   ├── Program.cs                   (minimal hosting model)
-│   │   ├── appsettings.json
-│   │   ├── appsettings.Development.json
-│   │   ├── appsettings.Staging.json
-│   │   ├── appsettings.Production.json
-│   │   ├── Controllers/
-│   │   │   ├── AuthController.cs
-│   │   │   ├── HospitalsController.cs
-│   │   │   ├── PatientsController.cs
-│   │   │   ├── SchedulingController.cs
-│   │   │   ├── ConsultationsController.cs
-│   │   │   ├── VitalsController.cs           (nested under Consultations route)
-│   │   │   ├── SymptomsController.cs
-│   │   │   ├── DiagnosesController.cs
-│   │   │   ├── PrescriptionsController.cs
-│   │   │   ├── FormularyController.cs
-│   │   │   ├── LabController.cs
-│   │   │   ├── BillingController.cs
-│   │   │   ├── ReportsController.cs
-│   │   │   ├── ComplianceController.cs
-│   │   │   ├── NotificationsController.cs
-│   │   │   ├── AuditController.cs
-│   │   │   └── AdminController.cs            (permissions, users, config)
-│   │   ├── Middleware/
-│   │   │   ├── ExceptionHandlingMiddleware.cs
-│   │   │   ├── HospitalContextMiddleware.cs  (JWT claim → SESSION_CONTEXT)
-│   │   │   └── SecurityHeadersMiddleware.cs
-│   │   └── Filters/
-│   │       └── ValidateModelAttribute.cs
-│   │
-│   ├── Consult360.Application/          ← business logic, no ASP.NET/SQL refs
-│   │   ├── Services/
-│   │   │   ├── Patients/PatientService.cs, AllergyService.cs, MedicalHistoryService.cs
-│   │   │   ├── Scheduling/SchedulingService.cs, SlotGenerationService.cs
-│   │   │   ├── Consultations/ConsultationService.cs, VitalsService.cs,
-│   │   │   │     SymptomService.cs, SoapService.cs, SignOffService.cs
-│   │   │   ├── Diagnoses/DiagnosisService.cs, Icd10SearchService.cs
-│   │   │   ├── Prescriptions/PrescriptionService.cs, FormularyService.cs,
-│   │   │   │     DrugAllergyCheckService.cs
-│   │   │   ├── Lab/LabOrderService.cs, LabResultService.cs
-│   │   │   ├── Billing/InvoiceService.cs, PaymentService.cs, FeeScheduleService.cs
-│   │   │   ├── Reports/ReportingService.cs
-│   │   │   ├── Notifications/NotificationService.cs
-│   │   │   └── Audit/AuditService.cs, PermissionService.cs
-│   │   ├── Dtos/                    (request/response records, 1 file per module)
-│   │   ├── Validators/              (FluentValidation, mirrors data.js §8 rules)
-│   │   ├── Interfaces/              (IPatientRepository, IConsultationRepository, …)
-│   │   └── Common/                  (Result<T> envelope, PagedResult<T>, verb-taxonomy
-│   │                                  base types, HospitalScoped marker interface)
-│   │
-│   ├── Consult360.Infrastructure/   ← Dapper, auth, external integrations
-│   │   ├── Data/
-│   │   │   ├── SqlConnectionFactory.cs
-│   │   │   ├── DapperTypeHandlers.cs     (DateOnly, UNIQUEIDENTIFIER mapping)
-│   │   │   └── Repositories/             (mirrors Application/Interfaces, 1:1)
-│   │   │       ├── PatientRepository.cs  (calls opd.usp_* procedures)
-│   │   │       ├── ConsultationRepository.cs (calls cln.usp_* procedures)
-│   │   │       ├── BillingRepository.cs  (calls bil.usp_* procedures)
-│   │   │       └── …
-│   │   ├── Security/
-│   │   │   ├── JwtTokenService.cs
-│   │   │   ├── HospitalContextAccessor.cs
-│   │   │   └── SessionContextSetter.cs   (sets SQL Server SESSION_CONTEXT)
-│   │   ├── Resilience/
-│   │   │   └── SqlResiliencePolicies.cs  (Polly retry/circuit-breaker)
-│   │   └── Integrations/
-│   │       ├── WhatsAppMessageSender.cs  (msg schema, behind a feature flag)
-│   │       └── EmailMessageSender.cs
-│   │
-│   └── Consult360.Domain/           ← (optional, can fold into Application/Models)
-│       └── Entities/                (POCOs mirroring schema.sql column names,
-│                                      PascalCase, used as Dapper row targets)
-│
-└── tests/
-    ├── Consult360.UnitTests/        (xUnit — Application services, no DB)
-    │   ├── Scheduling/SlotGenerationServiceTests.cs
-    │   ├── Consultations/SymptomStateServiceTests.cs
-    │   ├── Billing/FeeScheduleServiceTests.cs
-    │   └── Prescriptions/DrugAllergyCheckServiceTests.cs
-    └── Consult360.IntegrationTests/  (xUnit + Testcontainers.MsSql)
-        ├── Repositories/PatientRepositoryTests.cs
-        ├── Repositories/ConsultationRepositoryTests.cs
-        └── ApiContractTests/         (WebApplicationFactory, asserts response
-                                        shapes against API-SPECIFICATION.md)
+Solution 'DOCNyleUnifiedAPI'
+├── DOCNyleUnifiedAPI                     WCF Service Application (.NET 4.8, IIS)
+│   ├── DOCNyleUnifiedAPI.svc             the one endpoint
+│   │   └── DOCNyleUnifiedAPI.svc.cs      class DOCNyleUnifiedAPI : IDOCNyleUnifiedAPI
+│   │                                     — all 207 operations (#regions as in the spec), plus the
+│   │                                       private Run / Authorize / Audit / mapping helpers
+│   ├── IDOCNyleUnifiedAPI.cs             [ServiceContract] interface, [DataContract]s, ServiceFault
+│   ├── Web.config                        system.serviceModel, DOCNyle connection string
+│   └── packages.config
+└── DOCNyleUnifiedAPI.DAL                 Class library (.NET 4.8)
+    ├── DataRepository.cs                 one public method per stored procedure
+    ├── Helper.cs                         Open (+ SESSION_CONTEXT), Procedure, Add, readers, retry
+    ├── App.Config                        design time only; runtime config is the service's Web.config
+    └── packages.config
+
+Alongside (Phase 4 additions):
+├── db/Scripts/ + db/Consult360.DbMigrator/   DbUp scripts and runner (§11)
+└── tests/                                    unit, integration (LocalDB), parity (§12)
+
+Consumer (existing repository):
+└── OpdProject.sln / opd-project/             Web Forms site
+    ├── Connected Services/DocNyleApi/         generated DOCNyleUnifiedAPIClient + data contracts
+    ├── Web/DocNyle.cs                         NEW — creates the client, adds SessionToken, closes/aborts
+    └── Services/*Service.cs                   facade (bodies switch, §9)
 ```
 
 ### Responsibilities and dependency direction
 
-| Project | Depends on | Must never reference |
+| Project | References | Must never reference |
 |---|---|---|
-| `Consult360.Api` | `Application`, `Infrastructure` (for DI registration only, in `Program.cs`) | `Microsoft.Data.SqlClient` directly in a controller |
-| `Consult360.Application` | `Domain` only | `Microsoft.AspNetCore.*`, `Dapper`, `Microsoft.Data.SqlClient` — this project has **zero** web or SQL dependencies, so business logic is testable in isolation and the persistence technology could change without touching it |
-| `Consult360.Infrastructure` | `Application` (implements its interfaces), `Domain` | Nothing back up the chain |
-| `Consult360.Domain` | Nothing | Everything else |
+| `OpdProject` | the `DocNyleApi` service reference, `System.ServiceModel` | `DOCNyleUnifiedAPI.DAL`, `SqlClient` |
+| `DOCNyleUnifiedAPI` | `DOCNyleUnifiedAPI.DAL`, `System.ServiceModel`, `System.Runtime.Serialization` | `System.Web.UI`, `OpdProject`, `SqlClient` directly (all SQL goes through the DAL) |
+| `DOCNyleUnifiedAPI.DAL` | `System.Data`, `System.Data.SqlClient`, `System.Configuration` | `DOCNyleUnifiedAPI` — it returns rows / DAL types, never WCF data contracts |
 
-This mirrors the dependency-inversion shape implied by
-`DATA-LAYER-ARCHITECTURE.md`'s own layering (`data.js` → `api.js` → SQL):
-`Application` plays the role `data.js` played (the business rules), `Api`
-plays the role `api.js` played (the thin, signature-preserving pass-through
-that becomes the HTTP boundary), and `Infrastructure` is the new layer that
-didn't exist in Phase 1 — the actual SQL Server access.
+The site gets the contract from the service's WSDL (Connected Services), not from a shared
+assembly. Whenever `IDOCNyleUnifiedAPI.cs` changes, run **Update Service Reference** in
+`OpdProject` so a contract change shows up as a compile error on the site.
 
 ---
 
-## 4. Data Access Strategy
+## 4. Data Access — DOCNyleUnifiedAPI.DAL
 
-### Decision: Dapper, not EF Core, for stored-procedure execution
+### Decision: ADO.NET stored-procedure calls, not Entity Framework
 
-**Why.** The project's entire data-access surface is already
-stored-procedure-based: 152 procedures in `stored-procedures.sql`, each
-implementing one `data.js`/`api.js` method's exact behavior (soft deletes,
-`MERGE`-based upserts, `OUTPUT inserted.*` for created rows, allow-listed
-per-table export procedures instead of dynamic SQL). EF Core's core value
-proposition — a change-tracked object graph, LINQ-to-SQL translation,
-migrations that generate schema from C# model classes — actively works
-against that design:
+The data surface is already stored-procedure based, with every procedure implementing one
+operation's exact behavior (soft deletes, `MERGE` upserts, `OUTPUT inserted.*`, allow-listed
+per-table export procedures instead of dynamic SQL). Entity Framework 6's migrations would want
+to own the schema and fight `schema.sql`'s hand-written dual keys and constraint names; used only
+to call procedures, it adds a `DbContext` to keep in sync and gives nothing. `DataRepository`
+therefore calls procedures with plain ADO.NET through `Helper`. (Dapper is a drop-in option
+inside `Helper` if the team adds it to `packages.config`; the repository shape does not change.)
 
-- EF Core Code-First migrations would want to *own* the schema and
-  generate its own DDL, conflicting with `schema.sql`'s hand-authored
-  dual-key pattern (`Id BIGINT IDENTITY` clustered PK,
-  `{Table}Id UNIQUEIDENTIFIER DEFAULT NEWSEQUENTIALID()` external key) and
-  its explicit constraint-naming convention (`PK_{Schema}_{Table}`,
-  `FK_{Schema}_{Table}_{Column}`, etc. — `DATA-LAYER-ARCHITECTURE.md` §5.5).
-  EF Core can be pointed at an existing schema ("Database First"), but at
-  that point it is only being used as a query/mapping layer — which is
-  exactly what Dapper is, with far less overhead.
-- Every write already goes through a procedure that encodes business rules
-  server-side (e.g. `cln.usp_SaveVitals` computes BMI in the `MERGE`
-  statement itself — see §5.1). Using EF Core's `DbSet.Add()` / change
-  tracking would either bypass those procedures (reintroducing the
-  business logic in C# and duplicating it) or reduce EF Core to
-  `FromSqlRaw`/`ExecuteSqlRaw` calls, at which point it provides no benefit
-  over Dapper and adds a heavier `DbContext` object graph to keep in sync
-  with schema changes made directly in SQL scripts.
-- Some procedures return **multiple result sets** that need `QueryMultiple`
-  (e.g. `bil.usp_CreateInvoice` alongside a later
-  `bil.usp_RecalculateInvoiceTotals` call pattern; the day-end/reporting
-  views), and Dapper's `QueryMultipleAsync` is a direct, simple fit;
-  EF Core has no first-class equivalent.
+Rules: `CommandType.StoredProcedure`; parameters by name; `null` → `DBNull.Value`; one result
+row → `DataRow` (or `null`), many rows → `DataTable`, side-effect only → `ExecuteNonQuery`.
 
-Dapper is used exclusively for stored-procedure execution:
-`CommandType.StoredProcedure`, parameters bound by name, `QueryAsync` for
-`SELECT`-returning procedures, `ExecuteAsync` for pure side-effect
-procedures, and `QuerySingleOrDefaultAsync` for procedures whose `SELECT`
-(or `OUTPUT inserted.*`) returns exactly one row.
-
-### Repository pattern
-
-One repository class per functional module, implementing an interface
-defined in `Consult360.Application.Interfaces`. Each repository method maps
-1:1 to a stored procedure — there is no query-building, no LINQ expression
-translation, and no "repository does something clever" logic. All business
-logic (validation, computed values not already handled by the procedure,
-orchestration across more than one procedure call) lives one layer up, in
-`Consult360.Application.Services`.
+### `Helper.cs`
 
 ```csharp
-// Consult360.Application/Interfaces/IPatientRepository.cs
-public interface IPatientRepository
+// DOCNyleUnifiedAPI.DAL/Helper.cs
+public static class Helper
 {
-    Task<PatientRow?> GetAsync(Guid patientId, CancellationToken ct);
-    Task<IReadOnlyList<PatientRow>> SearchAsync(string term, Guid hospitalId, CancellationToken ct);
-    Task<PatientRow> CreateAsync(CreatePatientParams p, CancellationToken ct);
-    Task<PatientRow?> UpdateAsync(Guid patientId, UpdatePatientParams p, CancellationToken ct);
-}
+    private static readonly string Cs = ConfigurationManager.ConnectionStrings["DOCNyle"].ConnectionString;
 
-// Consult360.Infrastructure/Data/Repositories/PatientRepository.cs
-public sealed class PatientRepository : IPatientRepository
-{
-    private readonly ISqlConnectionFactory _factory;
-    public PatientRepository(ISqlConnectionFactory factory) => _factory = factory;
-
-    public async Task<PatientRow?> GetAsync(Guid patientId, CancellationToken ct)
+    /// Opens a pooled connection and pins it to the caller's hospital for row-level security.
+    public static SqlConnection Open(string hospitalId)
     {
-        using var conn = _factory.CreateOpen();
-        var cmd = new CommandDefinition(
-            "opd.usp_GetPatient",
-            new { PatientId = patientId },
-            commandType: CommandType.StoredProcedure,
-            cancellationToken: ct);
-        return await conn.QuerySingleOrDefaultAsync<PatientRow>(cmd);
+        var conn = new SqlConnection(Cs);
+        conn.Open();
+        using (var cmd = new SqlCommand("sp_set_session_context", conn) { CommandType = CommandType.StoredProcedure })
+        {
+            cmd.Parameters.AddWithValue("@key", "HospitalId");
+            cmd.Parameters.AddWithValue("@value", hospitalId);
+            cmd.Parameters.AddWithValue("@read_only", 1);
+            cmd.ExecuteNonQuery();
+        }
+        return conn;
     }
 
-    public async Task<IReadOnlyList<PatientRow>> SearchAsync(string term, Guid hospitalId, CancellationToken ct)
+    public static SqlCommand Procedure(SqlConnection conn, string name, SqlTransaction tx = null)
     {
-        using var conn = _factory.CreateOpen();
-        var cmd = new CommandDefinition(
-            "opd.usp_SearchPatients",
-            new { Term = term, HospitalId = hospitalId },
-            commandType: CommandType.StoredProcedure,
-            cancellationToken: ct);
-        var rows = await conn.QueryAsync<PatientRow>(cmd);
-        return rows.AsList();
+        return new SqlCommand(name, conn, tx) { CommandType = CommandType.StoredProcedure, CommandTimeout = 30 };
     }
 
-    public async Task<PatientRow> CreateAsync(CreatePatientParams p, CancellationToken ct)
+    public static void Add(SqlCommand cmd, string name, object value)
     {
-        using var conn = _factory.CreateOpen();
-        // opd.usp_CreatePatient ends with `OUTPUT inserted.PatientId, inserted.Mrn,
-        // inserted.FullName, inserted.CreatedAt` — a single-row result set, exactly
-        // like every other create procedure in stored-procedures.sql.
-        var cmd = new CommandDefinition(
-            "opd.usp_CreatePatient",
-            p, // anonymous/record param object; property names match @ParamNames
-            commandType: CommandType.StoredProcedure,
-            cancellationToken: ct);
-        return await conn.QuerySingleAsync<PatientRow>(cmd);
+        cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
     }
+
+    public static DataTable Table(SqlCommand cmd)   { return Retry(() => { var t = new DataTable(); new SqlDataAdapter(cmd).Fill(t); return t; }); }
+    public static DataRow   FirstRow(SqlCommand cmd) { var t = Table(cmd); return t.Rows.Count > 0 ? t.Rows[0] : null; }
+    public static DataSet   Sets(SqlCommand cmd)    { return Retry(() => { var d = new DataSet(); new SqlDataAdapter(cmd).Fill(d); return d; }); }
+    public static int       Execute(SqlCommand cmd) { return Retry(() => cmd.ExecuteNonQuery()); }
+
+    public static T Get<T>(DataRow row, string column) { return row[column] == DBNull.Value ? default(T) : (T)row[column]; }
+
+    // Retry, transient error numbers: see "Transient faults" below.
 }
 ```
 
-### Handling `OUTPUT inserted.*`
+### `DataRepository.cs`
 
-Every `create`/`save`-verb procedure in `stored-procedures.sql` ends its
-`INSERT` with an `OUTPUT inserted.<columns>` clause (see the pattern at
-`sec.usp_CreateUser`, `opd.usp_CreatePatient`, `cln.usp_CreatePrescription`,
-etc. — 20+ occurrences). From ADO.NET/Dapper's perspective this behaves
-exactly like a `SELECT`: the procedure returns a one-row result set, so
-`QuerySingleAsync<T>`/`QuerySingleOrDefaultAsync<T>` reads it with no
-special handling required. No `SqlParameter` with `ParameterDirection.Output`
-is needed for these — the pattern the schema already uses is result-set
-based, not scalar-output-parameter based, and the repositories should match
-that rather than introducing a second convention.
-
-### Multi-result-set handling (`QueryMultiple`)
-
-Procedures that return more than one logical result set — for example a
-reporting endpoint that returns both summary rows and a breakdown (`GET
-/reports/day-end` → `{ invoiceCount, totalBilled, … }` + `[ { componentType,
-paymentMethod, totalAmount, paymentCount } ] }`, backed by
-`bil.vw_DayEndSummary` + `bil.vw_PaymentsByComponent`) — are wrapped in a
-single procedure that issues two `SELECT`s, consumed with
-`QueryMultipleAsync`:
+One public method per procedure, named after it. The constructor takes the caller's
+`HospitalId` and `UserId` so no method can forget them.
 
 ```csharp
-public async Task<DayEndSummaryRow> GetDayEndSummaryAsync(Guid hospitalId, DateOnly date, CancellationToken ct)
+// DOCNyleUnifiedAPI.DAL/DataRepository.cs
+public class DataRepository
 {
-    using var conn = _factory.CreateOpen();
-    using var multi = await conn.QueryMultipleAsync(new CommandDefinition(
-        "bil.usp_GetDayEndSummary", // wraps the two views in one call
-        new { HospitalId = hospitalId, Date = date },
-        commandType: CommandType.StoredProcedure, cancellationToken: ct));
+    private readonly string _hospitalId, _userId;
+    public DataRepository(string hospitalId, string userId) { _hospitalId = hospitalId; _userId = userId; }
 
-    var summary = await multi.ReadSingleAsync<DayEndSummaryRow>();
-    var byMethod = (await multi.ReadAsync<PaymentByComponentRow>()).AsList();
-    summary.PaymentsByComponent = byMethod;
-    return summary;
+    #region Patients
+    public DataTable SearchPatients(string term)
+    {
+        using (var conn = Helper.Open(_hospitalId))
+        using (var cmd = Helper.Procedure(conn, "opd.usp_SearchPatients"))
+        {
+            Helper.Add(cmd, "@HospitalId", _hospitalId);
+            Helper.Add(cmd, "@Term", term);
+            return Helper.Table(cmd);
+        }
+    }
+
+    public DataRow GetPatient(string patientId) { /* opd.usp_GetPatient — as API-SPECIFICATION §0.10 */ }
+
+    public DataRow CreatePatient(PatientInput p)
+    {
+        // opd.usp_CreatePatient ends with OUTPUT inserted.* — a one-row result set.
+        using (var conn = Helper.Open(_hospitalId))
+        using (var cmd = Helper.Procedure(conn, "opd.usp_CreatePatient"))
+        {
+            Helper.Add(cmd, "@HospitalId", _hospitalId);
+            Helper.Add(cmd, "@FullName", p.FullName);
+            // … one Add per procedure parameter, names exactly as in stored-procedures.sql
+            Helper.Add(cmd, "@CreatedBy", _userId);
+            return Helper.FirstRow(cmd);
+        }
+    }
+    #endregion
 }
 ```
 
-*(Where a report is currently expressed as two separate views without a
-wrapping procedure, add a thin wrapping procedure — this is schema-additive,
-not a redesign of the views.)*
+`DataRepository` uses the same `#region`s as `IDOCNyleUnifiedAPI.cs`. Inputs with many
+parameters take a small DAL input class (`PatientInput`) defined in `DataRepository.cs`, so the
+DAL never depends on the WCF data contracts; the service maps request → input and row → data
+contract.
 
-### Connection & transaction management
+### `OUTPUT inserted.*` and multiple result sets
 
-- `ISqlConnectionFactory` is a scoped-per-request service that opens a
-  `SqlConnection` against the connection string for the current
-  environment. Every repository call opens, uses, and disposes its own
-  connection (`using var conn = _factory.CreateOpen()`); connection pooling
-  is handled by ADO.NET, not manually.
-- Where a single logical operation spans more than one procedure call (for
-  example: create an invoice line item, then recalculate invoice totals),
-  the `Application` service wraps both repository calls in an explicit
-  `SqlConnection`/`SqlTransaction` passed down via an
-  `IUnitOfWork`/`TransactionScope` abstraction, so a failure in the second
-  call rolls back the first. Prefer pushing that pairing into a single
-  procedure when the two steps are always used together (as
-  `bil.usp_CreatePayment` already does by recalculating the invoice's
-  `paidAmount`/`status` in the same procedure) — multi-procedure
-  application-level transactions are the exception, not the default
-  pattern, because most compound operations are already procedure-internal.
-
-### Retry policy for transient SQL Server faults
-
-Wrap `SqlConnection.OpenAsync`/command execution in a Polly retry policy
-targeting the small set of transient SQL Server error numbers (`-2`
-timeout, `4060`, `40197`, `40501`, `40613`, `49918`, `49919`, `49920`,
-`11001`), with exponential backoff and a max of 3 retries, registered once
-in `Consult360.Infrastructure.Resilience.SqlResiliencePolicies` and applied
-via the `ISqlConnectionFactory` so every repository gets it for free without
-each one hand-rolling retry logic.
+Every create/save procedure returns the written row through `OUTPUT inserted.<columns>`, which
+reads like a `SELECT`: no output parameters. Procedures that return more than one result set —
+`GetDayEndSummary` (summary + by-component rows), `ListNoShowReport` (totals + by-status rows),
+`GetVisitIntakeAndConsent` — are read with `Helper.Sets` (one `DataTable` per result set):
 
 ```csharp
-public static IAsyncPolicy GetSqlRetryPolicy() =>
-    Policy
-        .Handle<SqlException>(ex => TransientSqlErrorNumbers.Contains(ex.Number))
-        .Or<TimeoutException>()
-        .WaitAndRetryAsync(3, attempt => TimeSpan.FromMilliseconds(200 * Math.Pow(2, attempt)));
+public DataSet ListNoShowReport(DateTime from, DateTime to)
+{
+    using (var conn = Helper.Open(_hospitalId))
+    using (var cmd = Helper.Procedure(conn, "opd.usp_ListNoShowReport"))
+    {
+        Helper.Add(cmd, "@HospitalId", _hospitalId);
+        Helper.Add(cmd, "@FromDate", from);
+        Helper.Add(cmd, "@ToDate", to);
+        return Helper.Sets(cmd);          // Tables[0] = totals, Tables[1] = by status
+    }
+}
 ```
+
+Where a report is two views with no wrapping procedure (`bil.vw_DayEndSummary` +
+`bil.vw_PaymentsByComponent`), add a thin procedure that selects both — schema-additive, not a
+redesign of the views.
+
+### Transactions
+
+Compound work belongs in one procedure, as it already is: `cln.usp_ConfirmSignOff` deducts
+stock, locks the consultation and completes the appointment in one transaction;
+`bil.usp_CreatePayment` recalculates the bill split itself. An operation that genuinely calls
+two procedures together (`SaveDoctorCharge`: doctor settings + fee schedule) gets one
+`DataRepository` method that opens one connection and one `SqlTransaction` and passes it to
+`Helper.Procedure(conn, name, tx)` for both. Avoid `TransactionScope`, which escalates to MSDTC
+when a second connection opens.
+
+### Transient faults
+
+`Helper.Retry` retries 3 times with back-off from 200 ms for SQL error numbers `-2` (timeout),
+`1205` (deadlock victim), `4060`, `40197`, `40501`, `40613`, `49918`–`49920` and `11001`. Retry
+reads and idempotent `MERGE` writes only — `DataRepository` passes `retry: false` for `Create…`
+procedures.
 
 ---
 
-## 5. Business Logic Porting
+## 5. Porting the Business Logic
 
 ### Methodology
 
-For each `data.js` module, go through every exported method and classify
-it into one of three buckets before writing any C#:
+For each `Services/*Service.cs` class, list its public methods and put each in one bucket
+before writing code:
 
-1. **Fully absorbed by the stored procedure.** The procedure already
-   implements the rule end-to-end (e.g. BMI computation in
-   `cln.usp_SaveVitals`'s `MERGE`, soft-delete semantics in
-   `opd.usp_DeleteAllergy`, primary-diagnosis-defaulting in
-   `cln.usp_CreateDiagnosis`). The C# service method is a thin pass-through
-   to the repository plus DTO mapping — no reimplementation needed, but the
-   service-layer unit test should still assert the *contract* (e.g. "first
-   diagnosis on a consultation comes back `IsPrimary = true`") so a future
-   procedure change that breaks the contract fails a test, not production.
+1. **Already in the procedure.** The procedure implements the rule end to end (BMI in
+   `cln.usp_SaveVitals`, soft delete in `opd.usp_DeleteAllergy`, first-diagnosis-is-primary in
+   `cln.usp_CreateDiagnosis`, slot generation in `opd.usp_ListAvailableSlots`). The operation is
+   `DataRepository` call + mapping. Its test asserts the contract ("first diagnosis comes back
+   `IsPrimary = true`") so a procedure change that breaks it fails a test, not production.
+2. **Needs C# in the service.** Input validation, defaults, pivoting a flat result into the
+   contract's shape, password hashing, computing `@SignatureHash`, writing audit entries.
+3. **Safety checks that must not be skippable.** `CheckDrugAllergyConflicts` today is called by
+   the CPOE card before it saves; a caller that skips it can still prescribe. The service runs
+   the check inside `CreatePrescription` itself (§5.4).
+4. **Presentation logic that stays in the page or facade.** The symptom chip cycle, label
+   formatting, `ServiceItemLabel`, `FormatDate` — anything that only shapes what a page shows.
 
-2. **Needs a genuine C# port.** The rule is orchestration or computation
-   that either happens before a database call (request validation,
-   deriving a query parameter) or was never pushed into a procedure because
-   it's read-only/derived and doesn't belong in persistence (e.g. the
-   available-slots response shape used by the front end, the permission
-   matrix pivot from the flat `(Role, Feature, IsGranted)` grid
-   `sec.usp_GetPermissionMatrix` returns into the `{ROLE: {feature: bool}}`
-   object `api.js`'s `getPermissionMatrix` contract promises). This is
-   real work — see the three worked examples below.
+Order (ascending complexity, one engineer per region end to end): **Hospital & configuration →
+Users & permissions → Patients → Scheduling → Consultation core & sign-off → Vitals → Symptoms →
+Diagnoses → Catalog (phrases, formulary) → Prescriptions → Lab → Inventory → Billing → Reports →
+Notifications → Audit & export.**
 
-3. **Pre-flight / defense-in-depth logic that duplicates a procedure on
-   purpose.** A small number of `data.js` methods (drug-allergy conflict
-   checking is the clearest case) exist as safety checks the *client*
-   calls before submitting a write. `cln.usp_CheckDrugAllergyConflicts`
-   already exists as the server-side equivalent (§5.4), but
-   `PEN-TEST-STRATEGY.md` §3.5 explicitly flags that in Phase 1 "the alert
-   fires in UI but can be bypassed by calling the API directly." The C#
-   port for this class of method is therefore not just "call the
-   procedure" — it's "call the procedure from inside
-   `PrescriptionService.CreatePrescriptionAsync` itself, before writing the
-   prescription, not only when the client asks for a pre-check," closing
-   the bypass the pen-test doc identifies.
-
-Go module by module in this order (roughly ascending complexity, and
-matching the SPA's own module boundaries so one engineer can own one
-module's C# port end-to-end): **Config/Reference data → Patients →
-Allergies/Medical History → Scheduling → Consultation core (SOAP, sign-off)
-→ Vitals → Symptoms → Diagnoses/ICD-10 → Phrases → Formulary/Prescriptions
-→ Lab → Billing → Reports → Notifications → Audit/Permissions/Settings.**
-
-### 5.1 Worked example — effective-dated fee lookup
-
-`data.js`'s `getEffectiveFee` is a small, easy-to-get-subtly-wrong
-date-range lookup (open-ended `EffectiveTo`, inclusive boundaries):
-
-```javascript
-// js/data.js
-getEffectiveFee: (doctorId, consultationType, onDate) => {
-  const date = onDate || new Date().toISOString().slice(0, 10);
-  return doctorFeeSchedule.find((f) =>
-    f.DoctorId === doctorId &&
-    f.ConsultationType === consultationType &&
-    f.EffectiveFrom <= date &&
-    (!f.EffectiveTo || f.EffectiveTo >= date));
-},
-```
-
-This is backed by `bil.usp_CheckEffectiveFee`, which must reproduce the
-exact same boundary semantics in T-SQL (`EffectiveFrom <= @OnDate AND
-(EffectiveTo IS NULL OR EffectiveTo >= @OnDate)`). The C# port is a thin
-service wrapper — but it is the place to fix the one real risk in the
-original: a caller passing an invalid/empty date string. The C# version
-makes "today" the actual default via a `TimeProvider`, not a string
-default, and validates `onDate` before it ever reaches SQL:
+### 5.1 Worked example — effective-dated fee lookup (bucket 1 + 2)
 
 ```csharp
-// Consult360.Application/Services/Billing/FeeScheduleService.cs
-public sealed class FeeScheduleService : IFeeScheduleService
+// today: OpdProject/Services/SchedulingService.cs
+public static decimal FlatFee(string doctorId, string category, DateTime onDate)
 {
-    private readonly IBillingRepository _repo;
-    private readonly TimeProvider _clock;
-
-    public async Task<FeeScheduleDto?> GetEffectiveFeeAsync(
-        Guid doctorId, string consultationType, DateOnly? onDate, CancellationToken ct)
-    {
-        var effectiveDate = onDate ?? DateOnly.FromDateTime(_clock.GetUtcNow().DateTime);
-        var row = await _repo.CheckEffectiveFeeAsync(doctorId, consultationType, effectiveDate, ct);
-        return row is null ? null : FeeScheduleDto.FromRow(row);
-    }
+    var f = DataStore.Fees.FirstOrDefault(x => x.DoctorId == doctorId && x.ConsultationType == category
+        && x.EffectiveFrom.Date <= onDate.Date && (!x.EffectiveTo.HasValue || x.EffectiveTo.Value.Date >= onDate.Date));
+    return f != null ? f.FeeAmount : 0;
 }
 ```
 
-Backing procedure (`bil.usp_CheckEffectiveFee`, already written) performs
-the actual range filter in T-SQL — the C# layer's job is only to supply a
-trustworthy default date and map the DTO, matching bucket 1 above.
-
-### 5.2 Worked example — tri-state symptom toggle
-
-The symptom state machine (`UNSET → YES/NO/NOT_ASKED`, cycled by repeated
-clicks in the UI) is persisted by `updateSymptomState`, which is a simple
-upsert in `data.js`:
-
-```javascript
-// js/data.js
-updateSymptomState: (consultationId, symptomCode, newState) => {
-  let row = consultationSymptoms.find((s) => s.ConsultationId === consultationId && s.SymptomCode === symptomCode);
-  if (!row) {
-    row = { SymptomId: nextId('SYMP'), ConsultationId: consultationId, SymptomCode: symptomCode, State: 'UNSET', Duration: null, Severity: null, FreeTextNotes: null };
-    consultationSymptoms.push(row);
-  }
-  row.State = newState;
-  return row;
-},
-```
-
-Two things matter for the C# port that are easy to lose in translation:
-
-- **The tri-state *cycle* itself is UI logic, not data-layer logic** — the
-  comment in `api.js`/`data.js` is explicit that "tri-state cycle handled
-  by the caller, this just persists." The consultation module in the
-  browser decides `UNSET → YES → NO → UNSET` (or whatever the actual cycle
-  order is) and sends the resulting state; the API only ever receives and
-  persists a final state value. The C# service must **not** try to
-  re-derive "next state from current state" — it validates that the
-  incoming state is one of `YES`/`NO`/`NOT_ASKED` (the schema's
-  `CK_cln_ConsultationSymptom_State` CHECK constraint enum) and persists it
-  as given, exactly matching the original's division of responsibility.
-- **The upsert-with-default-row pattern** is business logic worth keeping
-  explicit in the service layer, not hidden purely in the procedure's
-  `MERGE`, because the DTO returned to the client needs the same shape
-  whether the row existed before or not:
+`bil.usp_CheckEffectiveFee` applies the same inclusive range in T-SQL. The C# part is the
+default date: "today" must be the **hospital's** today (its timezone), not the server's, so a
+fee that changes at midnight in Kingston is right for a server in UTC.
 
 ```csharp
-// Consult360.Application/Services/Consultations/SymptomService.cs
-public sealed class SymptomService : ISymptomService
+// DOCNyleUnifiedAPI/DOCNyleUnifiedAPI.svc.cs — #region Scheduling
+public FeeSchedule CheckEffectiveFee(string doctorId, string consultationType, DateTime? onDate)
 {
-    private static readonly HashSet<string> AllowedStates = new(StringComparer.Ordinal)
-        { "YES", "NO", "NOT_ASKED" };
-
-    public async Task<ConsultationSymptomDto> UpdateStateAsync(
-        Guid consultationId, string symptomCode, string newState, Guid hospitalId, CancellationToken ct)
+    return Run(() =>
     {
-        if (!AllowedStates.Contains(newState))
-            throw new ValidationException($"'{newState}' is not a valid symptom state.");
-
-        // cln.usp_UpdateSymptomState performs the find-or-create MERGE itself;
-        // the service's job is input validation plus DTO mapping, matching
-        // bucket 1 for the persistence rule and bucket 2 for the state-value
-        // contract enforcement that data.js never had to do (JS has no enums).
-        var row = await _repo.UpdateSymptomStateAsync(consultationId, symptomCode, newState, hospitalId, ct);
-        return ConsultationSymptomDto.FromRow(row);
-    }
+        var caller = Authorize("scheduling");
+        var date = (onDate ?? caller.HospitalToday).Date;      // CallerContext knows the hospital's zone
+        var row = Repo(caller).CheckEffectiveFee(doctorId, consultationType, date);
+        return row == null ? null : ToFeeSchedule(row);
+    });
 }
 ```
 
-### 5.3 Worked example — slot-generation algorithm
+The facade keeps `FlatFee` returning `0` when there is no row, as the pages expect.
 
-`listAvailableSlots` is the clearest case of genuine algorithmic logic in
-`data.js` — it walks a doctor's weekly schedule in fixed-size increments
-and marks which slots are already booked:
-
-```javascript
-// js/data.js
-listAvailableSlots: (doctorId, hospitalId, dateStr) => {
-  const dayNames = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
-  const dayOfWeek = dayNames[new Date(dateStr).getDay()];
-  const config = doctorSlotConfig.find((s) => s.DoctorId === doctorId && s.DayOfWeek === dayOfWeek && s.IsActive);
-  if (!config) return [];
-  const booked = appointments
-    .filter((a) => a.DoctorId === doctorId && a.SlotStart.slice(0, 10) === dateStr && a.Status !== 'CANCELLED')
-    .map((a) => a.SlotStart);
-  const slots = [];
-  const [startH, startM] = config.StartTime.split(':').map(Number);
-  const [endH, endM] = config.EndTime.split(':').map(Number);
-  let current = startH * 60 + startM;
-  const end = endH * 60 + endM;
-  while (current + config.SlotDurationMinutes <= end) {
-    const hh = String(Math.floor(current / 60)).padStart(2, '0');
-    const mm = String(current % 60).padStart(2, '0');
-    const slotStart = `${dateStr}T${hh}:${mm}:00`;
-    const nextMin = current + config.SlotDurationMinutes;
-    /* ...builds slotEnd the same way... */
-    slots.push({ SlotStart: slotStart, SlotEnd: slotEnd, IsBooked: booked.includes(slotStart) });
-    current = nextMin;
-  }
-  return slots;
-},
-```
-
-This exact algorithm has **already been ported to T-SQL** in
-`opd.usp_ListAvailableSlots`, using a recursive CTE to walk the same
-minute-increment loop and a day-of-week lookup table to avoid
-locale-dependent `DATENAME`:
-
-```sql
-;WITH Slots AS (
-    SELECT CAST(@StartTime AS TIME) AS SlotTimeStart
-    UNION ALL
-    SELECT DATEADD(MINUTE, @DurationMin, SlotTimeStart) FROM Slots
-    WHERE DATEADD(MINUTE, @DurationMin, SlotTimeStart) < CAST(@EndTime AS TIME)
-)
-SELECT
-    CONVERT(NVARCHAR(10), @AppointmentDate, 23) + 'T' + FORMAT(SlotTimeStart, 'HH\:mm') + ':00' AS SlotStart,
-    CONVERT(NVARCHAR(10), @AppointmentDate, 23) + 'T' + FORMAT(DATEADD(MINUTE, @DurationMin, SlotTimeStart), 'HH\:mm') + ':00' AS SlotEnd,
-    CASE WHEN EXISTS (SELECT 1 FROM opd.Appointment a WHERE ... AND a.Status <> 'CANCELLED') THEN 1 ELSE 0 END AS IsBooked
-FROM Slots
-OPTION (MAXRECURSION 200);
-```
-
-This is a bucket-1 case: the algorithm is already fully implemented
-server-side, and the C# service is deliberately a thin pass-through —
-**but** it is exactly the kind of logic where "thin pass-through" still
-needs a real regression test, because a subtle SQL/JS mismatch here (an
-off-by-one on the loop boundary, an inclusive vs. exclusive end time) would
-silently double-book or drop the last slot of the day. The parity test for
-this endpoint (§11) runs the same `(doctorId, date)` inputs against both
-the Phase 1 `data.js` implementation and the Phase 4 API and diffs the
-returned slot arrays element-for-element, specifically because this is
-loop/boundary logic, not a simple filter:
+### 5.2 Worked example — the symptom chip cycle (bucket 4)
 
 ```csharp
-// Consult360.Application/Services/Scheduling/SchedulingService.cs
-public async Task<IReadOnlyList<AvailableSlotDto>> ListAvailableSlotsAsync(
-    Guid doctorId, Guid hospitalId, DateOnly date, CancellationToken ct)
+// today: OpdProject/Services/ConsultationService.cs
+public static string CycleSymptom(string consultationId, string code)
 {
-    var rows = await _repo.ListAvailableSlotsAsync(doctorId, hospitalId, date, ct);
-    // No re-derivation of the slot grid in C# — opd.usp_ListAvailableSlots is the
-    // single source of truth for slot boundaries, matching data.js's contract that
-    // "no config for that weekday" returns an empty array, not an error.
-    return rows.Select(AvailableSlotDto.FromRow).ToList();
+    var row = DataStore.Symptoms.FirstOrDefault(s => s.ConsultationId == consultationId && s.SymptomCode == code);
+    if (row == null) { row = new ConsultationSymptom { … State = "UNSET" }; DataStore.Symptoms.Add(row); }
+    row.State = row.State == "UNSET" ? "YES" : row.State == "YES" ? "NO" : "UNSET";
+    return row.State;
 }
 ```
 
-### 5.4 Worked example — drug-allergy conflict checking (bucket 3)
-
-`checkDrugAllergyConflicts` combines a direct substring match against the
-patient's active allergies with a hard-coded penicillin-class rule:
-
-```javascript
-// js/data.js
-checkDrugAllergyConflicts: (patientId, medicineName, composition) => {
-  const allergies = patientAllergies.filter((a) => a.PatientId === patientId && a.Status === 'ACTIVE');
-  const alerts = [];
-  const drugLower = (medicineName + ' ' + (composition || '')).toLowerCase();
-  allergies.forEach((a) => {
-    const allergyLower = a.AllergyName.toLowerCase();
-    if (drugLower.includes(allergyLower) || allergyLower.includes(medicineName.toLowerCase().split(' ')[0])) {
-      alerts.push({ Severity: 'CRITICAL', AllergyName: a.AllergyName, AllergySeverity: a.Severity, Message: `...` });
-    }
-    if (allergyLower.includes('penicillin') && (drugLower.includes('amoxicillin') || drugLower.includes('ampicillin') || drugLower.includes('penicillin') || drugLower.includes('augmentin'))) {
-      if (!alerts.some((al) => al.AllergyName === a.AllergyName)) alerts.push({ /* ... */ });
-    }
-  });
-  return alerts;
-},
-```
-
-`cln.usp_CheckDrugAllergyConflicts` already reproduces this exact
-substring/class logic in T-SQL. The genuine C# work here is **not**
-reimplementing the matcher — it's closing the bypass path
-`PEN-TEST-STRATEGY.md` §3.5 calls out by name ("Bypass drug-allergy check
-— Alert fires in UI but can be bypassed by calling the API directly"):
+The cycle (`UNSET → YES → NO → UNSET`) is how the chip behaves, not a data rule. The contract
+only persists a final state: `UpdateSymptomState(consultationId, symptomName, state)` with
+`YES` / `NO` / `NOT_ASKED`. So the **facade** computes the next state and sends it; the service
+validates the value against the `CK_cln_ConsultationSymptom_State` set and never re-derives it.
 
 ```csharp
-// Consult360.Application/Services/Prescriptions/PrescriptionService.cs
-public async Task<PrescriptionDto> CreatePrescriptionAsync(
-    CreatePrescriptionRequest req, Guid hospitalId, CancellationToken ct)
+// OpdProject/Services/ConsultationService.cs — facade after the switch
+public static string CycleSymptom(string consultationId, string code)
 {
-    // Server-side enforcement: the same check the SPA runs client-side before
-    // submitting is run again here, unconditionally, before the write. The
-    // caller cannot skip it by calling POST /consultations/{id}/prescriptions
-    // directly — closing PEN-TEST-STRATEGY.md §3.5's "bypass drug-allergy
-    // check" finding for Phase 4.
-    var conflicts = await _drugAllergyCheck.CheckAsync(
-        req.PatientId, req.MedicineName, req.Composition, ct);
-
-    var critical = conflicts.Where(c => c.Severity == "CRITICAL").ToList();
-    if (critical.Count > 0 && !req.OverrideAcknowledged)
-    {
-        // Non-blocking by product design (data.js/UI never hard-blocks either) —
-        // but the override must be explicit and is what gets audited, not silently
-        // accepted.
-        return PrescriptionDto.RequiresOverride(critical);
-    }
-    if (critical.Count > 0 && req.OverrideAcknowledged)
-    {
-        await _audit.RecordAsync(new AuditEntry(hospitalId, req.PrescriberUserId,
-            "OVERRIDE", "Prescription", null,
-            $"Drug-allergy alert overridden for {req.MedicineName}"), ct);
-    }
-
-    var created = await _repo.CreatePrescriptionAsync(req, hospitalId, ct);
-    return PrescriptionDto.FromRow(created);
+    var current = GetSymptomStates(consultationId);          // ListConsultationSymptoms
+    string state;
+    current.TryGetValue(code, out state);
+    var next = state == "YES" ? "NO" : state == "NO" ? "NOT_ASKED" : "YES";
+    DocNyle.Call(api => { api.UpdateSymptomState(consultationId, code, next); return 0; });
+    return next == "NOT_ASKED" ? "UNSET" : next;              // the chip still shows UNSET
 }
 ```
 
-This preserves the product's non-blocking-alert philosophy (the doctor can
-still prescribe after acknowledging) while making the check something the
-server enforces rather than something the client merely happens to call.
+### 5.3 Worked example — slot generation (bucket 1, parity-critical)
 
-### Module-by-module bucket summary
+`SchedulingService.ListAvailableSlots` walks each weekly window in steps of slot + buffer,
+returns nothing on leave days, and marks a slot booked when it overlaps a non-cancelled
+appointment plus the buffer:
 
-| Module | Representative methods | Bucket |
+```csharp
+for (int m = ToMinutes(w.StartTime); m + slot <= wEnd; m += slot + buffer)
+{
+    int end = m + slot;
+    slots.Add(new TimeSlot { SlotStart = day.AddMinutes(m), SlotEnd = day.AddMinutes(end),
+                             IsBooked = taken.Any(t => m < t.End && end + buffer > t.Start) });
+}
+```
+
+`opd.usp_ListAvailableSlots` implements the same walk with a recursive CTE. The operation is a
+pass-through — but an off-by-one at a window's end or a different overlap test would silently
+drop the last slot or double-book. The parity test (§12) runs the same doctor/date/duration
+inputs through the in-memory method and through the `ListAvailableSlots` operation and compares
+the slot lists element by element, including days with several windows, leave days, a fully
+booked day, and a slot that exactly fills the window.
+
+### 5.4 Worked example — drug-allergy check made non-bypassable (bucket 3)
+
+`ConsultationService.CheckDrugAllergyConflicts` (substring match plus the penicillin-class
+rule) is mirrored by `cln.usp_CheckDrugAllergyConflicts`. Today the CPOE card calls it and then
+calls `AddPrescription`; nothing stops a caller from calling only the second. In the service,
+`CreatePrescription` runs the check itself:
+
+```csharp
+// DOCNyleUnifiedAPI/DOCNyleUnifiedAPI.svc.cs — #region Consultation
+public Prescription CreatePrescription(string consultationId, CreatePrescriptionRequest request)
+{
+    return Run(() =>
+    {
+        var caller = Authorize("consultation");
+        var repo = Repo(caller);
+        var critical = repo.CheckDrugAllergyConflicts(request.PatientId, request.MedicineName, request.Composition)
+                           .AsEnumerable().Where(r => r.Field<string>("Severity") == "CRITICAL").ToList();
+        if (critical.Count > 0 && request.AllergyOverrideAcknowledged != true)
+            throw Conflict("Allergy alert must be acknowledged before prescribing.");
+
+        if (critical.Count > 0)
+            Audit(caller, "OVERRIDE", "Prescription", null, "Drug-allergy alert overridden for " + request.MedicineName);
+
+        var row = repo.CreatePrescription(consultationId, ToPrescriptionInput(request));
+        Audit(caller, "CREATE", "Prescription", Helper.Get<Guid>(row, "PrescriptionId").ToString(), request.MedicineName);
+        return ToPrescription(row);
+    });
+}
+```
+
+This keeps the product's non-blocking behavior (the doctor can still prescribe after
+acknowledging) while the server, not the page, enforces it. `AllergyOverrideAcknowledged` is a
+new optional member of `CreatePrescriptionRequest`; add it to `API-SPECIFICATION.md` §6 when
+this lands.
+
+### 5.5 Worked example — sign-off (bucket 1 + 2)
+
+`ConsultationService.SignOff` today hashes `consultationId:doctorId:ticks`, adds the
+attestation, locks the record and completes the appointment; stock is consumed separately by
+`InventoryService.ConsumeForConsultation`. `cln.usp_ConfirmSignOff` does all of it — including
+stock — in one transaction and throws 50040 when stock is short. The C# work: compute
+`@SignatureHash` as a real hash (SHA-256 over the signed SOAP text, diagnoses and prescriptions,
+not a base64 of ids), take the doctor from the caller (a doctor can only sign their own
+consultation), and let `Run` map 50040 to a `BusinessRule` fault whose message lists the
+shortages. The facade drops its separate `ConsumeForConsultation` call.
+
+### Module bucket summary
+
+| Module (current class) | Representative methods | Bucket |
 |---|---|---|
-| Patients | `searchPatients`, `createPatient` (MRN generation), `updatePatient` | 1 — procedures already implement search/MRN/upsert |
-| Allergies | `createAllergy`, `deleteAllergy` (soft delete → `Status='INACTIVE'`, mapped to schema's `RESOLVED` — see API-SPEC "Known Gaps" #1) | 1, with a documented semantic gap to resolve or accept |
-| Scheduling | `listAvailableSlots` | 1, but algorithmic — needs the parity test in §11, not just a contract test |
-| Consultation core | `getOrCreateConsultation`, `confirmSignOff` (4-point attestation, locks record) | 1 for persistence; 2 for the "reject writes to a locked consultation" guard, which must be enforced in the service layer *and* the procedure (defense in depth, since `saveSoapNotes` etc. are separate calls) |
-| Vitals | `saveVitals` | 1 — BMI computed in the procedure's `MERGE`, more complete than `data.js` itself (see §5.1's callout) |
-| Symptoms | `updateSymptomState` | 2 — state-value validation genuinely belongs in C#, cycle logic stays client-side |
-| Diagnoses | `createDiagnosis` (first diagnosis defaults `isPrimary`) | 1 |
-| Prescriptions | `createPrescription`, `checkDrugAllergyConflicts` | 3 — see §5.4 |
-| Billing | `getEffectiveFee`, `recalculateInvoiceTotals`, `cancelInvoice` (issues a credit note) | 1, with the date-default fix in §5.1 |
-| Reports | all `list*Report` methods | 1 — pure aggregation queries/views |
-| Audit | `recordAuditEntry` | 2 — server must populate `IpAddress`/`UserAgent` itself (client-supplied values are not trustworthy for an audit trail; `data.js`'s comment already flags these as "server-populated in Phase 4+") |
+| `HospitalService` | `GetHospital`, `SaveSettings`, `ListVitalsConfig`, `SaveHospitalCompliance` | 1 |
+| `UserService` | `Authenticate`, `CreateUser`, `TogglePermission`, `GetPermissionMatrix` | 2 — password hashing, matrix pivot |
+| `PatientService` | `Search`, `Create` (MRN), `SaveAllergy`, `SaveMedicalHistory`, `AddCoverage` | 1; `FindDuplicate` has no procedure yet (Known Gaps) |
+| `SchedulingService` | `ListAvailableSlots`, `UpdateStatus`, `SaveDoctorProfile`, `SaveDoctorCharge` | 1, parity-critical; status moves → `Conflict` fault |
+| `ConsultationService` | `GetOrCreate`, `SaveVitals`, `CycleSymptom`, `AddPrescription`, `SignOff` | 1 / 3 / 4 — see §5.2, 5.4, 5.5 |
+| `CatalogService`, `PhraseService` | `SearchFormulary`, `ToggleFavorite`, `ListVisiblePhrases` | 1; `ToggleFavorite` becomes Create/Delete in the facade |
+| `LabService` | `SubmitResult`, `MarkReviewed`, `ClaimOrder`, attachments | 1; claim-by-mobile and attachments need procedures (Known Gaps) |
+| `BillingService` | `GenerateInvoiceForConsultation`, `RecalculateTotals`, `ApplyCoverage`, `RecordPayment` | 1 for each procedure; 2 for invoice generation, which orchestrates charge + lines + recalc |
+| `InventoryService` | `ReceiveStock`, `AdjustStock`, `Shortages` | 1 |
+| `ReportService`, `NotificationService`, `ExportService`, `AuditService` | reports, queue, CSV export, audit | 1; 2 for audit IP / user agent (taken from the request, not the caller) |
+| `ConsultationConfigService`, `UserNotificationService` | form designer, in-app notifications | Not migrated yet — no procedures (Known Gaps); stay on `DataStore` until they exist |
 
 ---
 
-## 6. API Layer / Controllers
+## 6. The Service — DOCNyleUnifiedAPI.svc
 
-Controllers are organized to match the SPA's own module boundaries and
-`API-SPECIFICATION.md`'s section breakdown (13 controllers for 130
-endpoints), not a generic CRUD-per-table scaffold. Every controller action
-maps to exactly one row in `API-SPECIFICATION.md`; the specification
-document remains the source of truth for exact routes/params/shapes and is
-not re-derived here — see §14 for the pointer and a representative sample
-per module.
+`API-SPECIFICATION.md` is the contract; this section covers how to build it in the two files of
+the service project.
 
-### Conventions
+### 6.1 `IDOCNyleUnifiedAPI.cs`
 
-- `[ApiController]` on every controller — automatic 400 responses for
-  invalid model state, automatic `[FromBody]` inference.
-- DTOs, never entity/row types, cross the controller boundary in either
-  direction. `Consult360.Domain` row types (`PatientRow`, `AppointmentRow`,
-  …) never appear in a controller signature.
-- Validation via FluentValidation validators registered in
-  `Consult360.Application`, invoked through
-  `AddFluentValidationAutoValidation()` so a bad request never reaches a
-  service method — this replaces `data.js`'s inline validation
-  (`DATA-LAYER-ARCHITECTURE.md` §8's length/format/enum checks) with the
-  same rules expressed as validator classes, one per DTO.
-- Routing follows `API-SPECIFICATION.md` literally — nested resource routes
-  (`/patients/{id}/allergies`, `/consultations/{id}/vitals`) map to
-  `[Route("api/patients/{patientId:guid}/allergies")]`-style attribute
-  routes on the owning controller, not a flat route table.
-- API versioning: URL-segment versioning (`/api/v1/...`) from day one via
-  `Asp.Versioning.Http`, even though only one version exists at cutover —
-  this avoids a breaking route change the first time the API needs to
-  evolve independently of the SPA.
-- Global exception handling middleware converts unhandled exceptions into
-  a consistent JSON error envelope (`{ "error": { "code", "message",
-  "traceId" } }`) and — per `PEN-TEST-STRATEGY.md` §3.6 — never leaks stack
-  traces or file paths outside `Development`.
+- One `[ServiceContract(Namespace = Ns.V1)] public interface IDOCNyleUnifiedAPI`, with
+  `#region`s in the order of the spec (§1 Auth … §13 Audit & export). Every operation has
+  `[OperationContract]` and `[FaultContract(typeof(ServiceFault))]`.
+- Operation name = procedure name without schema and `usp_` — unique across the whole contract.
+- After the interface, the `[DataContract]` classes, grouped in the same regions, then
+  `ServiceFault`, `FaultCode`, `FieldError` and the `Ns` constant
+  (`http://schemas.consult360.com/opd/2026/10`). Data contracts implement
+  `IExtensibleDataObject`, number every member (`Order`) and only ever gain members. Dates follow
+  spec §0.8.
+- The file will be long (≈ 200 operations and their types). Keep it navigable with regions; if it
+  becomes unwieldy, the data contracts can move to `partial` or extra files later without
+  changing the contract — the spec does not depend on the file split.
 
-### Worked example — `PatientsController.GetPatient`
+### 6.2 `DOCNyleUnifiedAPI.svc.cs`
 
 ```csharp
-[ApiController]
-[Route("api/v1/patients")]
-[Authorize(Policy = "RequirePatients")]
-public sealed class PatientsController : ControllerBase
+[ServiceBehavior(InstanceContextMode = InstanceContextMode.PerCall, ConcurrencyMode = ConcurrencyMode.Multiple,
+                 Namespace = Ns.V1)]
+public class DOCNyleUnifiedAPI : IDOCNyleUnifiedAPI
 {
-    private readonly IPatientService _service;
-    private readonly IAuditService _audit;
-    private readonly IHospitalContextAccessor _hospitalContext;
+    #region Patients
 
-    [HttpGet("{id:guid}")]
-    public async Task<ActionResult<PatientDto>> GetPatient(Guid id, CancellationToken ct)
+    public Patient GetPatient(string patientId)
     {
-        var patient = await _service.GetPatientAsync(id, ct);
-        if (patient is null) return NotFound();
+        return Run(() =>
+        {
+            var caller = Authorize("patients");
+            var row = Repo(caller).GetPatient(patientId);
+            if (row == null) throw NotFound("Patient not found.");
+            Audit(caller, "READ", "Patient", patientId);
+            return ToPatient(row);
+        });
+    }
 
-        // AUDIT: API-SPECIFICATION.md §3 requires a READ audit entry on this route.
-        await _audit.RecordAsync(new AuditEntry(
-            _hospitalContext.HospitalId, _hospitalContext.UserId,
-            "READ", "Patient", id.ToString(), null), ct);
+    #endregion
 
-        return Ok(patient);
+    #region Plumbing
+
+    private static DataRepository Repo(CallerContext c) { return new DataRepository(c.HospitalId, c.UserId); }
+
+    private CallerContext Authorize(string feature) { /* §7.2 / §7.3 */ }
+
+    private void Audit(CallerContext c, string action, string entityType, string entityId, string details = null)
+    { /* Repo(c).RecordAuditEntry(…) with the forwarded client IP / user agent headers */ }
+
+    private static T Run<T>(Func<T> body) { /* §6.3 */ }
+
+    #endregion
+}
+```
+
+Every operation has the same shape: `Authorize` → validate → `DataRepository` → map → `Audit`,
+inside `Run`. No SQL and no static state in this class. Row → contract mapping methods
+(`ToPatient(DataRow)`, …) sit at the end of each region.
+
+```xml
+<%@ ServiceHost Language="C#" Service="DOCNyleUnifiedAPI.DOCNyleUnifiedAPI" CodeBehind="DOCNyleUnifiedAPI.svc.cs" %>
+```
+
+### 6.3 Faults — `Run`
+
+```csharp
+private static T Run<T>(Func<T> body)
+{
+    try { return body(); }
+    catch (FaultException<ServiceFault>) { throw; }                        // NotFound(), Conflict(), Validation()…
+    catch (SqlException ex) when (ex.Number == 50121 || ex.Number == 50122)
+    { throw Fault(FaultCode.Conflict, ex.Message, ex.Number); }
+    catch (SqlException ex) when (ex.Number >= 50000 && ex.Number < 60000)
+    { throw Fault(FaultCode.BusinessRule, ex.Message, ex.Number); }
+    catch (Exception ex)
+    {
+        Log.Error(ex, CorrelationId);                                       // full detail stays on the server
+        throw Fault(FaultCode.Internal, "Something went wrong. Reference: " + CorrelationId, null);
     }
 }
 ```
 
-### Worked example — `ConsultationsController.SaveVitals`
+The `NotFound`, `Conflict`, `Validation`, `Unauthenticated` and `Forbidden` helpers build
+`FaultException<ServiceFault>` with the codes in spec §0.6. `includeExceptionDetailInFaults`
+stays `false` outside Debug, so stack traces and SQL text never reach the site.
 
-```csharp
-[ApiController]
-[Route("api/v1/consultations/{consultationId:guid}/vitals")]
-[Authorize(Policy = "RequireConsultation")]
-public sealed class VitalsController : ControllerBase
-{
-    private readonly IVitalsService _service;
+### 6.4 Audit
 
-    [HttpGet]
-    public async Task<ActionResult<VitalsDto>> GetVitals(Guid consultationId, CancellationToken ct)
-    {
-        var vitals = await _service.GetVitalsAsync(consultationId, ct);
-        return vitals is null ? NotFound() : Ok(vitals);
-    }
-
-    [HttpPost]
-    public async Task<ActionResult<VitalsDto>> SaveVitals(
-        Guid consultationId, [FromBody] SaveVitalsRequest req, CancellationToken ct)
-    {
-        var hospitalId = HttpContext.Items["HospitalId"] as Guid? ?? throw new UnauthorizedAccessException();
-        var saved = await _service.SaveVitalsAsync(consultationId, hospitalId, req, ct);
-        // cln.usp_SaveVitals is a no-op against a locked consultation per the
-        // API spec ("no-op if isLocked"); the service returns the current row
-        // either way, so the response contract matches data.js's saveVitals,
-        // which never itself checked IsLocked — the lock guard lives in the
-        // procedure/service, not duplicated ad hoc per field.
-        return Ok(saved);
-    }
-}
-```
-
-### Worked example — `PrescriptionsController.CreatePrescription`
-
-```csharp
-[HttpPost]
-[Route("api/v1/consultations/{consultationId:guid}/prescriptions")]
-[Authorize(Policy = "RequireConsultation")]
-public async Task<ActionResult<PrescriptionDto>> CreatePrescription(
-    Guid consultationId, [FromBody] CreatePrescriptionRequest req, CancellationToken ct)
-{
-    req = req with { ConsultationId = consultationId };
-    var hospitalId = _hospitalContext.HospitalId;
-    var result = await _service.CreatePrescriptionAsync(req, hospitalId, ct);
-
-    if (result.RequiresOverride)
-        return Conflict(result); // 409 — client must resubmit with OverrideAcknowledged=true
-
-    await _audit.RecordAsync(new AuditEntry(hospitalId, _hospitalContext.UserId,
-        "CREATE", "Prescription", result.PrescriptionId.ToString(), null), ct);
-    return CreatedAtAction(nameof(GetPrescription), new { consultationId, id = result.PrescriptionId }, result);
-}
-```
-
-### Response envelope
-
-`api.js`'s Phase 1 contract wraps every value in a resolved `Promise` with
-no error envelope (`ok(value)` — errors throw as JS exceptions). Phase 4
-keeps successful responses as bare JSON bodies (matching the shapes in
-`API-SPECIFICATION.md` exactly, so `api.js`'s `fetch()` bodies need no
-unwrapping logic beyond `response.json()`), and standardizes only the
-**error** shape via the exception-handling middleware, since Phase 1 never
-had a consistent error contract to begin with — `api.js`'s Phase 4 `fetch`
-bodies check `response.ok` and throw a JS `Error` built from the envelope's
-`message` field for any non-2xx response, preserving today's
-throw-on-failure calling convention for UI modules.
+Operations marked **Audited** in the spec write their entry themselves through `Audit(...)`
+(`DataRepository.RecordAuditEntry` → `sec.usp_RecordAuditEntry`), with the IP and user agent of
+the original browser request — the site forwards those in two optional headers (`ClientIp`,
+`ClientUserAgent`) next to `SessionToken`. The `BasePage.Audit(...)` calls pages make today for
+other events become the `RecordAuditEntry` operation. Where a page and an audited operation would
+now both record the same event (for example `patient-allergies-body.ascx.cs` after
+`DeleteAllergy`), remove the page's call when that module switches over.
 
 ---
 
 ## 7. Authentication, Authorization & Multi-Tenancy
 
-### Replacing `session-manager.js` / `app-context.js`
+### 7.1 From `AppSession` to a service session
 
-Phase 1's session model is entirely client-side: `session-manager.js`
-generates a random token in the browser, stores it in `localStorage`,
-enforces "one active session per user" via a `storage` event listener
-across tabs, and auto-expires after 15 minutes of inactivity — none of
-which the server can trust or verify (`PEN-TEST-STRATEGY.md` §3.1 flags
-exactly this: "Session in JavaScript memory," "Vertical privilege
-escalation... AppContext stores role in JS memory — can be modified via
-dev tools"). `app-context.js`'s `_session.userRole`/`hospitalId` are
-similarly just JS variables set at login with no server-side verification
-on subsequent calls.
+Today `AppSession` keeps the signed-in `UserId` in ASP.NET InProc session (15-minute timeout,
+`Web.config`) and `UserService.Authenticate` compares the plain password in `DataStore`. Phase 4:
 
-Phase 4 replaces this with a **hybrid JWT + server-tracked session**
-design, because the schema already anticipates both halves of it:
-`sec.usp_AuthenticateUser`, `sec.usp_CreateUserSession`, and
-`sec.usp_CheckSessionValid` exist in `stored-procedures.sql` — a
-`sec.UserSession` table backing real server-side session tracking already
-exists in the schema, it's simply unused by the Phase 1 client-only
-implementation.
+1. `login.aspx` calls the `AuthenticateUser` operation with the email and password.
+2. On success the site generates a random 256-bit token and calls `CreateUserSession` with an
+   expiry matching the session timeout; `sec.UserSession` holds it.
+3. `AppSession.SignIn` stores both the `UserId` and the token (`AppSession.ServiceToken`).
+   `Web/DocNyle.cs` adds the token to every outgoing call.
+4. `AppSession.SignOut` ends the ASP.NET session; the `sec.UserSession` row expires or is revoked
+   (an admin can revoke it — not possible today).
+5. `BasePage` treats an `Unauthenticated` fault like a lost session: sign out and redirect to
+   `login.aspx?returnUrl=…`, which it already does for an expired session.
 
-- **JWT bearer token** — issued at login, contains `sub` (UserId), `role`,
-  and a `HospitalId` claim. Every subsequent request is authenticated by
-  validating this token's signature and expiry (stateless, no DB round trip
-  needed for authorization itself). Short-lived (e.g. 15 minutes, matching
-  the SPA's existing inactivity window) with a refresh-token flow, since
-  ASP.NET Core Identity's default cookie model doesn't fit a pure API +
-  separately-hosted SPA well — bearer tokens do.
-- **Server-side `sec.UserSession` row per login** — created via
-  `sec.usp_CreateUserSession` at the same time the JWT is issued. This
-  row is what gives Phase 4 the "only one active session per user" behavior
-  `session-manager.js` today only approximates via `localStorage` (which
-  fails across different browsers/devices and can't be revoked by an
-  admin). `sec.usp_CheckSessionValid` backs an explicit
-  `GET /auth/session` endpoint the SPA can poll instead of trusting its own
-  `localStorage` — and an admin-initiated revoke (`ADMIN_REVOKE`, already a
-  reason code `session-manager.js`'s expired-modal UI anticipates) becomes
-  possible for the first time, by simply invalidating the session row.
-- **Password hashing** — `sec.ApplicationUser.PasswordHash` currently holds
-  literal demo strings (`'demo123'`) in the seed data; `PEN-TEST-STRATEGY.md`
-  §4 flags this as a Critical pre-test item ("Hash passwords — bcrypt/scrypt
-  in Phase 2"). `sec.usp_AuthenticateUser` compares `@PasswordHash` as
-  received, so the **hashing happens in C#** (via
-  `Microsoft.AspNetCore.Identity.PasswordHasher<T>` or `BCrypt.Net-Next`)
-  before the hash is ever sent to the procedure — the procedure's contract
-  (compare a hash to a stored hash) does not need to change, only what the
-  application computes and stores as that hash. Seed data must be
-  re-hashed as part of database seeding (§10), not left as plaintext.
-- **Login rate limiting** — ASP.NET Core's built-in `Microsoft.AspNetCore.
-  RateLimiter` middleware, a fixed-window limiter on `POST /auth/login`
-  keyed by IP + attempted email, closing `PEN-TEST-STRATEGY.md` §4 item 2
-  ("5 failures → 15-minute lockout").
+`AppSession.CurrentUser` re-reads the user each request so a disabled account loses access at
+once. Keep that, but cache the user for the request (`HttpContext.Items`) so one page does not
+call the service several times for it.
 
-### `HospitalId` scoping — server-enforced, not client-supplied
+### 7.2 Session validation — `Authorize`, part 1
 
-`api.js`'s `_hid()` helper is a **convenience default**, not a security
-boundary — every hospital-scoped method signature accepts an explicit
-`hospitalId` parameter that the caller *could* override, and Phase 1 has
-no server to reject a mismatched one. `PEN-TEST-STRATEGY.md` §3.4 names
-this directly: "`_hid()` injects session hospital as fallback — but
-doesn't reject explicit wrong IDs... Phase 2: server middleware must
-REJECT any request where provided HospitalId ≠ JWT HospitalId."
+`Authorize(feature)` reads the `SessionToken` header from
+`OperationContext.Current.IncomingMessageHeaders` (missing → `Unauthenticated`), validates it with
+`DataRepository.CheckSessionValid` (`sec.usp_CheckSessionValid`; cache valid tokens in
+`MemoryCache` for up to 60 seconds), loads the user, roles, `HospitalId` and the hospital's time
+zone, and returns a `CallerContext`. `AuthenticateUser` and `CreateUserSession` are the only
+operations that do not call `Authorize`.
 
-Phase 4 implements this as `HospitalContextMiddleware`:
+### 7.3 Permissions — `Authorize`, part 2
 
-```csharp
-public sealed class HospitalContextMiddleware
-{
-    private readonly RequestDelegate _next;
+Then it checks the caller's roles against `sec.PermissionMatrix` (per hospital; cache per
+hospital for a short time and clear it when `UpdatePermission` runs) and throws `Forbidden` when
+no role grants the feature. It is the server twin of `BasePage.RequiredPermission` /
+`BasePage.Can(...)`, which stay for hiding pages and buttons. Both read the same matrix — the
+site's checks call the `GetPermissionMatrix` operation once per session instead of reading
+`DataStore.Permissions`, so there is one source of truth.
 
-    public async Task InvokeAsync(HttpContext context, ISessionContextSetter sessionContext)
-    {
-        var claim = context.User.FindFirst("HospitalId");
-        if (claim is null || !Guid.TryParse(claim.Value, out var hospitalId))
-        {
-            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            return;
-        }
+Features in use: `consultation`, `patients`, `scheduling`, `billing`, `reports`, `print`,
+`lab_portal`, `admin_hospital`, `admin_scheduling`, `admin_consultation`, `admin_vitals`,
+`admin_specialty`, `admin_formulary`, `admin_phrases`, `admin_inventory`, `admin_users`,
+`audit_log`, `data_export`, `data_import`.
 
-        // Any client-supplied HospitalId in the query string or body is
-        // IGNORED for authorization purposes — this claim is the only source
-        // of truth, closing PEN-TEST-STRATEGY.md §3.4's IDOR finding.
-        context.Items["HospitalId"] = hospitalId;
+### 7.4 Tenancy and Row-Level Security
 
-        // Set SQL Server SESSION_CONTEXT for this connection's lifetime so
-        // the database's own Row-Level Security policy (architecture §6)
-        // enforces the same boundary even if application code has a bug.
-        await sessionContext.SetHospitalIdAsync(hospitalId);
+`HospitalId` comes only from `CallerContext`. No data contract has a `HospitalId` member as
+input; a record id from another hospital is reported as `NotFound`. `DataRepository` is
+constructed with the caller's `HospitalId`, passes it to every procedure, and `Helper.Open` sets
+`SESSION_CONTEXT('HospitalId')` read-only on every connection. The deployment applies the RLS
+policies from `DATA-LAYER-ARCHITECTURE.md` §6 to every hospital-scoped table. The procedures still
+filter on `@HospitalId` explicitly — RLS is the backstop if a new procedure forgets.
 
-        await _next(context);
-    }
-}
-```
+### 7.5 Passwords
 
-Controllers and services read `HttpContext.Items["HospitalId"]` (or an
-injected `IHospitalContextAccessor` wrapping it), never a client-supplied
-value, for every repository call that needs a `HospitalId` parameter.
-
-### Row-Level Security
-
-`DATA-LAYER-ARCHITECTURE.md` §6 already specifies the RLS design
-(`sec.fn_HospitalFilter` + a `SECURITY POLICY` per hospital-scoped table,
-filtering on `SESSION_CONTEXT('HospitalId')`). Phase 4's job is to (a)
-apply those policies as part of the database deployment (§10) across all
-hospital-scoped tables, not only `opd.Patient`, and (b) have every
-connection opened by `ISqlConnectionFactory` call
-`sp_set_session_context @key = N'HospitalId', @value = @HospitalId` (via
-`ISessionContextSetter`) immediately after opening, before any repository
-query runs on that connection — this is what makes RLS actually apply per
-request rather than being dormant infrastructure. This is deliberately
-**defense in depth**: the `HospitalId` parameter every stored procedure
-already accepts is still passed explicitly and still filters explicitly;
-RLS is the database-level backstop if that application-level filter is
-ever missed on a new procedure.
-
-### Policy-based authorization from the permission matrix
-
-`data.js`'s `permissionMatrix` is a static, in-memory `{ROLE: {feature:
-bool}}` grid checked by `hasPermission(role, feature)` — called from
-`router.js`'s route guard on the client, with no server-side equivalent
-today. `sec.PermissionMatrix` already exists in the schema as a
-**per-hospital-configurable** table (`sec.usp_GetPermissionMatrix` filters
-`WHERE HospitalId = @HospitalId`) — a real improvement over `data.js`'s
-single global matrix that the migration should adopt, not flatten back
-down to a hard-coded grid (see §13's risk about permission-matrix drift for
-why this consistency matters).
-
-Seventeen feature flags exist today (`consultation`, `patients`, `scheduling`,
-`billing`, `reports`, `admin_hospital`, `admin_scheduling`, `admin_vitals`, `admin_specialty`,
-`admin_formulary`, `admin_phrases`, `admin_users`, `audit_log`,
-`data_export`, `data_import`, `print`, `lab_portal`), each becoming an
-ASP.NET Core authorization policy backed by a custom
-`IAuthorizationHandler` that queries the per-hospital matrix (cached
-per-request, refreshed on a short TTL, since it's now configurable and no
-longer a compile-time constant):
-
-```csharp
-public sealed class FeaturePermissionHandler : AuthorizationHandler<FeaturePermissionRequirement>
-{
-    private readonly IPermissionService _permissions;
-
-    protected override async Task HandleRequirementAsync(
-        AuthorizationHandlerContext context, FeaturePermissionRequirement requirement)
-    {
-        var role = context.User.FindFirst(ClaimTypes.Role)?.Value;
-        var hospitalId = context.User.FindFirst("HospitalId")?.Value;
-        if (role is null || hospitalId is null) return;
-
-        if (await _permissions.HasPermissionAsync(Guid.Parse(hospitalId), role, requirement.Feature))
-            context.Succeed(requirement);
-    }
-}
-
-// Program.cs
-builder.Services.AddAuthorizationBuilder()
-    .AddPolicy("RequireConsultation", p => p.Requirements.Add(new FeaturePermissionRequirement("consultation")))
-    .AddPolicy("RequirePatients", p => p.Requirements.Add(new FeaturePermissionRequirement("patients")))
-    // ... one per feature flag, generated from the same feature-name list
-    //     sec.usp_ListPermissionFeatures returns, so the policy set can never
-    //     silently drift from the database's own feature list.
-    ;
-```
-
-This is the direct Phase 4 replacement for `router.js`'s `ROUTE_PERMS` map
-and `_checkPermission` guard — the client-side guard is **not removed**
-(it still gives instant UI feedback / hides inaccessible nav items without
-a round trip) but it is no longer the enforcement point; every request
-still passes through the server-side policy check regardless of what the
-client-side router decided.
+Seed users today hold plain passwords (`demo123`, `admin123`) in `DataStore`. The service hashes
+with PBKDF2 (`Rfc2898DeriveBytes`, SHA-256, per-user salt, ≥ 100,000 iterations). A salted hash
+cannot be recomputed from the password alone, so `sec.usp_AuthenticateUser`'s "compare
+`@PasswordHash`" contract needs a companion procedure that returns the stored hash for an email
+(proposed `sec.usp_GetUserCredential`, with a `DataRepository.GetUserCredential` method); the
+service verifies in C#, then calls `AuthenticateUser` and audits `LOGIN` or `LOGIN_FAIL`. Add that
+procedure in P1. The seed script stores real hashes of the documented demo passwords (§11). Lock
+an account for 15 minutes after 5 failed attempts.
 
 ---
 
-## 8. Client-Side Engines Decision
+## 8. Logic That Stays In-Process
 
-All five engines in `js/engines/` **stay 100% client-side in Phase 4.
-None require a C# service port.** This is a deliberate, per-engine
-determination from reading each file, not a default assumption — the
-opposite call (port everything to a server-side rules engine, as a
-differently-shaped prior migration guide for an unrelated product did) does
-not fit what these engines actually do here.
+These have no data access and gain nothing from a network hop; the Web Forms app keeps calling
+them directly:
 
-| Engine | What it does | Inputs | Blocking? | Verdict |
-|---|---|---|---|---|
-| **Voice SOAP** (`engine-voice-soap.js`) | Wraps the browser's native `SpeechRecognition`/`webkitSpeechRecognition` Web Speech API, parses spoken section names ("Subjective"/"Objective"/"Plan"), writes transcript text directly into SOAP `<textarea>` DOM elements | Live microphone audio, browser API | No — dictation aid only | **Client-only, cannot be ported.** This is a wrapper around a browser API that has no server-side equivalent; there is nothing to move. |
-| **Branched Flow** (`engine-branched-flow.js`) | Pure function: complaint keywords + demographic/country context → suggested labs/ICD-10 codes/vitals-to-highlight + a banner string. Returns UI directives; caller renders them | Data already fetched to the browser (active complaints, patient age/gender, specialty, country) | No — advisory suggestions only, never writes anything | **Stays client.** Zero PHI leaves the browser differently than today; nothing it computes is persisted or trusted for a decision; it is presentation logic, not a clinical safety gate. |
-| **SOAP Composer** (`engine-soap-composer.js`) | Pure function: aggregates vitals/symptoms/diagnoses/medications/lab orders already on screen into a draft S/O/A/P text block | Data already fetched to the browser | No — draft text the doctor must review/edit before `saveSoapNotes` persists anything | **Stays client.** It only ever produces a *draft* the doctor edits; the actual persistence path (`saveSoapNotes` → `cln.usp_SaveSoapNotes`) is unchanged and already server-validated (rejects writes to a locked consultation). |
-| **Rx Reconciler** (`engine-rx-reconciler.js`) | Pure function: dosage-delta %, therapeutic-class duplicate, and same-visit/active-medication overlap checks against a candidate prescription | Patient's active meds + current-visit meds, already fetched to the browser | No — produces a non-blocking alert ribbon; not called through `api.js`/`data.js` at all today | **Stays client**, with one caveat: unlike `checkDrugAllergyConflicts` (a `data.js`/procedure-backed method — see §5.4), this engine's checks have **no server-side equivalent today** and are not exposed as an API method. Because they are advisory-only and the product's own design never blocks on them, this is an acceptable gap for this migration phase, not a regression — but it is a real difference from the allergy check and should be flagged in a future compliance review if the business ever wants dosage-delta/duplicate-class warnings to be non-bypassable (which would require adding a new stored procedure and API endpoint that does not exist yet, out of scope here). |
-| **Contradiction Engine** (`engine-contradiction.js`) | Pure function: vitals-vs-diagnosis conflict rules, laterality mismatch detection, pediatric weight-based dose limit checks | Data already fetched to the browser | No — same non-blocking alert ribbon pattern, same "not currently exposed via api.js" status as Rx Reconciler | **Stays client**, same caveat as Rx Reconciler above. |
-
-**Why this differs from a "port every engine" default.** `PRODUCT-GUIDE.md`
-itself describes all five as "a pure function the consultation module calls
-and then renders the result of — none of them block the doctor outright."
-None of the four non-voice engines are invoked through `api.js` or have a
-corresponding `data.js` method or stored procedure — they operate
-exclusively on data the browser already holds after calling the real API
-methods, and their output is advisory, never authoritative. Porting them
-to C# would add a server round trip for a UI convenience with no security
-or data-integrity benefit, since nothing they compute is ever trusted as
-the final word (contrast this with `checkDrugAllergyConflicts`, which *is*
-a `data.js`/procedure-backed method with a real server-side implementation
-port in §5.4, precisely because it is treated as a safety check, not
-merely a UI hint).
-
----
-
-## 9. Front-End Integration
-
-### `js/api.js` — the only SPA file that changes
-
-Every method body changes from `ok(window.Data.xxx())` to a `fetch()` call
-against the new API, preserving the exact method name and parameter order
-so every UI module that calls `window.API.xxx(...)` needs zero changes:
-
-```javascript
-// Before (Phase 1)
-getPatient: (id) => ok(window.Data.getPatient(id)),
-
-// After (Phase 4)
-getPatient: (id) => _fetch(`/api/v1/patients/${id}`),
-```
-
-```javascript
-// js/api.js — Phase 4 shared fetch helper, replaces the ok()/_hid() helpers
-const API_BASE = window.Consult360Config?.apiBaseUrl || '/api/v1';
-
-async function _fetch(path, options = {}) {
-  const token = window.SessionManager ? window.SessionManager.getToken() : null;
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {}),
-    },
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error?.message || `Request failed: ${res.status}`);
-  }
-  if (res.status === 204) return null;
-  return res.json();
-}
-```
-
-`_hid()`'s role — silently defaulting a missing `hospitalId` parameter —
-is retired from `api.js` itself, because the server now derives
-`HospitalId` from the JWT unconditionally (§7) and ignores any
-client-supplied value for authorization purposes; `api.js` can keep sending
-it for readability/backward compatibility with UI call sites, but it is no
-longer load-bearing.
-
-### CORS configuration
-
-If the SPA is hosted on a different origin than the API (see the two
-deployment options below), CORS must allow the SPA's origin with
-credentials for the `Authorization` header:
-
-```csharp
-// Program.cs
-builder.Services.AddCors(options => options.AddPolicy("Spa", policy =>
-    policy.WithOrigins(builder.Configuration["Spa:Origin"]!)
-          .AllowAnyHeader()
-          .WithMethods("GET", "POST", "PUT", "DELETE", "PATCH")
-          .AllowCredentials()));
-
-var app = builder.Build();
-app.UseCors("Spa");
-```
-
-### Static file serving — two options
-
-| Option | Description | Trade-offs |
+| Code | What it does | Why it stays |
 |---|---|---|
-| **A — Serve the SPA from `wwwroot` under the ASP.NET Core app** | Copy `index.html`, `js/`, `css/`, `templates/` etc. into `Consult360.Api/wwwroot`; enable `app.UseStaticFiles()` and a SPA fallback route. `api.js`'s `API_BASE` becomes a relative path (`/api/v1`), no CORS needed at all. | Simplest deployment (one app, one URL, one TLS cert); ties the SPA's release cadence to the API's; every API deploy also redeploys the SPA even if it didn't change. |
-| **B — Keep the SPA on its existing static host** (the current Python/static server, or any CDN/static hosting) and point `api.js` at the API's separate base URL | `API_BASE` is an absolute URL (`https://api.consult360.example/api/v1`); CORS (above) is required. | Decouples SPA and API release cycles; matches the current Phase 1 deployment model most closely; requires CORS configuration and a second TLS certificate/domain. |
+| `ContradictionEngine` (`Services/ClinicalEngines.cs`) | vitals-vs-diagnosis, laterality and pediatric-dose alerts | Advisory, non-blocking, works on data the page already loaded |
+| `RxReconciler` | dose-delta, duplicate-class and overlap alerts | Same. Unlike the allergy check, these have no procedure; making them non-bypassable would need new procedures — out of scope |
+| `SoapComposer` | drafts S/O/A/P text from the visit's data | Produces a draft the doctor edits; `SaveSoapNotes` persists |
+| `BranchedFlowEngine` | complaint-driven suggestions | Advisory only |
+| `VitalUnitService`, `PhoneService`, `HospitalService.FormatDate/FormatTime/FormatMrn`, `TimeZoneService` conversions | unit conversion, phone rules, display formats | Pure functions; their inputs (hospital settings, vitals config) come from the service |
+| `js/engines/engine-voice-soap.js`, `js/components/component-drawing-pad.js` | browser speech recognition, sketch canvas | Browser APIs — nothing to move; the sketch is saved through `SaveSketch` |
 
-Recommendation: **Option A for the initial Phase 4 cutover** (fewer moving
-parts while everything else is changing at once), with the explicit note
-that switching to Option B later is a configuration change only
-(`API_BASE` + CORS), not a code change, since `api.js` already isolates
-every network call behind that one constant.
-
-### What stays untouched
-
-`index.html`, `app.js`, `router.js`, `session-manager.js` (only its
-`getToken()`/session-check calls now hit the real `GET /auth/session`
-endpoint instead of trusting `localStorage` alone), `app-context.js` (its
-`init()` already calls `window.API.getHospital()`, so it needs no change —
-only what that call does underneath changes), every file under
-`js/modules/`, `js/components/`, `js/templates/`, and all five files under
-`js/engines/` (§8). This is the direct payoff of the `api.js` facade
-pattern `DATA-LAYER-ARCHITECTURE.md` was designed to enable.
+The one clinical safety check that *is* server-side is the drug-allergy check (§5.4).
 
 ---
 
-## 10. Database Deployment & Migrations Strategy
+## 9. Web Forms Integration
 
-`schema.sql` and `stored-procedures.sql` are hand-authored T-SQL, not
-EF Core Code-First output — versioning them going forward needs a
-SQL-script-based migration tool, not `dotnet ef migrations`.
+### 9.1 Service reference
 
-### Recommended: DbUp
+In `OpdProject`: Connected Services → Add Service Reference →
+`https://localhost:{port}/DOCNyleUnifiedAPI.svc?wsdl`, namespace `DocNyleApi`, **Advanced →
+Collection type: `System.Collections.Generic.List`**, reuse types in referenced assemblies off.
+This generates `DocNyleApi.DOCNyleUnifiedAPIClient`, the data contracts and the `<client>`
+section in `Web.config`. Run **Update Service Reference** after every change to
+`IDOCNyleUnifiedAPI.cs`.
 
-DbUp runs a numbered/timestamped sequence of `.sql` scripts against a
-target database, tracking which have already run in a `SchemaVersions`
-table, and is a small enough dependency (a single NuGet package, invoked
-from a console app or CI step) to fit a project of this size without the
-overhead of a full SSDT `.sqlproj`/database-project build pipeline. An SSDT
-database project is a reasonable alternative if the team prefers
-Visual-Studio-integrated schema comparison/publish tooling — either choice
-satisfies the same requirement (versioned, repeatable, idempotent-safe
-script application); this guide recommends DbUp for its lower operational
-overhead and straightforward CI integration.
+### 9.2 The facade switch
+
+Each `Services/*Service.cs` class keeps its public methods. Its body moves from `DataStore` to
+the service, behind one setting per module so modules switch one at a time and can switch back:
+
+```xml
+<!-- OpdProject/Web.config -->
+<appSettings>
+  <!-- InProc = DataStore (today) · Wcf = DOCNyleUnifiedAPI -->
+  <add key="DataSource:Patients" value="Wcf" />
+  <add key="DataSource:Billing"  value="InProc" />
+</appSettings>
+```
+
+```csharp
+// OpdProject/Services/PatientService.cs
+public static Patient Get(string patientId)
+{
+    if (DataSource.IsWcf("Patients"))
+        return PatientMap.FromContract(DocNyle.Call(api => api.GetPatient(patientId)));
+    lock (DataStore.Sync) return DataStore.Patients.FirstOrDefault(p => p.PatientId == patientId);
+}
+```
+
+`PatientMap` converts the generated `DocNyleApi.Patient` to the existing `Models.Patient` so
+pages and data binding stay as they are. When every module is on `Wcf` and parity has passed
+(P4), the `InProc` branches and the mapping are removed and pages can bind to the generated
+types directly.
+
+### 9.3 `Web/DocNyle.cs`
+
+The one place that creates clients (spec §0.9): it creates a `DOCNyleUnifiedAPIClient`, adds the
+`SessionToken` (and `ClientIp` / `ClientUserAgent`, `CorrelationId`) headers inside an
+`OperationContextScope`, calls the operation, and `Close()`s — or `Abort()`s on a communication
+error. Never wrap the client in `using` (`Dispose` throws on a faulted channel and hides the real
+error). The generated client caches its `ChannelFactory` per endpoint configuration, so creating
+one per call is fine.
+
+```xml
+<!-- OpdProject/Web.config — generated by the service reference, then tuned -->
+<system.serviceModel>
+  <bindings>
+    <basicHttpBinding>
+      <binding name="BasicHttpsBinding_IDOCNyleUnifiedAPI" messageEncoding="Mtom"
+               maxReceivedMessageSize="52428800" sendTimeout="00:00:30">
+        <readerQuotas maxStringContentLength="52428800" maxArrayLength="52428800" />
+        <security mode="Transport" />
+      </binding>
+    </basicHttpBinding>
+  </bindings>
+  <client>
+    <endpoint address="https://localhost:44395/DOCNyleUnifiedAPI.svc"
+              binding="basicHttpBinding" bindingConfiguration="BasicHttpsBinding_IDOCNyleUnifiedAPI"
+              contract="DocNyleApi.IDOCNyleUnifiedAPI" name="BasicHttpsBinding_IDOCNyleUnifiedAPI" />
+  </client>
+</system.serviceModel>
+```
+
+### 9.4 Errors on pages
+
+`BasePage` catches `FaultException<DocNyleApi.ServiceFault>` from event handlers (override
+`OnError` plus a `TryCall` helper for handlers that want to stay on the page): `Validation` and
+`BusinessRule` show `Detail.Message` with `ToastDanger` and keep the form; `NotFound` shows the
+existing error state; `Forbidden` redirects to `access-denied`; `Unauthenticated` signs out
+(§7.1); `Internal` shows a generic error with the reference.
+
+### 9.5 Round trips
+
+Each facade call is now a network call. Pages that make many reads on load —
+`consultation-360.aspx` and its cards, `billing-checkout.aspx`, the settings hub — get slower if
+every card calls separately. Mitigations, in order: reuse values within a request (cache in
+`HttpContext.Items`), cache reference data per hospital for a few minutes (`ListSpecialties`,
+`ListVitalsConfig`, `ListAppointmentTypes`, `GetHospitalSettings`; searches are not cached), and
+only then add a combined read operation to the contract for a screen that still needs it.
+
+---
+
+## 10. Hosting & Deployment
+
+- **IIS:** `DOCNyleUnifiedAPI` is its own IIS application (its own app pool, .NET CLR v4.0,
+  Integrated pipeline) — on the same server as the site to start with. The site's app pool
+  identity needs no database rights; the service's identity (or a SQL login in an encrypted
+  `connectionStrings` section, `aspnet_regiis -pef`) gets `EXECUTE` on the schemas and nothing
+  else.
+- **One endpoint:** `https://{host}/DOCNyleUnifiedAPI.svc`. HTTPS only (`security
+  mode="Transport"`); IIS Express in development uses its development certificate on an
+  `https://localhost:443xx` port.
+- **Same machine:** optionally add a `netNamedPipeBinding` endpoint to the same service (requires
+  the WAS / Non-HTTP activation feature) and point the site's client endpoint at it. The contract
+  does not change.
+- **Development:** open both solutions (or add `DOCNyleUnifiedAPI` to `OpdProject.sln` as an
+  existing project) and start both; `START-SERVER.bat` gains a second IIS Express site for the
+  service.
+- **Config per environment:** `Web.Debug.config` / `Web.Release.config` transforms set the client
+  endpoint address (site), the `DOCNyle` connection string, `serviceMetadata` and `serviceDebug`
+  (service). No secrets in source control. The DAL's `App.Config` is not read at run time.
+
+---
+
+## 11. Database Deployment & Migrations
+
+`schema.sql`, `stored-procedures.sql` and `audit-log.sql` are hand-written T-SQL; version them
+with a script runner, not EF migrations.
+
+### DbUp
 
 ```
 db/
 ├── Scripts/
-│   ├── 0001_InitialSchema.sql        (= current docs/schema.sql, split per schema if large)
-│   ├── 0002_StoredProcedures.sql     (= current docs/stored-procedures.sql)
-│   ├── 0003_RowLevelSecurityPolicies.sql
-│   ├── 0004_AlwaysEncryptedColumns.sql   (Phase 2+ per ENCRYPTION-STRATEGY.md timeline)
-│   └── 0005_SeedDemoData.sql
-├── Consult360.DbMigrator/            (console app, runs DbUp against a connection string)
-└── Consult360.DbMigrator.Tests/      (verifies scripts apply cleanly to a fresh DB)
+│   ├── 0001_Schema.sql                 (= docs/schema.sql)
+│   ├── 0002_AuditLog.sql               (= docs/audit-log.sql)
+│   ├── 0003_RowLevelSecurity.sql
+│   ├── 0004_SeedReferenceData.sql      (time zones, payers, compliances, catalogs)
+│   └── 0005_SeedDemoData.sql           (demo hospitals, users, patients — dev/test only)
+├── Procedures/                         (= docs/stored-procedures.sql split per schema; "always run")
+└── Consult360.DbMigrator/              (console app, .NET 4.8)
 ```
 
-Stored procedures are re-deployable by re-running their `CREATE OR ALTER
-PROCEDURE` scripts (every procedure in `stored-procedures.sql` already uses
-`CREATE OR ALTER`, which is idempotent by design) — these can live in their
-own always-reapplied script category (DbUp supports "always run" scripts
-distinct from "run once" migrations), so a procedure fix doesn't need a new
-numbered migration file each time.
+Every procedure uses `CREATE OR ALTER`, so the `Procedures/` folder is an "always run" script
+group and a procedure fix does not need a new numbered script. The migrator runs as a deployment
+step before the service is updated, in every environment.
 
-### Environment promotion
+### Seeding
 
-`dev → test → staging → production`, each with its own connection string
-in `appsettings.{Environment}.json` / environment variables (never
-committed secrets — use a secrets manager or ASP.NET Core User Secrets
-locally, Azure Key Vault or equivalent in deployed environments). The
-`DbMigrator` console app runs as an explicit CI/CD pipeline step before the
-API deployment step in every environment, so schema/procedure changes are
-always applied before the code that depends on them goes live.
-
-### Seeding demo data
-
-`data.js`'s seeded arrays (2 hospitals, 7 users, 5 patients, allergies,
-formulary, lab catalog, phrase bank, etc.) become an idempotent
-`0005_SeedDemoData.sql` script using `MERGE` (or `IF NOT EXISTS INSERT`) so
-re-running it against an already-seeded database is a no-op rather than a
-duplicate-row error — this preserves the exact same demo dataset
-`testing-guide.md`'s manual test scripts assume (same seeded patients,
-same login credentials), just sourced from SQL instead of a JS array. One
-important adjustment versus the literal `data.js` content: seeded
-`PasswordHash` values must be real hashes of the documented demo passwords
-(`demo123`, `admin123`, `lab123`), not the plaintext strings themselves —
-see §7's password-hashing note.
+`DataStore.Seed()` (two hospitals — `HOSP-001` India / INR, `HOSP-002` Jamaica / JMD — demo users,
+`PAT-001`…`PAT-005`, allergies, formulary, lab catalog, phrases, inventory) becomes
+`0005_SeedDemoData.sql`, idempotent (`MERGE` / `IF NOT EXISTS`), so `testing-guide.md`'s scenarios
+find the same records and logins. The readable demo ids become fixed GUIDs, and the seed keeps a
+lookup table of `PAT-001` → GUID for the parity tests. Seeded passwords are PBKDF2 hashes of the
+documented demo passwords, generated by the same hasher the service uses — never plain text.
 
 ---
 
-## 11. Testing & Parity Strategy
+## 12. Testing & Parity Strategy
 
-### `testing-guide.md` becomes the regression/parity contract
-
-`testing-guide.md`'s manual QA script — organized by module (Patients,
-Consultation 360°, Scheduling, Billing, Lab Portal, Reports,
-Administration), each with specific seeded users/patients and expected
-outcomes — is the behavioral contract this migration must not break. Every
-section of that guide becomes either an `Consult360.IntegrationTests` test
-case (automatable) or an explicit manual regression pass against the new
-API-backed deployment before cutover (for anything genuinely UI-only, like
-visual layout). The seeded data referenced throughout it (`PAT-001`
-through `PAT-005`, the `USR-00x` login credentials, `HOSP-001`/`HOSP-002`)
-must resolve to the same records post-migration — which is exactly what
-§10's idempotent seed script guarantees.
-
-### Test project structure
-
-- **`Consult360.UnitTests`** (xUnit, no database) — tests
-  `Consult360.Application` services in isolation, with repository
-  interfaces mocked (Moq/NSubstitute). This is where the bucket-2 logic
-  from §5 gets its real test coverage: slot-generation boundary cases
-  (no config for a weekday → empty array; last slot exactly fitting the
-  end time; a fully booked day), symptom-state enum validation, fee-lookup
-  date-boundary cases (`EffectiveTo` null vs. set, exact boundary dates),
-  and the drug-allergy override/audit flow.
-- **`Consult360.IntegrationTests`** (xUnit + `Testcontainers.MsSql`) —
-  spins up a real SQL Server 2019 container per test run, applies
-  `db/Scripts/` via the `DbMigrator`, and exercises repositories directly
-  against real stored procedures — this is the only way to catch
-  parameter/type mismatches between C# DTOs and procedure signatures
-  (§13's risk table), and the only reliable way to test `MERGE`-based
-  upserts, `OUTPUT inserted.*` shapes, and RLS policies end-to-end. A
-  LocalDB-based fallback is acceptable for local development machines
-  without Docker, but CI runs against the containerized SQL Server 2019 to
-  match production as closely as possible.
-- **API contract tests** (`WebApplicationFactory<Program>`) — assert that
-  each endpoint's actual JSON response shape matches what
-  `API-SPECIFICATION.md` documents (field names/types, not just status
-  codes), catching drift between the specification document and the
-  implementation before it reaches the SPA, which has no runtime schema
-  validation of its own.
-
-### Parity testing methodology
-
-For any endpoint backed by genuine algorithmic logic (§5.3's slot
-generation is the paradigm case, but the same applies to the drug-allergy
-matcher and the permission-matrix pivot), write a parity test that runs
-the **same inputs** against the Phase 1 `data.js` implementation (via a
-headless JS test runner, e.g. Node + the existing `data.js` file loaded
-directly) and the Phase 4 API, and diffs the outputs. This is stronger
-than either side's unit tests alone, because it directly verifies the "no
-change to behavior" guarantee this whole migration is built around,
-rather than trusting that both implementations independently satisfy the
-same prose description of the rule.
+- **Unit tests** (MSTest or xUnit on .NET 4.8): the `DOCNyleUnifiedAPI` operations with
+  `DataRepository` behind an interface (`IDataRepository`, extracted for testing) and a fake —
+  validation, defaults (hospital "today"), fault mapping in `Run`, `Authorize` decisions, audit
+  calls, the allergy-override flow.
+- **Integration tests:** a fresh SQL Server LocalDB database per run, built by the DbMigrator.
+  `DataRepository` tests call each procedure with real parameters — the only place a misspelt
+  parameter name or `INT` / `DECIMAL` mismatch shows up. Service tests self-host
+  `DOCNyleUnifiedAPI` with `ServiceHost` on a `net.pipe` address and call it with
+  `ChannelFactory<IDOCNyleUnifiedAPI>`, asserting member values and fault codes. For every region,
+  one test asserts that a second hospital's ids return `NotFound`.
+- **Parity tests:** the in-memory `Services/*Service.cs` code and the WCF service are both C#, so
+  the same inputs can run through both in one test — the facade with `DataSource:X = InProc`
+  against seeded `DataStore`, and with `Wcf` against the seeded database — and the results
+  compared. Required for slot generation, fee lookup, consultation charge (free follow-up, unit
+  charging), bill split / coverage allocation, stock consumption order (earliest expiry first),
+  drug-allergy matching and the permission matrix.
+- **`testing-guide.md`** is the behavioral contract: every section either becomes an automated
+  test or a manual pass against the WCF-backed site before cutover.
 
 ---
 
-## 12. Migration Sequence & Phase Gates
+## 13. Migration Sequence & Phase Gates
 
 | Phase | Scope | Exit gate |
 |---|---|---|
-| **P0 — Frozen inputs** | `schema.sql`, `stored-procedures.sql`, `API-SPECIFICATION.md`, `DATA-LAYER-ARCHITECTURE.md` — already exist, already reviewed. No new work in this phase; this table starts from here. | Sign-off that these four documents are the frozen contract for everything below; any change to them after this point requires an explicit addendum, not a silent edit mid-migration. |
-| **P1 — Solution skeleton** | Create the 4 .NET projects (§3), wire up DI, `Program.cs`'s middleware pipeline, `appsettings.*.json` per environment, `ISqlConnectionFactory` against a dev SQL Server 2019 instance with `schema.sql`/`stored-procedures.sql` already applied via DbUp (§10). No business logic yet — one smoke-test endpoint (`GET /api/v1/health`) proves the pipeline end-to-end. | Solution builds, `dotnet test` runs (empty test suite passes), health endpoint returns 200 against a real SQL Server 2019 connection, DbUp applies cleanly to a fresh database. |
-| **P2 — Business logic port, module by module** | Work through the module order in §5's methodology, one module at a time: repository → service → unit tests → integration tests, for that module only, before moving to the next. Each module's stored procedures already exist; this phase is the C# side only. | Every module in §5's table has a `Consult360.Application` service with unit test coverage for its bucket-2/bucket-3 logic, and an `Consult360.IntegrationTests` suite exercising its repository against a real database. No controllers wired yet. |
-| **P3 — Controllers + auth** | Wire every service from P2 into a controller action matching `API-SPECIFICATION.md` (§6), implement JWT issuance + `HospitalContextMiddleware` + policy-based authorization (§7). | Every one of the 130 endpoints in `API-SPECIFICATION.md` is implemented and covered by an API contract test (§11); `swagger.json`/OpenAPI output matches the specification document; a manual Postman/Bruno pass against every endpoint with each of the 6 seeded roles confirms correct 200/401/403 behavior. |
-| **P4 — Point `api.js` at the new API, feature-flagged** | Ship the Phase 4 `api.js` (§9) behind a runtime config flag (`window.Consult360Config.apiBaseUrl`), so the same SPA build can point at either the old in-memory `data.js` path or the new API — allowing a side-by-side parallel run in a staging environment before full cutover. | The SPA, pointed at the new API, passes a full manual walkthrough of every section of `testing-guide.md` with no behavioral difference observed; `js/data.js` is not yet deleted (kept as the flagged-off fallback). |
-| **P5 — Parity testing against `testing-guide.md`** | Execute every `testing-guide.md` scenario against the Phase 4-backed deployment with the exact same seeded users/patients; run the automated parity tests from §11 for the algorithmic endpoints. Any discrepancy is a P5 blocker, not a "fix later" note. | Zero open discrepancies between documented Phase 1 behavior and observed Phase 4 behavior across every `testing-guide.md` section; all automated parity tests green. |
-| **P6 — Production cutover** | Point the production connection string at the production SQL Server 2019 instance, enable the RLS security policies (§7) in production, flip the `api.js` config flag to the new API for all users, rotate demo credentials to real ones. | Production traffic is served entirely by the new stack for a full business cycle (e.g. one week) with no `data.js`-path fallback traffic and no unresolved P5-class discrepancies reported. |
-| **P7 — Decommission Phase 1 path** | Delete `js/data.js` and the `ok()`/in-memory-array code paths from the repository (the SPA no longer references `window.Data` for anything except, if retained, `hasPermission` client-side convenience checks — replace those call sites with a cached read of the server-issued permission policy set). Remove the feature flag from P4. | `js/data.js` is deleted from the SPA bundle; no runtime code path references it; the migration is complete. |
+| **P0 — Frozen inputs** | `schema.sql`, `stored-procedures.sql`, `audit-log.sql`, `API-SPECIFICATION.md`, `DATA-LAYER-ARCHITECTURE.md`. | Signed off as the contract; later changes go in as explicit addenda. |
+| **P1 — Skeleton** | `IDOCNyleUnifiedAPI.cs` with every operation and data contract; `DOCNyleUnifiedAPI.svc.cs` with `Run`, `Authorize`, `Audit`; `Helper.cs` with `Open` (+ SESSION_CONTEXT), parameters and retry; DbMigrator building a dev database; `sec.usp_GetUserCredential` (§7.5). Auth region working end to end; service reference added to `OpdProject`. | Both projects build; the site signs in through the service against SQL Server; a call without a token is rejected; DbUp applies to an empty database cleanly. |
+| **P2 — Operations, region by region** | In the order of §5: `DataRepository` methods → operations → unit tests → integration tests, one region at a time. | Every operation in the spec is implemented and has an integration test; fault codes match spec §0.6. |
+| **P3 — Facade switch, module by module** | Turn `DataSource:{Module}` to `Wcf` in a test environment, fix mapping and page error handling (§9). | Each switched module passes its `testing-guide.md` section with no behavior change; parity tests for that module green. |
+| **P4 — Parity run** | All modules on `Wcf` in staging; full `testing-guide.md` walkthrough with every seeded role; all parity tests. | Zero open differences between in-memory and WCF behavior. |
+| **P5 — Production cutover** | Production database built by the migrator (reference data only — no demo seed), RLS enabled, real users created, demo credentials absent. | One full business cycle (e.g. a week) on WCF with no fallback to `InProc`. |
+| **P6 — Decommission the in-memory path** | Delete `DataStore`, the `InProc` branches, the `DataSource` settings and the model ↔ contract mapping where the generated types can be used directly. | No code references `DataStore`; the facade classes are thin wrappers over `DocNyle.Call` (or are removed in favor of direct calls). |
 
 ---
 
-## 13. Risks & Mitigations
+## 14. Risks & Mitigations
 
-| Risk | Why it's real here | Mitigation |
+| Risk | Why it is real here | Mitigation |
 |---|---|---|
-| **`data.js` business-logic subtleties lost in translation** | `data.js` is genuine hand-written JS (not a declarative ruleset) — boundary conditions in date-range lookups, loop off-by-ones in slot generation, string-matching heuristics in the allergy checker are easy to reproduce *almost* correctly. | The bucket classification in §5 plus mandatory parity tests (§11) for anything in bucket 2/3; unit tests assert the *contract*, not just "compiles and returns something." |
-| **Stored procedure parameter/type mismatches with C# DTOs** | 152 procedures, many with 10+ parameters and nullable/default values (e.g. `cln.usp_SaveVitals`'s 12 optional vital fields) — a mismatched parameter name, an `INT` vs `DECIMAL` mismatch, or a missed `NULL`-default silently produces wrong results rather than a compile error with Dapper's dynamic parameter binding. | `Consult360.IntegrationTests` exercises every repository method against a real SQL Server 2019 instance (Testcontainers), not mocks — this is the only layer that would actually catch a parameter mismatch; strongly-typed parameter objects (records, not anonymous objects) for every repository call, name-checked against the procedure signature in a code review checklist. |
-| **Permission-matrix drift between client-side `hasPermission` and server-side policy** | `router.js`'s client-side guard and the new server-side `FeaturePermissionHandler` (§7) are two independent enforcement points reading (potentially) two different sources if not deliberately kept in sync — this is exactly the kind of drift a pen tester looks for. | Single source of truth: `sec.PermissionMatrix` (per-hospital, DB-backed) is authoritative; the client-side guard fetches the same matrix via `GET /permissions` at login/session start rather than embedding its own copy, so there is only one place the grid is actually defined. |
-| **Session/`HospitalId` spoofing now that auth is real** | Phase 1 has nothing to spoof (everything is client-trusted by design); Phase 4 introduces the first real trust boundary, and it's the single most pen-test-relevant change in this migration (`PEN-TEST-STRATEGY.md` §3.4). | `HospitalContextMiddleware` (§7) derives `HospitalId` exclusively from the validated JWT claim, never from client-supplied query/body values, with RLS as a database-level backstop; integration tests specifically assert that a request with a mismatched client-supplied `HospitalId` still resolves against the JWT's hospital, not the client's claim. |
-| **Performance regression from network round-trips replacing in-memory array access** | Every `data.js` call was a synchronous in-memory `Array.filter()`; every Phase 4 call is now a network round trip + a stored procedure execution. Pages that previously fired several `API.xxx()` calls in quick succession (e.g. the Consultation 360° workspace loading vitals, symptoms, diagnoses, and prescriptions on open) will be noticeably slower if each becomes a separate HTTP round trip. | Favor procedures/endpoints that already batch related reads (e.g. a single `GetConsultationById` response that includes nested vitals/symptoms rather than four separate calls, where `API-SPECIFICATION.md`'s existing shape allows it); add response caching (`ResponseCache`/output caching) for read-heavy, rarely-changing reference data (formulary, ICD-10 catalog, phrase bank); add server-side pagination for any `list*` endpoint whose result set can grow large in production (patient search, audit log, invoices) even though the Phase 1 in-memory arrays never needed it at seed-data scale. |
-| **Drug-allergy / clinical-safety checks bypassable via direct API calls** | Called out explicitly in `PEN-TEST-STRATEGY.md` §3.5; Phase 1's check only ever runs client-side. | §5.4's server-side enforcement inside `PrescriptionService.CreatePrescriptionAsync`, not merely a callable pre-check endpoint the client can choose to skip. |
-| **Password/credential handling regression during seed migration** | Seed data currently stores demo passwords as plaintext-equivalent strings; a careless seed script port could carry that forward into a "production-looking" database. | Seed script (§10) hashes every seeded password through the same `PasswordHasher`/`BCrypt` code path used at runtime — no seeded row ever contains a plaintext-comparable value, and this is asserted by an integration test that attempts to log in with the documented demo credentials through the real auth endpoint, not by reading the seed script's literal text. |
+| Business-logic differences between the C# services and the procedures | Boundary rules (fee dates, slot windows, coverage capping, expiry-first stock) were written twice, once in C# and once in T-SQL | Bucket classification (§5) and mandatory parity tests (§12) for every parity-critical method |
+| Procedure parameter / type mismatches | 212 procedures, many with 10+ optional parameters; ADO.NET binds by name at run time | One `DataRepository` method per procedure with parameter names copied from `stored-procedures.sql`; integration test per method on LocalDB |
+| One very large contract file | ≈ 200 operations and their data contracts in `IDOCNyleUnifiedAPI.cs`; merge conflicts when several people work on regions | Strict region order matching the spec; one region per pull request; data contracts can move to partial files without changing the contract |
+| Stale service reference in the site | The site's types come from WSDL, not a shared assembly | Update Service Reference is part of every contract change; CI fails if the generated `Reference.cs` differs from the live WSDL |
+| Chattier pages after the switch | Every facade call becomes a SOAP round trip; Consultation 360 loads many cards | Per-request and per-hospital caching (§9.5) before adding combined operations; measure page load in P3 |
+| Tenant leakage | The service is the first real trust boundary; `BasePage.HospitalId` defaults to `HOSP-001` | `HospitalId` only from the caller; `DataRepository` constructed with it; RLS backstop; cross-hospital `NotFound` test per region |
+| Two permission sources drift | `BasePage.Can` and `Authorize` both check permissions | Both read `sec.PermissionMatrix`; the site loads it from `GetPermissionMatrix`, not `DataStore` |
+| Client misuse in the site | `using` on a faulted client, headers not added | `Web/DocNyle.cs` is the only way pages reach the service (§9.3); code review checklist |
+| Large payloads | Logos, sketches, card images and CSV exports travel as `byte[]` | MTOM, 50 MB quotas matching IIS limits; a streamed endpoint for file transfers once those procedures exist |
+| Credentials carried over from the demo | `DataStore` holds plain passwords | PBKDF2 hashes in the seed, generated by the runtime hasher; a test signs in with the demo logins through the service |
+| Features with no procedures yet | Form designer, in-app notifications, lab attachments, consent documents, lab claim, duplicate check | Those modules stay `InProc` until their procedures and operations are added (spec Known Gaps); P6 cannot finish until they are |
 
 ---
 
-## 14. Appendix
+## 15. Appendix
 
-### 14.1 Representative method-mapping tables (per module)
+### 15.1 Representative mapping (current method → operation → `DataRepository` / procedure)
 
-The full 130-endpoint mapping is `docs/API-SPECIFICATION.md`; the full
-143-method inventory is `js/api.js`; the full 152-procedure inventory is
-`docs/stored-procedures.sql`. The tables below are a representative sample
-per module — enough to make the `api.js method → Controller action → Route
-→ Stored Procedure` pattern unambiguous for an engineer picking up any
-module's port.
+The operation and its `DataRepository` method share a name.
 
-**Patients**
+| Current (`OpdProject/Services`) | `IDOCNyleUnifiedAPI` operation | Procedure |
+|---|---|---|
+| `UserService.Authenticate(email, password)` | `AuthenticateUser` | `sec.usp_AuthenticateUser` (+ `sec.usp_GetUserCredential`) |
+| `UserService.TogglePermission(role, feature)` | `UpdatePermission(role, feature, null)` | `sec.usp_UpdatePermission` |
+| `HospitalService.GetSettings(hid)` | `GetHospitalSettings()` | `cfg.usp_GetHospitalSettings` |
+| `PatientService.Search(hid, term)` | `SearchPatients(term)` | `opd.usp_SearchPatients` |
+| `PatientService.Get(id)` | `GetPatient(id)` | `opd.usp_GetPatient` |
+| `PatientService.DeactivateAllergy(id)` | `DeleteAllergy(id)` | `opd.usp_DeleteAllergy` |
+| `SchedulingService.ListAvailableSlots(did, hid, date, dur)` | `ListAvailableSlots(did, date, dur)` | `opd.usp_ListAvailableSlots` |
+| `SchedulingService.UpdateStatus(id, status, by)` | `UpdateAppointmentStatus(id, status)` | `opd.usp_UpdateAppointmentStatus` |
+| `SchedulingService.FlatFee(did, cat, date)` | `CheckEffectiveFee(did, cat, date)` | `bil.usp_CheckEffectiveFee` |
+| `ConsultationService.GetOrCreate(pid, did, hid)` | `GetOrCreateConsultation(pid, did, null)` | `cln.usp_GetOrCreateConsultation` |
+| `ConsultationService.CycleSymptom(cid, code)` | `UpdateSymptomState(cid, code, next)` | `cln.usp_UpdateSymptomState` |
+| `ConsultationService.AddPrescription(record)` | `CreatePrescription(cid, request)` | `cln.usp_CreatePrescription` (+ allergy check) |
+| `ConsultationService.SignOff(cid, did)` | `ConfirmSignOff(cid)` | `cln.usp_ConfirmSignOff` |
+| `CatalogService.ToggleFavorite(did, tid)` | `CreateLabFavorite` / `DeleteLabFavorite` | `cln.usp_CreateLabFavorite` / `cln.usp_DeleteLabFavorite` |
+| `LabService.SubmitResult(record)` | `SubmitLabResult(request)` | `cln.usp_SubmitLabResult` |
+| `BillingService.RecalculateTotals(id)` | `RecalculateInvoiceTotals(id)` | `bil.usp_RecalculateInvoiceTotals` |
+| `BillingService.RecordPayment(…)` | `CreatePayment(invoiceId, request)` | `bil.usp_CreatePayment` |
+| `InventoryService.ReceiveStock(…)` | `RecordStockReceipt(itemId, request)` | `inv.usp_RecordStockReceipt` |
+| `ExportService.ToCsv(key, hid)` | `ListExportData(key)` | `sec.usp_ListExportData_{Table}` |
+| `AuditService.Record(…)` | `RecordAuditEntry(request)` | `sec.usp_RecordAuditEntry` |
 
-| api.js method | Controller.Action | Route | Stored Procedure |
-|---|---|---|---|
-| `searchPatients(term, hid)` | `PatientsController.Search` | `GET /patients/search?term=&hospitalId=` | `opd.usp_SearchPatients` |
-| `getPatient(id)` | `PatientsController.GetPatient` | `GET /patients/{id}` | `opd.usp_GetPatient` |
-| `createPatient(record)` | `PatientsController.CreatePatient` | `POST /patients` | `opd.usp_CreatePatient` |
-| `updatePatient(id, patch)` | `PatientsController.UpdatePatient` | `PUT /patients/{id}` | `opd.usp_UpdatePatient` |
-| `listAllergies(patientId)` | `AllergiesController.List` | `GET /patients/{id}/allergies` | `opd.usp_ListAllergies` |
-| `deleteAllergy(id)` | `AllergiesController.Delete` | `DELETE /allergies/{id}` | `opd.usp_DeleteAllergy` |
+The full list is `API-SPECIFICATION.md` (207 operations, each naming its procedure).
 
-**Scheduling**
+### 15.2 Phase checklist
 
-| api.js method | Controller.Action | Route | Stored Procedure |
-|---|---|---|---|
-| `listTodayAppointmentsForDoctor(doctorId, hid)` | `SchedulingController.ListToday` | `GET /doctors/{doctorId}/appointments/today?hospitalId=` | `opd.usp_ListTodayAppointmentsForDoctor` |
-| `listDoctorSlotConfig(doctorId)` | `SchedulingController.GetSlotConfig` | `GET /doctors/{doctorId}/slot-config` | `opd.usp_ListDoctorSlotConfig` |
-| `listAvailableSlots(doctorId, hid, date)` | `SchedulingController.ListAvailableSlots` | `GET /doctors/{doctorId}/available-slots?hospitalId=&date=` | `opd.usp_ListAvailableSlots` |
-| `createAppointment(record)` | `SchedulingController.CreateAppointment` | `POST /appointments` | `opd.usp_CreateAppointment` |
-| `updateAppointmentStatus(id, status)` | `SchedulingController.UpdateStatus` | `PUT /appointments/{id}/status` | `opd.usp_UpdateAppointmentStatus` |
+- **P0** — Contract documents frozen and reviewed.
+- **P1** — Interface, service plumbing, DAL `Helper`, DbMigrator; sign-in through WCF; service reference in the site.
+- **P2** — Every operation implemented with integration tests.
+- **P3** — Modules switched to `Wcf` one by one in test; parity per module.
+- **P4** — Everything on `Wcf` in staging; full `testing-guide.md` pass; parity green.
+- **P5** — Production cutover with RLS, real users, no demo data.
+- **P6** — `DataStore` and the `InProc` path deleted.
 
-**Consultation core / Vitals / Symptoms**
-
-| api.js method | Controller.Action | Route | Stored Procedure |
-|---|---|---|---|
-| `getOrCreateConsultation(pid, did, hid)` | `ConsultationsController.GetOrCreate` | `POST /consultations` | `cln.usp_GetOrCreateConsultation` |
-| `saveVitals(consultationId, patch)` | `VitalsController.SaveVitals` | `POST /consultations/{id}/vitals` | `cln.usp_SaveVitals` |
-| `updateSymptomState(cid, code, state)` | `SymptomsController.UpdateState` | `PUT /consultations/{id}/symptoms/{symptomName}/state` | `cln.usp_UpdateSymptomState` |
-| `saveSoapNotes(cid, s, o, p)` | `ConsultationsController.SaveSoap` | `PUT /consultations/{id}/soap` | `cln.usp_SaveSoapNotes` |
-| `confirmSignOff(record)` | `ConsultationsController.SignOff` | `POST /consultations/{id}/sign-off` | `cln.usp_ConfirmSignOff` |
-
-**Prescriptions / Formulary / Lab**
-
-| api.js method | Controller.Action | Route | Stored Procedure |
-|---|---|---|---|
-| `searchFormulary(term, hid)` | `FormularyController.Search` | `GET /formulary/search?term=&hospitalId=` | `cfg.usp_SearchFormulary` |
-| `createPrescription(record)` | `PrescriptionsController.CreatePrescription` | `POST /consultations/{id}/prescriptions` | `cln.usp_CreatePrescription` |
-| `checkDrugAllergyConflicts(pid, name, comp)` | `PrescriptionsController.CheckAllergyConflicts` | `GET /patients/{id}/drug-allergy-check?medicineName=&composition=` | `cln.usp_CheckDrugAllergyConflicts` |
-| `submitLabResult(record)` | `LabController.SubmitResult` | `POST /lab-portal/results` | `cln.usp_SubmitLabResult` |
-| `listPendingLabOrders(hid)` | `LabController.ListPendingOrders` | `GET /lab-portal/pending-orders?hospitalId=` | `cln.usp_ListPendingLabOrders` |
-
-**Billing**
-
-| api.js method | Controller.Action | Route | Stored Procedure |
-|---|---|---|---|
-| `checkEffectiveFee(doctorId, type, onDate)` | `BillingController.GetEffectiveFee` | `GET /doctors/{doctorId}/fee?type=&onDate=` | `bil.usp_CheckEffectiveFee` |
-| `createInvoice(record)` | `BillingController.CreateInvoice` | `POST /invoices` | `bil.usp_CreateInvoice` |
-| `createPayment(record)` | `BillingController.CreatePayment` | `POST /invoices/{id}/payments` | `bil.usp_CreatePayment` |
-| `cancelInvoice(id, reason, userId)` | `BillingController.CancelInvoice` | `POST /invoices/{id}/cancel` | `bil.usp_CancelInvoice` |
-| `recalculateInvoiceTotals(invoiceId)` | `BillingController.Recalculate` | `POST /invoices/{id}/recalculate` | `bil.usp_RecalculateInvoiceTotals` |
-
-**Audit / Permissions / Settings**
-
-| api.js method | Controller.Action | Route | Stored Procedure |
-|---|---|---|---|
-| `recordAuditEntry(entry)` | `AuditController.RecordEntry` | `POST /audit/logs` | `sec.usp_RecordAuditEntry` |
-| `getPermissionMatrix()` | `AdminController.GetPermissionMatrix` | `GET /permissions?hospitalId=` | `sec.usp_GetPermissionMatrix` |
-| `listUsers(hid)` | `AdminController.ListUsers` | `GET /users?hospitalId=` | `sec.usp_ListUsers` |
-| `updateUserActive(id)` | `AdminController.ToggleUserActive` | `PUT /users/{id}/active` | `sec.usp_UpdateUserActive` |
-| `listExportData(tableKey)` | `AuditController.ExportTable` | `GET /export/{tableKey}?hospitalId=&format=csv` | `sec.usp_ListExportData_{TableKey}` |
-
-*(Full 130-row table: `docs/API-SPECIFICATION.md`. Full 152-procedure
-listing with parameter signatures: `docs/stored-procedures.sql`.)*
-
-### 14.2 Condensed phase checklist
-
-- **P0** — Confirm `schema.sql`/`stored-procedures.sql`/`API-SPECIFICATION.md`/`DATA-LAYER-ARCHITECTURE.md` are frozen and reviewed.
-- **P1** — 4 .NET projects created; DI wired; DbUp applies schema+procedures to dev SQL Server 2019; health endpoint green.
-- **P2** — Per module: repository → service → unit tests → integration tests, following §5's bucket classification.
-- **P3** — Every `API-SPECIFICATION.md` endpoint implemented + contract-tested; JWT + `HospitalContextMiddleware` + policy authorization in place.
-- **P4** — `api.js` Phase 4 build shipped behind a feature flag; parallel-run capable.
-- **P5** — Full `testing-guide.md` walkthrough + automated parity tests, zero open discrepancies.
-- **P6** — Production cutover, RLS enabled, one full business cycle on the new stack with no fallback traffic.
-- **P7** — `js/data.js` deleted; feature flag removed; migration complete.
-
-### 14.3 Reference documents
+### 15.3 Reference documents
 
 | Document | Use |
 |---|---|
-| `docs/DATA-LAYER-ARCHITECTURE.md` | Binding naming/schema/verb-taxonomy rules this guide implements |
-| `docs/schema.sql` | The 51-table SQL Server 2019 DDL (deployed via §10, not redesigned) |
-| `docs/stored-procedures.sql` | The 152 stored procedures every repository method calls |
-| `docs/API-SPECIFICATION.md` | The 130-endpoint REST contract every controller action implements |
-| `docs/PRODUCT-GUIDE.md` | Module inventory, engine descriptions, current-limitations context |
-| `docs/testing-guide.md` | The regression/parity contract for §11 |
-| `docs/ENCRYPTION-STRATEGY.md` | Always Encrypted column list and phased encryption timeline referenced in §7 |
-| `docs/PEN-TEST-STRATEGY.md` | The specific vulnerabilities this migration's auth/authorization design (§7) and risk table (§13) close |
+| `docs/API-SPECIFICATION.md` | The WCF contract `IDOCNyleUnifiedAPI` implements |
+| `docs/DATA-LAYER-ARCHITECTURE.md` | Naming, schema and verb-taxonomy rules |
+| `docs/schema.sql`, `docs/audit-log.sql` | The DDL deployed in §11 |
+| `docs/stored-procedures.sql` | The procedures every `DataRepository` method calls |
+| `docs/PRODUCT-GUIDE.md` | What each screen does |
+| `docs/testing-guide.md` | The behavioral contract for §12 |
