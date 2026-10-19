@@ -1,13 +1,17 @@
+using Newtonsoft.Json;
+using OpdProject.Helpers;
+using OpdProject.Models;
+using OpdProject.Web;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using OpdProject.Models;
 
 namespace OpdProject.Services
 {
     /// <summary>Authentication, user management and the role → feature permission matrix.</summary>
-    public static class UserService
+    public class UserService
     {
+        BasePage basePage = new BasePage();
         public static readonly string[] Roles = { "ADMIN", "DOCTOR", "RECEPTIONIST", "BILLING", "NURSE", "LAB_PARTNER" };
 
         /// <summary>Roles an administrator can assign from User Management. A LAB_PARTNER account must be linked to a lab partner.</summary>
@@ -24,7 +28,42 @@ namespace OpdProject.Services
             { "admin_inventory", "Clinic Inventory" },
         };
 
-        /// <summary>Verifies e-mail + password for an active user whose hospital exists. Returns null on failure.</summary>
+        //public static AppUser Authenticate(string email, string password)
+        //{
+        //    try
+        //    {
+        //        var helper = new CommonHelper();
+
+        //        var loginPayload = JsonConvert.SerializeObject(new
+        //        {
+        //            Email = (email ?? "").Trim(),
+        //            Password = password
+        //        });
+
+        //        var reply = helper._serialized_json_data<LoginResponse>("Login", loginPayload);
+
+        //        if (reply == null || !reply.Success)
+        //            return null;
+
+        //        return new AppUser
+        //        {
+        //            UserId = reply.UserId,
+        //            HospitalId = reply.HospitalId,
+        //            FullName = reply.FullName,
+        //            Email = reply.Email,
+        //            SpecialtyId = reply.SpecialtyId,
+        //            LabPartnerId = reply.LabPartnerId,
+        //            Roles = reply.Roles?.Split(',').ToList() ?? new List<string>(),
+        //            IsActive = true
+        //        };
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        System.Diagnostics.Debug.WriteLine($"Authentication Error: {ex.Message}");
+        //        AppSession.Toast("danger", "Login failed", "Unable to reach the server. Please try again.");
+        //        return null;
+        //    }
+        //}
         public static AppUser Authenticate(string email, string password)
         {
             lock (DataStore.Sync)
