@@ -39,6 +39,7 @@
                   <a class="btn btn--xs btn--primary" href="<%#: Urls.Consultation(Item.PatientId) %>" title="Open consultation"><i class="ti ti-stethoscope" aria-hidden="true"></i></a>
                 </asp:PlaceHolder>
                 <a class="btn btn--xs btn--ghost" href="<%#: Urls.PatientEdit(Item.PatientId) %>" title="Edit patient"><i class="ti ti-edit" aria-hidden="true"></i></a>
+                <a class="btn btn--xs btn--ghost" href="<%#: Urls.PatientCoverage(Item.PatientId) + "#consent" %>" title="Coverage &amp; signed consent form"><i class="ti ti-file-certificate" aria-hidden="true"></i></a>
                 <a class="btn btn--xs" href="<%#: Urls.Allergies(Item.PatientId) %>" title="Allergies, history, medications"><i class="ti ti-clipboard-heart" aria-hidden="true"></i> Health Record</a>
               </td>
             </tr>

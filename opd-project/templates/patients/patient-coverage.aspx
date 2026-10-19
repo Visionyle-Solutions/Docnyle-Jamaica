@@ -53,7 +53,7 @@
   </asp:Panel>
 
   <%-- Consent for Sharing Health Information: print (pre-filled), patient signs on paper, upload the scanned copy --%>
-  <div class="card mb-3">
+  <div id="consent" class="card mb-3" style="scroll-margin-top:16px;">
     <div class="reg-section-title" style="border-top:0; padding-top:0; margin-top:0; display:flex; justify-content:space-between; align-items:center; gap:8px;">
       <span>Consent for sharing health information</span>
       <asp:Literal ID="ConsentBadge" runat="server" />

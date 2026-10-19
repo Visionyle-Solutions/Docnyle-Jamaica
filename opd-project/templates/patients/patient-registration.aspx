@@ -19,6 +19,9 @@
         <i class="ti ti-device-floppy" aria-hidden="true"></i> <asp:Literal ID="SaveLabel" runat="server" />
       </asp:LinkButton>
       <a class="btn btn--ghost" href="<%: Urls.PatientSearch %>">Cancel</a>
+      <% if (IsEdit) { %>
+      <a class="btn btn--ghost" href="<%: Urls.PatientCoverage(EditingId) + "#consent" %>" style="margin-left:auto;"><i class="ti ti-file-certificate" aria-hidden="true"></i> Coverage &amp; Consent</a>
+      <% } %>
     </div>
   </div>
 </div>

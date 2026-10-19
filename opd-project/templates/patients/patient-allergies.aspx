@@ -16,6 +16,7 @@
     <div class="page-container titlecase-headings">
       <div style="display:flex; gap:8px; margin-bottom:8px;">
         <a class="btn btn--xs btn--ghost" href="<%: Urls.PatientSearch %>"><i class="ti ti-arrow-left" aria-hidden="true"></i> Patients</a>
+        <a class="btn btn--xs btn--ghost" href="<%: Urls.PatientCoverage(PatientId) + "#consent" %>"><i class="ti ti-file-certificate" aria-hidden="true"></i> Coverage &amp; Consent</a>
         <asp:HyperLink ID="ConsultLink" runat="server" CssClass="btn btn--xs btn--primary"><i class="ti ti-stethoscope" aria-hidden="true"></i> Open consultation</asp:HyperLink>
       </div>
 

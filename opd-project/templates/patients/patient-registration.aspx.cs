@@ -16,8 +16,8 @@ namespace OpdProject.templates.patients
         protected override string RequiredPermission { get { return "patients"; } }
         public override string PageTitle { get { return IsEdit ? "Edit Patient" : "New Patient Registration"; } }
 
-        private string EditingId { get { return RouteValue("patientId"); } }
-        private bool IsEdit { get { return !string.IsNullOrEmpty(EditingId); } }
+        protected string EditingId { get { return RouteValue("patientId"); } }
+        protected bool IsEdit { get { return !string.IsNullOrEmpty(EditingId); } }
 
         protected void Page_Load(object sender, EventArgs e)
         {

@@ -16,7 +16,7 @@ namespace OpdProject.templates.patients
         protected override string RequiredPermission { get { return "patients"; } }
         public override string PageTitle { get { return "Health Record"; } }
 
-        private string PatientId { get { return RouteValue("patientId"); } }
+        protected string PatientId { get { return RouteValue("patientId"); } }
 
         protected string ActiveTab
         {
