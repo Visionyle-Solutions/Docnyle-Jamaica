@@ -1,8 +1,8 @@
-# Consult360 — OPD Consultation Module
+# DocNyle — OPD Consultation Module
 ## Phase 4 Migration Guide: WCF (DOCNyleUnifiedAPI) + SQL Server 2019
 
 **Document version:** 2.1 — October 2026
-**Scope:** The final migration phase. It moves Consult360's data layer from the in-memory
+**Scope:** The final migration phase. It moves DocNyle's data layer from the in-memory
 store inside the Web Forms application (`Services/DataStore.cs` and the static
 `Services/*Service.cs` classes) to the **DOCNyleUnifiedAPI** WCF service backed by SQL Server
 2019, using the schema, stored procedures and service contract already designed for it.
@@ -45,7 +45,7 @@ target are stale on that point.
 
 ## 1. Executive Summary & Target Architecture
 
-Today Consult360 is one ASP.NET Web Forms application (`OpdProject`, .NET Framework 4.8,
+Today DocNyle is one ASP.NET Web Forms application (`OpdProject`, .NET Framework 4.8,
 IIS / IIS Express). Its pages and user controls (`templates/**/*.aspx`, `*.ascx`) call static
 service classes (`PatientService`, `ConsultationService`, `BillingService`, …) that read and
 write `List<T>` tables in `DataStore`, seeded at start-up and lost when the app domain
@@ -164,7 +164,7 @@ Solution 'DOCNyleUnifiedAPI'
     └── packages.config
 
 Alongside (Phase 4 additions):
-├── db/Scripts/ + db/Consult360.DbMigrator/   DbUp scripts and runner (§11)
+├── db/Scripts/ + db/DocNyle.DbMigrator/   DbUp scripts and runner (§11)
 └── tests/                                    unit, integration (LocalDB), parity (§12)
 
 Consumer (existing repository):
@@ -827,7 +827,7 @@ db/
 │   ├── 0004_SeedReferenceData.sql      (time zones, payers, compliances, catalogs)
 │   └── 0005_SeedDemoData.sql           (demo hospitals, users, patients — dev/test only)
 ├── Procedures/                         (= docs/stored-procedures.sql split per schema; "always run")
-└── Consult360.DbMigrator/              (console app, .NET 4.8)
+└── DocNyle.DbMigrator/              (console app, .NET 4.8)
 ```
 
 Every procedure uses `CREATE OR ALTER`, so the `Procedures/` folder is an "always run" script

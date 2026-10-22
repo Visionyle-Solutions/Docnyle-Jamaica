@@ -2,7 +2,7 @@
 using System.Runtime.InteropServices;
 
 [assembly: AssemblyTitle("OpdProject")]
-[assembly: AssemblyDescription("Consult360 OPD Consultation Module - ASP.NET Web Forms (.NET Framework 4.8)")]
+[assembly: AssemblyDescription("DocNyle OPD Consultation Module - ASP.NET Web Forms (.NET Framework 4.8)")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("OpdProject")]

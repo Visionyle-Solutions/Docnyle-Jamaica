@@ -109,8 +109,8 @@ namespace OpdProject.Web
             {
                 var s = HttpContext.Current != null ? HttpContext.Current.Session : null;
                 if (s == null) return new System.Collections.Generic.Dictionary<string, object>();
-                var d = s["Consult360.SessionIndex"] as System.Collections.Generic.Dictionary<string, object>;
-                if (d == null) s["Consult360.SessionIndex"] = d = new System.Collections.Generic.Dictionary<string, object>();
+                var d = s["DocNyle.SessionIndex"] as System.Collections.Generic.Dictionary<string, object>;
+                if (d == null) s["DocNyle.SessionIndex"] = d = new System.Collections.Generic.Dictionary<string, object>();
                 return d;
             }
         }

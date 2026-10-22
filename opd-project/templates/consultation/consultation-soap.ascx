@@ -11,7 +11,7 @@
 
     <asp:PlaceHolder ID="VoiceHolder" runat="server">
       <div style="display:flex; gap:8px; margin-bottom:8px;">
-        <button class="btn btn--sm" id="voiceDictateBtn" type="button" style="background:var(--surface-page);" onclick="Consult360.toggleVoice();">
+        <button class="btn btn--sm" id="voiceDictateBtn" type="button" style="background:var(--surface-page);" onclick="DocNyle.toggleVoice();">
           <i class="ti ti-microphone" aria-hidden="true"></i> <span id="voiceBtnLabel">Start Dictation</span>
         </button>
         <span id="voiceStatus" class="text-xs text-muted" style="align-self:center;"></span>
@@ -126,7 +126,7 @@
         <i class="ti ti-writing" aria-hidden="true" style="color:var(--color-primary);"></i>
         <strong class="text-sm">Sketches &amp; Handwritten Notes</strong>
         <asp:PlaceHolder ID="PadToggleHolder" runat="server">
-          <button class="btn btn--xs btn--ghost" type="button" onclick="Consult360.toggleDrawingPad();"><i class="ti ti-pencil-plus" aria-hidden="true"></i> Open Drawing Pad</button>
+          <button class="btn btn--xs btn--ghost" type="button" onclick="DocNyle.toggleDrawingPad();"><i class="ti ti-pencil-plus" aria-hidden="true"></i> Open Drawing Pad</button>
         </asp:PlaceHolder>
       </div>
       <div id="drawingPadContainer"></div>
@@ -149,26 +149,26 @@
   </div>
 </div>
 <script>
-  window.Consult360 = window.Consult360 || {};
-  Consult360.toggleVoice = function () {
+  window.DocNyle = window.DocNyle || {};
+  DocNyle.toggleVoice = function () {
     if (!window.VoiceSOAP || !window.VoiceSOAP.isSupported()) { alert('Voice dictation needs the Web Speech API — use Chrome or Edge.'); return; }
-    if (!Consult360._voiceReady) {
+    if (!DocNyle._voiceReady) {
       window.VoiceSOAP.init({ lang: 'en-IN', onStatusChange: function (s) {
         var btn = document.getElementById('voiceDictateBtn'), label = document.getElementById('voiceBtnLabel'), st = document.getElementById('voiceStatus');
         btn.style.background = s.isListening ? 'var(--color-danger)' : 'var(--surface-page)'; btn.style.color = s.isListening ? '#fff' : '';
         label.textContent = s.isListening ? 'Stop dictation' : 'Start dictation';
         st.textContent = s.isListening ? '🔴 Listening... Say "Subjective", "Objective", or "Plan" to switch sections' : (s.error ? 'Voice error: ' + s.error : '');
       } });
-      Consult360._voiceReady = true;
+      DocNyle._voiceReady = true;
     }
     window.VoiceSOAP.toggle('soapSubjective');
   };
-  Consult360.toggleDrawingPad = function () {
+  DocNyle.toggleDrawingPad = function () {
     var c = document.getElementById('drawingPadContainer');
-    if (Consult360._pad) { Consult360._pad.destroy(); Consult360._pad = null; return; }
+    if (DocNyle._pad) { DocNyle._pad.destroy(); DocNyle._pad = null; return; }
     /* Fit the card: up to 560px wide, never wider than the Observations column */
     var w = Math.max(240, Math.min(560, c.clientWidth - 2));
-    Consult360._pad = window.DrawingPad.create({ container: c, width: w, height: 250, onSave: function (d) {
+    DocNyle._pad = window.DrawingPad.create({ container: c, width: w, height: 250, onSave: function (d) {
       document.getElementById('sketchData').value = d.jpeg;
       document.getElementById('sketchTitle').value = d.title || '';
       <%= Page.ClientScript.GetPostBackEventReference(SaveSketchButton, "") %>;

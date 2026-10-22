@@ -1,4 +1,4 @@
-# Consult360 — API-to-page mapping
+# DocNyle — API-to-page mapping
 
 Generated from the code: each page's facade calls (`Services/*Service.cs`) resolved to the DOCNyle API operations
 (`Helpers/CommonHelper.cs`, one method per operation) they reach in `Api` mode. Every API call is made by `CommonHelper`.

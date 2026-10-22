@@ -1,5 +1,5 @@
 /* ============================================================
-   Consult360 — SQL Server 2019 Schema
+   DocNyle — SQL Server 2019 Schema
    Version: 4.1 (2026-10-17: + sec.LabClaimAttempt; 4.0 in sync with the application models, 2026-10-15)
 
    Source of truth: the C# models in the Models folder, held today by the in-memory

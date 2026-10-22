@@ -22,7 +22,7 @@ namespace OpdProject.Web
         protected virtual bool AllowAnonymous { get { return false; } }
 
         /// <summary>Page heading shown in the browser title.</summary>
-        public virtual string PageTitle { get { return "Consult360"; } }
+        public virtual string PageTitle { get { return "DocNyle"; } }
 
         protected AppUser CurrentUser { get; private set; }
         protected string UserId { get { return CurrentUser != null ? CurrentUser.UserId : null; } }
@@ -61,6 +61,7 @@ namespace OpdProject.Web
             /* endResponse: true — nothing on a guarded page may run for an unauthorised request */
             if (CurrentUser == null && !AllowAnonymous)
                 Response.Redirect(Urls.Login + "?returnUrl=" + HttpUtility.UrlEncode(Request.RawUrl), true);
+            if (CurrentUser != null) AppSession.KeepAlive();
             if (CurrentUser != null && !UserService.HasPermission(CurrentUser, RequiredPermission))
                 Response.Redirect(Urls.To("access-denied") + "?page=" + HttpUtility.UrlEncode(PageTitle), true);
         }
@@ -68,7 +69,7 @@ namespace OpdProject.Web
         protected override void OnPreRender(EventArgs e)
         {
             base.OnPreRender(e);
-            Title = PageTitle + " · Consult360";
+            Title = PageTitle + " · DocNyle";
         }
 
         protected bool Can(string feature) { return UserService.HasPermission(CurrentUser, feature); }
@@ -112,6 +113,7 @@ namespace OpdProject.Web
                     target = Urls.Login + "?returnUrl=" + HttpUtility.UrlEncode(Request.RawUrl);
                     break;
                 case ApiFaultKind.Forbidden:
+                    ToastWarning("Access denied", api.UserMessage);
                     target = Urls.To("access-denied") + "?page=" + HttpUtility.UrlEncode(PageTitle);
                     break;
                 case ApiFaultKind.Network:
