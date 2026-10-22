@@ -316,6 +316,16 @@ textarea.form-control { height: auto; min-height: 72px; padding: var(--space-2);
 }
 .state-panel i { font-size: 32px; margin-bottom: var(--space-2); display: block; }
 
+/* A postback (and the API calls behind it) is in flight — see site.js duplicate-submit guard */
+body.is-submitting { cursor: progress; }
+.is-busy { position: relative; opacity: .7; pointer-events: none; }
+.btn.is-busy::after {
+  content: ""; width: 12px; height: 12px; margin-left: 8px; display: inline-block; vertical-align: middle;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
+  animation: c360-spin .7s linear infinite;
+}
+@keyframes c360-spin { to { transform: rotate(360deg); } }
+
 /* Accessibility utility */
 .sr-only {
   position: absolute;

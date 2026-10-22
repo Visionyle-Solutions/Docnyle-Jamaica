@@ -1,7 +1,11 @@
-using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System;
+using OpdProject.Helpers;
 using OpdProject.Models;
+using OpdProject.Services.Api;
+using OpdProject.Web;
 
 namespace OpdProject.Services
 {
@@ -14,8 +18,10 @@ namespace OpdProject.Services
     }
 
     /// <summary>The consultation workspace: vitals, complaints, diagnoses, SOAP, prescriptions, labs, referrals, follow-up, sign-off.</summary>
-    public static class ConsultationService
+    public static partial class ConsultationService
     {
+        private static readonly CommonHelper cnHelperObj = new CommonHelper();
+
         public static readonly Dictionary<string, VitalRange> VitalRanges = new Dictionary<string, VitalRange>
         {
             { "TEMP", new VitalRange { Min = 90, Max = 110, Label = "90-110°F" } },
@@ -35,12 +41,14 @@ namespace OpdProject.Services
 
         public static Consultation Get(string consultationId)
         {
+            if (Api) return ApiGet(consultationId);
             lock (DataStore.Sync) return DataStore.Consultations.FirstOrDefault(c => c.ConsultationId == consultationId);
         }
 
         /// <summary>Returns the doctor's IN_PROGRESS consultation for the patient, creating one if none exists.</summary>
         public static Consultation GetOrCreate(string patientId, string doctorId, string hospitalId)
         {
+            if (Api) return ApiGetOrCreate(patientId, doctorId, null);
             lock (DataStore.Sync)
             {
                 var c = DataStore.Consultations.FirstOrDefault(x => x.PatientId == patientId && x.DoctorId == doctorId && x.Status == "IN_PROGRESS");
@@ -60,6 +68,11 @@ namespace OpdProject.Services
         /// <summary>The doctor's IN_PROGRESS consultation for the patient, or null (never creates one).</summary>
         public static Consultation FindInProgress(string patientId, string doctorId)
         {
+            if (Api)
+            {
+                var c = DocNyle.OrNull(() => cnHelperObj.GetInProgressConsultation(AppSession.ApiHospitalId, AppSession.ApiUserId, patientId, doctorId, AppSession.ApiHashValue).EnsureSuccess())?.Consultation;
+                return c != null ? (ApiGet(c.ConsultationId) ?? ToModel(c)) : null;
+            }
             lock (DataStore.Sync) return DataStore.Consultations.FirstOrDefault(x => x.PatientId == patientId && x.DoctorId == doctorId && x.Status == "IN_PROGRESS");
         }
 
@@ -69,6 +82,7 @@ namespace OpdProject.Services
         /// </summary>
         public static Consultation Open(string patientId, string doctorId, string hospitalId)
         {
+            if (Api) return ApiOpen(patientId, doctorId, hospitalId);
             var c = GetOrCreate(patientId, doctorId, hospitalId);
             var appt = SchedulingService.ListAppointments(hospitalId, doctorId, TimeZoneService.Today(hospitalId))
                 .FirstOrDefault(a => a.PatientId == patientId && (a.Status == "CHECKED_IN" || a.Status == "IN_CONSULT"));
@@ -82,12 +96,20 @@ namespace OpdProject.Services
 
         public static List<Consultation> ListForDate(string hospitalId, DateTime date)
         {
+            if (Api)
+                return (cnHelperObj.ListConsultationsForDate(AppSession.ApiHospitalId, AppSession.ApiUserId, DocNyle.Date(date), AppSession.ApiHashValue).EnsureSuccess().Consultations ?? new List<CON_ConsultationSummaryInfo>())
+                    .Select(s => ToModel(new CON_ConsultationInfo
+                    {
+                        ConsultationId = s.ConsultationId, PatientId = s.PatientId, DoctorId = s.DoctorId, AppointmentId = s.AppointmentId,
+                        Status = s.Status, VisitDate = s.VisitDate, VisitLocalDate = DocNyle.Date(date),
+                    })).ToList();
             lock (DataStore.Sync) return DataStore.Consultations.Where(c => c.HospitalId == hospitalId && c.VisitLocalDate == date.Date).ToList();
         }
 
         /// <summary>Signed visits of the patient, newest first, summarised for the context panel.</summary>
         public static List<PastVisit> ListPastVisits(string patientId)
         {
+            if (Api) return ApiPastVisits(patientId);
             lock (DataStore.Sync)
             {
                 return DataStore.Consultations.Where(c => c.PatientId == patientId && c.Status == "LOCKED")
@@ -110,6 +132,14 @@ namespace OpdProject.Services
 
         public static void SkipStep(string consultationId, string step)
         {
+            if (Api)
+            {
+                var c = ApiGet(consultationId);
+                if (c == null || c.SkippedSteps.Contains(step)) return;
+                ApiSaveSoap(c, c.SubjectiveText, c.ObjectiveText, c.PlanText, c.SubjectivePersonal, c.ObjectivePersonal, c.PlanPersonal,
+                    c.SkippedSteps.Concat(new[] { step }).ToList());
+                return;
+            }
             lock (DataStore.Sync)
             {
                 var c = Get(consultationId);
@@ -121,6 +151,7 @@ namespace OpdProject.Services
 
         public static ConsultationVitals GetVitals(string consultationId)
         {
+            if (Api) return ApiGetVitals(consultationId);
             lock (DataStore.Sync) return DataStore.Vitals.FirstOrDefault(v => v.ConsultationId == consultationId);
         }
 
@@ -133,7 +164,8 @@ namespace OpdProject.Services
             VitalRange r;
             if (VitalRanges.TryGetValue(code, out r)) return r;
             VitalConfig cfg;
-            lock (DataStore.Sync) cfg = DataStore.VitalsConfig.FirstOrDefault(v => v.HospitalId == hospitalId && v.VitalCode == code);
+            if (DataSource.IsApi("Hospital")) cfg = HospitalService.ListVitalsConfig(hospitalId, false).FirstOrDefault(v => v.VitalCode == code);
+            else lock (DataStore.Sync) cfg = DataStore.VitalsConfig.FirstOrDefault(v => v.HospitalId == hospitalId && v.VitalCode == code);
             if (cfg == null || (!cfg.MinValue.HasValue && !cfg.MaxValue.HasValue)) return null;
             var unit = string.IsNullOrEmpty(cfg.AllowedUnits) ? "" : " " + cfg.AllowedUnits;
             Func<double, string> n = d => d.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -168,6 +200,7 @@ namespace OpdProject.Services
         /// <summary>Upserts the visit's vitals (one row per consultation) and derives BMI.</summary>
         public static ConsultationVitals SaveVitals(string consultationId, IDictionary<string, double?> values, string userId)
         {
+            if (Api) return ApiSaveVitals(consultationId, values);
             lock (DataStore.Sync)
             {
                 var row = GetVitals(consultationId);
@@ -238,11 +271,17 @@ namespace OpdProject.Services
 
         public static List<SymptomCatalogItem> ListSymptomCatalog(string hospitalId)
         {
+            if (Api) return ApiSymptomCatalog();
             lock (DataStore.Sync) return DataStore.SymptomCatalog.Where(s => s.HospitalId == hospitalId && s.IsActive).ToList();
         }
 
         public static string SymptomLabel(string hospitalId, string code)
         {
+            if (Api)
+            {
+                var hit = ApiSymptomCatalog().FirstOrDefault(x => x.SymptomCode == code);
+                return hit != null ? hit.DisplayLabel : code;
+            }
             lock (DataStore.Sync)
             {
                 var s = DataStore.SymptomCatalog.FirstOrDefault(x => x.HospitalId == hospitalId && x.SymptomCode == code);
@@ -252,6 +291,7 @@ namespace OpdProject.Services
 
         public static Dictionary<string, string> GetSymptomStates(string consultationId)
         {
+            if (Api) return new Dictionary<string, string>(ApiSymptomStates(consultationId));
             lock (DataStore.Sync)
                 return DataStore.Symptoms.Where(s => s.ConsultationId == consultationId).ToDictionary(s => s.SymptomCode, s => s.State);
         }
@@ -259,6 +299,14 @@ namespace OpdProject.Services
         /// <summary>Cycles a complaint unset → yes → no → unset and returns the new state.</summary>
         public static string CycleSymptom(string consultationId, string code)
         {
+            if (Api)
+            {
+                string cur;
+                if (!ApiSymptomStates(consultationId).TryGetValue(code, out cur)) cur = "UNSET";
+                var next = cur == "UNSET" ? "YES" : cur == "YES" ? "NO" : "UNSET";
+                ApiSetSymptom(consultationId, code, next);
+                return next;
+            }
             lock (DataStore.Sync)
             {
                 var row = DataStore.Symptoms.FirstOrDefault(s => s.ConsultationId == consultationId && s.SymptomCode == code);
@@ -275,6 +323,19 @@ namespace OpdProject.Services
         /// <summary>Adds a custom complaint to the catalog (if new) and marks it YES for the visit.</summary>
         public static void AddCustomSymptom(string hospitalId, string consultationId, string label)
         {
+            if (Api)
+            {
+                var existing = ApiSymptomCatalog().FirstOrDefault(s => string.Equals(s.DisplayLabel, label, StringComparison.OrdinalIgnoreCase));
+                var code = existing != null ? existing.SymptomCode : null;
+                if (code == null)
+                {
+                    var created = cnHelperObj.CreateCustomSymptom(new CON_CreateCustomSymptomReq { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue, DisplayLabel = label }).EnsureSuccess().Symptom;
+                    HospitalCache.Clear("symptom-catalog");
+                    code = created != null ? created.SymptomCode : label;
+                }
+                ApiSetSymptom(consultationId, code, "YES");
+                return;
+            }
             lock (DataStore.Sync)
             {
                 var code = System.Text.RegularExpressions.Regex.Replace(label.ToUpperInvariant(), "[^A-Z0-9]", "_");
@@ -293,6 +354,7 @@ namespace OpdProject.Services
         {
             var t = (term ?? "").Trim().ToLowerInvariant();
             if (t.Length < 2) return new List<Icd10Entry>();
+            if (Api) return (cnHelperObj.SearchIcd10Catalog(AppSession.ApiHospitalId, AppSession.ApiUserId, term.Trim(), AppSession.ApiHashValue).EnsureSuccess().Icd10Codes ?? new List<CON_Icd10Info>()).Select(ToModel).ToList();
             lock (DataStore.Sync)
                 return DataStore.Icd10Catalog.Where(r => r.Icd10Code.ToLowerInvariant().StartsWith(t) || r.Description.ToLowerInvariant().Contains(t)
                     || (r.SynonymTerms ?? "").ToLowerInvariant().Split(',').Any(s => s.Trim().Contains(t))).ToList();
@@ -300,17 +362,34 @@ namespace OpdProject.Services
 
         public static Icd10Entry GetIcd10(string code)
         {
+            if (Api)
+                return string.IsNullOrEmpty(code) ? null
+                    : (cnHelperObj.SearchIcd10Catalog(AppSession.ApiHospitalId, AppSession.ApiUserId, code, AppSession.ApiHashValue).EnsureSuccess().Icd10Codes ?? new List<CON_Icd10Info>()).Where(i => i.Code == code).Select(ToModel).FirstOrDefault();
             lock (DataStore.Sync) return DataStore.Icd10Catalog.FirstOrDefault(r => r.Icd10Code == code);
         }
 
         public static List<ConsultationDiagnosis> ListDiagnoses(string consultationId)
         {
+            if (Api)
+                return RequestCache.Get("diagnoses:" + consultationId, () =>
+                    (cnHelperObj.ListConsultationDiagnoses(AppSession.ApiHospitalId, AppSession.ApiUserId, consultationId, AppSession.ApiHashValue).EnsureSuccess().Diagnoses ?? new List<CON_DiagnosisInfo>()).Select(ToModel).OrderBy(d => d.SequenceOrder).ToList());
             lock (DataStore.Sync) return DataStore.Diagnoses.Where(d => d.ConsultationId == consultationId).OrderBy(d => d.SequenceOrder).ToList();
         }
 
         /// <summary>Code + clinical reasoning saved as one record; the first diagnosis on a visit is primary.</summary>
         public static ConsultationDiagnosis AddDiagnosis(string consultationId, string code, string description, string notes, string laterality, string acuteChronic)
         {
+            if (Api)
+            {
+                var d = cnHelperObj.CreateDiagnosis(new CON_CreateDiagnosisReq
+                {
+                    HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue,
+                    ConsultationId = consultationId, Icd10Code = code, Icd10Description = description, ClinicalNotes = notes,
+                    Laterality = string.IsNullOrEmpty(laterality) ? null : laterality, AcuteChronic = string.IsNullOrEmpty(acuteChronic) ? null : acuteChronic,
+                }).EnsureSuccess().Diagnosis;
+                RequestCache.Remove("diagnoses:" + consultationId);
+                return d != null ? ToModel(d) : null;
+            }
             lock (DataStore.Sync)
             {
                 var existing = DataStore.Diagnoses.Count(d => d.ConsultationId == consultationId);
@@ -326,6 +405,7 @@ namespace OpdProject.Services
 
         public static void RemoveDiagnosis(string diagnosisId)
         {
+            if (Api) { cnHelperObj.DeleteDiagnosis(new CON_DeleteDiagnosisReq { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue, DiagnosisId = diagnosisId }).EnsureSuccess(); RequestCache.RemovePrefix("diagnoses:"); return; }
             lock (DataStore.Sync)
             {
                 var dx = DataStore.Diagnoses.FirstOrDefault(d => d.DiagnosisId == diagnosisId);
@@ -343,6 +423,12 @@ namespace OpdProject.Services
 
         public static void SaveSoap(string consultationId, string s, string o, string p, string sPersonal, string oPersonal, string pPersonal)
         {
+            if (Api)
+            {
+                var c = ApiGet(consultationId);
+                if (c != null) ApiSaveSoap(c, s, o, p, sPersonal, oPersonal, pPersonal, c.SkippedSteps);
+                return;
+            }
             lock (DataStore.Sync)
             {
                 var c = Get(consultationId);
@@ -356,6 +442,7 @@ namespace OpdProject.Services
 
         public static List<Prescription> ListPrescriptions(string consultationId)
         {
+            if (Api) return RequestCache.Get("rx:" + consultationId, () => Map(cnHelperObj.ListPrescriptions(AppSession.ApiHospitalId, AppSession.ApiUserId, consultationId, AppSession.ApiHashValue).EnsureSuccess()).Where(p => p.Status == "ACTIVE").ToList());
             lock (DataStore.Sync) return DataStore.Prescriptions.Where(p => p.ConsultationId == consultationId && p.Status == "ACTIVE").ToList();
         }
 
@@ -363,6 +450,7 @@ namespace OpdProject.Services
         /// plus outside medicines recorded on the patient record.</summary>
         public static List<Prescription> ListActiveMedications(string patientId)
         {
+            if (Api) return Map(cnHelperObj.ListActiveMedicationsForPatient(AppSession.ApiHospitalId, AppSession.ApiUserId, patientId, AppSession.ApiHashValue).EnsureSuccess()).Where(IsCurrent).ToList();
             lock (DataStore.Sync) return DataStore.Prescriptions.Where(p => p.PatientId == patientId && IsCurrent(p)).ToList();
         }
 
@@ -370,6 +458,7 @@ namespace OpdProject.Services
         public static bool IsCurrent(Prescription p)
         {
             if (p.Status != "ACTIVE" || !p.PeriodEnd.HasValue) return p.Status == "ACTIVE";
+            if (Api) return p.PeriodEnd.Value.Date >= TimeZoneService.Today(CallerHospital);
             var c = Get(p.ConsultationId);
             return p.PeriodEnd.Value.Date >= TimeZoneService.Today(c != null ? c.HospitalId : null);
         }
@@ -377,19 +466,25 @@ namespace OpdProject.Services
         /// <summary>Every medicine on the patient's record (current, completed and discontinued), newest first.</summary>
         public static List<Prescription> ListMedicationHistory(string patientId)
         {
+            if (Api)
+                return RequestCache.Get("rx-history:" + patientId, () =>
+                    Map(cnHelperObj.ListPatientMedicationHistory(AppSession.ApiHospitalId, AppSession.ApiUserId, patientId, AppSession.ApiHashValue).EnsureSuccess()).OrderByDescending(p => p.PeriodStart ?? p.PrescribedDate).ToList());
             lock (DataStore.Sync)
                 return DataStore.Prescriptions.Where(p => p.PatientId == patientId)
                     .OrderByDescending(p => p.PeriodStart ?? p.PrescribedDate).ToList();
         }
 
-        public static Prescription GetPrescription(string prescriptionId)
+        /// <summary>API mode reads the prescription from the patient's medication history, so <paramref name="patientId"/> is required there.</summary>
+        public static Prescription GetPrescription(string prescriptionId, string patientId = null)
         {
+            if (Api) return string.IsNullOrEmpty(patientId) ? null : ListMedicationHistory(patientId).FirstOrDefault(p => p.PrescriptionId == prescriptionId);
             lock (DataStore.Sync) return DataStore.Prescriptions.FirstOrDefault(p => p.PrescriptionId == prescriptionId);
         }
 
         /// <summary>Adds or updates a medicine prescribed elsewhere (no consultation). Only outside records can be edited here.</summary>
         public static Prescription SaveOutsideMedication(Prescription record)
         {
+            if (Api) { RequestCache.Remove("rx-history:" + record.PatientId); return ApiSaveOutsideMedication(record); }
             lock (DataStore.Sync)
             {
                 var existing = string.IsNullOrEmpty(record.PrescriptionId) ? null
@@ -417,6 +512,7 @@ namespace OpdProject.Services
 
         public static Prescription AddPrescription(Prescription record)
         {
+            if (Api) { RequestCache.Remove("rx:" + record.ConsultationId); return ApiAddPrescription(record); }
             lock (DataStore.Sync)
             {
                 record.PrescriptionId = DataStore.NextId("RX");
@@ -434,6 +530,12 @@ namespace OpdProject.Services
 
         public static void DiscontinuePrescription(string prescriptionId)
         {
+            if (Api)
+            {
+                cnHelperObj.CancelPrescription(new CON_CancelPrescriptionReq { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue, PrescriptionId = prescriptionId }).EnsureSuccess();
+                RequestCache.RemovePrefix("rx");
+                return;
+            }
             lock (DataStore.Sync)
             {
                 var p = DataStore.Prescriptions.FirstOrDefault(x => x.PrescriptionId == prescriptionId);
@@ -444,6 +546,16 @@ namespace OpdProject.Services
         /// <summary>Active prescriptions from this doctor's most recent signed visit with the patient ("Repeat previous").</summary>
         public static List<Prescription> ListPreviousPrescriptionsByDoctor(string patientId, string doctorId, out Consultation fromVisit)
         {
+            if (Api)
+            {
+                var prev = cnHelperObj.ListPreviousPrescriptionsByDoctor(AppSession.ApiHospitalId, AppSession.ApiUserId, patientId, doctorId, AppSession.ApiHashValue).EnsureSuccess();
+                fromVisit = prev.Found && prev.Consultation != null ? (ApiGet(prev.Consultation.ConsultationId) ?? new Consultation
+                {
+                    ConsultationId = prev.Consultation.ConsultationId, PatientId = patientId, DoctorId = doctorId, HospitalId = CallerHospital,
+                    VisitLocalDate = DocNyle.LocalOrMin(prev.Consultation.VisitDate).Date, Status = "LOCKED", IsLocked = true,
+                }) : null;
+                return fromVisit == null ? new List<Prescription>() : (prev.Prescriptions ?? new List<CON_PrescriptionInfo>()).Select(ToModel).Where(p => p.Status == "ACTIVE").ToList();
+            }
             lock (DataStore.Sync)
             {
                 fromVisit = DataStore.Consultations.Where(c => c.PatientId == patientId && c.DoctorId == doctorId && c.Status == "LOCKED")
@@ -458,6 +570,9 @@ namespace OpdProject.Services
         public static List<ClinicalAlert> CheckDrugAllergyConflicts(string patientId, string medicineName, string composition)
         {
             var alerts = new List<ClinicalAlert>();
+            if (Api)
+                return (cnHelperObj.CheckDrugAllergyConflicts(AppSession.ApiHospitalId, AppSession.ApiUserId, patientId, medicineName, composition, AppSession.ApiHashValue).EnsureSuccess().Alerts ?? new List<CON_DrugAllergyAlertInfo>())
+                    .Select(a => new ClinicalAlert { Severity = string.IsNullOrEmpty(a.Severity) ? "CRITICAL" : a.Severity, Type = "DRUG_ALLERGY", Message = a.Message }).ToList();
             var drug = (medicineName + " " + (composition ?? "")).ToLowerInvariant();
             var firstWord = (medicineName ?? "").ToLowerInvariant().Split(' ')[0];
             foreach (var a in PatientService.ListAllergies(patientId, true))
@@ -476,11 +591,25 @@ namespace OpdProject.Services
 
         public static List<InvestigationOrder> ListOrders(string consultationId)
         {
+            if (Api)
+                return RequestCache.Get("orders:" + consultationId, () =>
+                    (cnHelperObj.ListInvestigationOrders(AppSession.ApiHospitalId, AppSession.ApiUserId, consultationId, AppSession.ApiHashValue).EnsureSuccess().Orders ?? new List<CON_InvestigationOrderInfo>()).Select(ToModel).OrderBy(o => o.OrderedAt).ToList());
             lock (DataStore.Sync) return DataStore.Orders.Where(o => o.ConsultationId == consultationId).OrderBy(o => o.OrderedAt).ToList();
         }
 
         public static InvestigationOrder AddOrder(Consultation c, LabTest test)
         {
+            if (Api)
+            {
+                if (ListOrders(c.ConsultationId).Any(x => x.TestId == test.TestId)) return null;
+                var created = cnHelperObj.CreateInvestigationOrder(new CON_CreateInvestigationOrderReq
+                {
+                    HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue,
+                    ConsultationId = c.ConsultationId, PatientId = c.PatientId, TestId = test.TestId, TestName = test.TestName, TestType = test.TestType,
+                }).EnsureSuccess().Order;
+                RequestCache.Remove("orders:" + c.ConsultationId);
+                return created != null ? ToModel(created) : null;
+            }
             lock (DataStore.Sync)
             {
                 if (DataStore.Orders.Any(o => o.ConsultationId == c.ConsultationId && o.TestId == test.TestId)) return null;
@@ -497,16 +626,34 @@ namespace OpdProject.Services
         /// <summary>Only an order the lab has not picked up yet (ORDERED) can be removed.</summary>
         public static bool RemoveOrder(string orderId)
         {
+            if (Api)
+            {
+                // 50218: the lab has already picked the order up (or the visit is signed).
+                try { cnHelperObj.DeleteInvestigationOrder(new CON_DeleteInvestigationOrderReq { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue, OrderId = orderId }).EnsureSuccess(); }
+                catch (ApiException ex) when (ex.ErrorNumber == 50218) { return false; }
+                RequestCache.RemovePrefix("orders:");
+                return true;
+            }
             lock (DataStore.Sync) return DataStore.Orders.RemoveAll(o => o.OrderId == orderId && o.Status == "ORDERED") > 0;
         }
 
         public static List<Referral> ListReferrals(string consultationId)
         {
+            if (Api) return (cnHelperObj.ListReferrals(AppSession.ApiHospitalId, AppSession.ApiUserId, consultationId, AppSession.ApiHashValue).EnsureSuccess().Referrals ?? new List<CON_ReferralInfo>()).Select(ToModel).OrderBy(x => x.CreatedAt).ToList();
             lock (DataStore.Sync) return DataStore.Referrals.Where(r => r.ConsultationId == consultationId).OrderBy(r => r.CreatedAt).ToList();
         }
 
         public static Referral AddReferral(Consultation c, string specialty, string doctorName, string urgency, string reason)
         {
+            if (Api)
+            {
+                var saved = cnHelperObj.CreateReferral(new CON_CreateReferralReq
+                {
+                    HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue,
+                    ConsultationId = c.ConsultationId, PatientId = c.PatientId, Specialty = specialty, DoctorName = doctorName, Urgency = urgency, Reason = reason,
+                }).EnsureSuccess().Referral;
+                return saved != null ? ToModel(saved) : null;
+            }
             var row = new Referral
             {
                 ReferralId = DataStore.NextId("REF"), ConsultationId = c.ConsultationId, PatientId = c.PatientId, Specialty = specialty,
@@ -520,6 +667,7 @@ namespace OpdProject.Services
 
         public static List<ConsultationServiceItem> ListServiceItems(string consultationId)
         {
+            if (Api) return ApiServiceItems(consultationId);
             lock (DataStore.Sync) return DataStore.ConsultationServiceItems.Where(s => s.ConsultationId == consultationId).OrderBy(s => s.CreatedAt).ToList();
         }
 
@@ -527,6 +675,17 @@ namespace OpdProject.Services
         public static ConsultationServiceItem AddServiceItem(Consultation c, ServiceCharge svc, int qty, string notes, string userId,
             InventoryItem item = null, int itemQty = 0)
         {
+            if (Api)
+            {
+                var saved = cnHelperObj.CreateConsultationServiceItem(new CON_CreateConsultationServiceItemReq
+                {
+                    HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue,
+                    ConsultationId = c.ConsultationId, ServiceChargeId = svc.ServiceChargeId, Qty = Math.Max(1, qty), Notes = notes ?? "",
+                    InventoryItemId = item != null ? item.InventoryItemId : null, ItemQty = item != null ? Math.Max(1, itemQty) : (int?)null,
+                }).EnsureSuccess().ServiceItem;
+                RequestCache.Remove("service-items:" + c.ConsultationId);
+                return saved != null ? ToModel(saved) : null;
+            }
             var row = new ConsultationServiceItem
             {
                 ConsultationServiceId = DataStore.NextId("CSV"), ConsultationId = c.ConsultationId, PatientId = c.PatientId,
@@ -546,6 +705,12 @@ namespace OpdProject.Services
 
         public static void RemoveServiceItem(string consultationId, string itemId)
         {
+            if (Api)
+            {
+                cnHelperObj.DeleteConsultationServiceItem(new CON_DeleteConsultationServiceItemReq { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue, ConsultationId = consultationId, ConsultationServiceId = itemId }).EnsureSuccess();
+                RequestCache.Remove("service-items:" + consultationId);
+                return;
+            }
             lock (DataStore.Sync) DataStore.ConsultationServiceItems.RemoveAll(s => s.ConsultationServiceId == itemId && s.ConsultationId == consultationId);
         }
 
@@ -563,6 +728,12 @@ namespace OpdProject.Services
 
         public static void SaveFollowup(string consultationId, DateTime? date, string notes)
         {
+            if (Api)
+            {
+                cnHelperObj.SaveFollowup(new CON_SaveFollowupReq { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue, ConsultationId = consultationId, FollowUpDate = DocNyle.Date(date), FollowUpNotes = notes ?? "" }).EnsureSuccess();
+                Forget(consultationId);
+                return;
+            }
             lock (DataStore.Sync)
             {
                 var c = Get(consultationId);
@@ -574,13 +745,35 @@ namespace OpdProject.Services
 
         /* ── Confidential note, addenda ── */
 
+        /// <summary>API mode: only the author can read a confidential note (the service answers Forbidden for anyone else → null).</summary>
         public static ConfidentialNote GetConfidentialNote(string consultationId, string doctorId)
         {
+            if (Api)
+            {
+                if (AppSession.ApiUser == null || AppSession.ApiUser.UserId != doctorId) return null;
+                return RequestCache.Get("confidential:" + consultationId, () =>
+                {
+                    CON_ConfidentialNoteInfo n;
+                    try { n = DocNyle.OrNull(() => cnHelperObj.GetConfidentialNote(AppSession.ApiHospitalId, AppSession.ApiUserId, consultationId, AppSession.ApiHashValue).EnsureSuccess())?.ConfidentialNote; }
+                    catch (ApiException ex) when (ex.Kind == ApiFaultKind.Forbidden) { n = null; }
+                    return n == null ? null : new ConfidentialNote
+                    {
+                        ConfidentialNoteId = n.ConfidentialNoteId, ConsultationId = n.ConsultationId, DoctorId = n.DoctorId, NoteText = n.NoteText,
+                        CreatedAt = DocNyle.InstantOrMin(n.CreatedAt), UpdatedAt = DocNyle.InstantOrMin(n.UpdatedAt),
+                    };
+                });
+            }
             lock (DataStore.Sync) return DataStore.ConfidentialNotes.FirstOrDefault(n => n.ConsultationId == consultationId && n.DoctorId == doctorId);
         }
 
         public static void SaveConfidentialNote(string consultationId, string doctorId, string text)
         {
+            if (Api)
+            {
+                cnHelperObj.SaveConfidentialNote(new CON_SaveConfidentialNoteReq { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue, ConsultationId = consultationId, NoteText = text }).EnsureSuccess();
+                RequestCache.Remove("confidential:" + consultationId);
+                return;
+            }
             lock (DataStore.Sync)
             {
                 var n = GetConfidentialNote(consultationId, doctorId);
@@ -596,11 +789,18 @@ namespace OpdProject.Services
 
         public static List<Addendum> ListAddenda(string consultationId)
         {
+            if (Api)
+                return (cnHelperObj.ListAddendums(AppSession.ApiHospitalId, AppSession.ApiUserId, consultationId, AppSession.ApiHashValue).EnsureSuccess().Addendums ?? new List<CON_AddendumInfo>()).Select(a => new Addendum
+                {
+                    AddendumId = a.AddendumId, ConsultationId = a.ConsultationId, DoctorId = a.DoctorId, Category = a.Category, AddendumText = a.AddendumText,
+                    CreatedAt = DocNyle.InstantOrMin(a.CreatedAt),
+                }).OrderBy(a => a.CreatedAt).ToList();
             lock (DataStore.Sync) return DataStore.Addenda.Where(a => a.ConsultationId == consultationId).OrderBy(a => a.CreatedAt).ToList();
         }
 
         public static void AddAddendum(string consultationId, string doctorId, string category, string text)
         {
+            if (Api) { cnHelperObj.CreateAddendum(new CON_CreateAddendumReq { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue, ConsultationId = consultationId, Category = category, AddendumText = text }).EnsureSuccess(); return; }
             lock (DataStore.Sync)
                 DataStore.Addenda.Add(new Addendum { AddendumId = DataStore.NextId("ADD"), ConsultationId = consultationId, DoctorId = doctorId, Category = category, AddendumText = text, CreatedAt = DateTime.UtcNow });
         }
@@ -609,11 +809,21 @@ namespace OpdProject.Services
 
         public static List<ConsultationSketch> ListPatientSketches(string patientId)
         {
+            if (Api) return (cnHelperObj.ListPatientSketches(AppSession.ApiHospitalId, AppSession.ApiUserId, patientId, AppSession.ApiHashValue).EnsureSuccess().Sketches ?? new List<CON_SketchInfo>()).Select(ToModel).OrderByDescending(s => s.CreatedAt).ToList();
             lock (DataStore.Sync) return DataStore.Sketches.Where(s => s.PatientId == patientId).OrderByDescending(s => s.CreatedAt).ToList();
         }
 
         public static ConsultationSketch SaveSketch(Consultation c, string doctorId, string title, string imageData)
         {
+            if (Api)
+            {
+                var saved = cnHelperObj.SaveSketch(new CON_SaveSketchReq
+                {
+                    HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue,
+                    ConsultationId = c.ConsultationId, PatientId = c.PatientId, Title = string.IsNullOrWhiteSpace(title) ? "Untitled" : title.Trim(), ImageDataBase64 = imageData,
+                }).EnsureSuccess().Sketch;
+                return saved != null ? ToModel(saved) : null;
+            }
             var row = new ConsultationSketch
             {
                 SketchId = DataStore.NextId("SKT"), ConsultationId = c.ConsultationId, PatientId = c.PatientId, DoctorId = doctorId,
@@ -626,8 +836,18 @@ namespace OpdProject.Services
         /* ── Sign-off ── */
 
         /// <summary>Four-point attestation: locks the record and completes the linked appointment (IN_CONSULT → COMPLETED).</summary>
+        /// <summary>
+        /// API mode: ConfirmSignOff locks the record, completes the linked appointment and deducts the stock of the visit's
+        /// items in one transaction (fault 50040 when stock ran out).
+        /// </summary>
         public static void SignOff(string consultationId, string doctorId)
         {
+            if (Api)
+            {
+                cnHelperObj.ConfirmSignOff(new CON_ConfirmSignOffReq { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue, ConsultationId = consultationId }).EnsureSuccess();
+                Forget(consultationId);
+                return;
+            }
             lock (DataStore.Sync)
             {
                 var c = Get(consultationId);
@@ -643,6 +863,287 @@ namespace OpdProject.Services
                     appt.CompletedAt = DateTime.UtcNow;
                 }
             }
+        }
+
+        private static bool Api { get { return DataSource.IsApi("Consultation"); } }
+
+        private static string CallerHospital { get { return AppSession.ApiUser != null ? AppSession.ApiUser.HospitalId : null; } }
+
+        /* ── Consultation record ── */
+
+        private static Consultation ToModel(CON_ConsultationInfo c)
+        {
+            if (c == null) return null;
+            var detail = c as CON_ConsultationDetailInfo;
+            var zone = string.IsNullOrEmpty(c.TimeZoneId) ? TimeZoneService.HospitalZoneId(CallerHospital) : c.TimeZoneId;
+            var visit = DocNyle.ParseInstant(c.VisitDate) ?? DateTime.UtcNow;
+            var m = new Consultation
+            {
+                ConsultationId = c.ConsultationId, HospitalId = CallerHospital, PatientId = c.PatientId, DoctorId = c.DoctorId,
+                AppointmentId = c.AppointmentId, VisitDate = visit, TimeZoneId = zone,
+                VisitLocalDate = (DocNyle.ParseLocal(c.VisitLocalDate) ?? TimeZoneService.LocalDate(visit, zone)).Date,
+                Status = c.Status, IsLocked = c.IsLocked || c.Status == "LOCKED",
+            };
+            if (detail != null)
+            {
+                m.SubjectiveText = detail.SubjectiveText; m.ObjectiveText = detail.ObjectiveText; m.PlanText = detail.PlanText;
+                m.SubjectivePersonal = detail.SubjectivePersonal; m.ObjectivePersonal = detail.ObjectivePersonal; m.PlanPersonal = detail.PlanPersonal;
+                m.FollowupDate = DocNyle.ParseLocal(detail.FollowupDate); m.FollowupNotes = detail.FollowupNotes;
+                m.SkippedSteps = detail.SkippedSteps ?? new List<string>();
+            }
+            return m;
+        }
+
+        /// <summary>GetConsultationById (the full record with SOAP, follow-up and skipped steps), cached for the request.</summary>
+        private static Consultation ApiGet(string consultationId)
+        {
+            if (string.IsNullOrEmpty(consultationId)) return null;
+            return RequestCache.Get("consultation:" + consultationId,
+                () => ToModel(DocNyle.OrNull(() => cnHelperObj.GetConsultationById(AppSession.ApiHospitalId, AppSession.ApiUserId, consultationId, AppSession.ApiHashValue).EnsureSuccess())?.Consultation));
+        }
+
+        private static void Forget(string consultationId) { RequestCache.Remove("consultation:" + consultationId); }
+
+        private static Consultation ApiGetOrCreate(string patientId, string doctorId, string appointmentId)
+        {
+            var c = cnHelperObj.GetOrCreateConsultation(new CON_GetOrCreateConsultationReq { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue, PatientId = patientId, DoctorId = doctorId, AppointmentId = appointmentId }).EnsureSuccess().Consultation;
+            if (c == null) throw new ApiException(ApiFaultKind.BusinessRule, "GetOrCreateConsultation", "The consultation could not be opened.");
+            Forget(c.ConsultationId);
+            return ApiGet(c.ConsultationId) ?? ToModel(c);
+        }
+
+        /// <summary>
+        /// GetOrCreateConsultation with today's checked-in / in-consult appointment (so the link is stored by the service,
+        /// never by mutating a returned object), then CHECKED_IN → IN_CONSULT.
+        /// </summary>
+        private static Consultation ApiOpen(string patientId, string doctorId, string hospitalId)
+        {
+            var appt = SchedulingService.ListAppointments(hospitalId, doctorId, TimeZoneService.Today(hospitalId))
+                .FirstOrDefault(a => a.PatientId == patientId && (a.Status == "CHECKED_IN" || a.Status == "IN_CONSULT"));
+            var existing = DocNyle.OrNull(() => cnHelperObj.GetInProgressConsultation(AppSession.ApiHospitalId, AppSession.ApiUserId, patientId, doctorId, AppSession.ApiHashValue).EnsureSuccess())?.Consultation;
+            var c = existing != null && (appt == null || existing.AppointmentId != null)
+                ? ApiGet(existing.ConsultationId)
+                : ApiGetOrCreate(patientId, doctorId, appt != null ? appt.AppointmentId : null);
+            if (c != null && appt != null && !c.IsLocked && appt.Status == "CHECKED_IN")
+                SchedulingService.UpdateStatus(appt.AppointmentId, "IN_CONSULT", doctorId);
+            return c;
+        }
+
+        private static List<PastVisit> ApiPastVisits(string patientId)
+        {
+            return (cnHelperObj.ListPatientPastVisits(AppSession.ApiHospitalId, AppSession.ApiUserId, patientId, AppSession.ApiHashValue).EnsureSuccess().PastVisits ?? new List<CON_PastVisitInfo>()).Select(v => new PastVisit
+            {
+                ConsultationId = v.ConsultationId, VisitDate = (DocNyle.ParseLocal(v.VisitDate) ?? DocNyle.ParseInstant(v.VisitAt) ?? DateTime.MinValue).Date,
+                DoctorName = v.DoctorName, ChiefComplaint = string.IsNullOrEmpty(v.ChiefComplaint) ? "—" : v.ChiefComplaint,
+                PrimaryDiagnosis = string.IsNullOrEmpty(v.PrimaryDiagnosis) ? "—" : v.PrimaryDiagnosis,
+            }).OrderByDescending(v => v.VisitDate).ToList();
+        }
+
+        /// <summary>SaveSoapNotes carries the SOAP text and the skipped steps together, so both are always sent.</summary>
+        private static void ApiSaveSoap(Consultation c, string s, string o, string p, string sp, string op, string pp, List<string> skipped)
+        {
+            cnHelperObj.SaveSoapNotes(new CON_SaveSoapNotesReq
+            {
+                HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue,
+                ConsultationId = c.ConsultationId, SubjectiveText = s ?? "", ObjectiveText = o ?? "", PlanText = p ?? "",
+                SubjectivePersonal = sp ?? "", ObjectivePersonal = op ?? "", PlanPersonal = pp ?? "", SkippedSteps = skipped ?? new List<string>(),
+            }).EnsureSuccess();
+            Forget(c.ConsultationId);
+        }
+
+        /* ── Vitals ── */
+
+        private static ConsultationVitals ToModel(CON_VitalsInfo v)
+        {
+            if (v == null) return null;
+            Func<decimal?, double?> d = x => x.HasValue ? (double)x.Value : (double?)null;
+            var m = new ConsultationVitals
+            {
+                VitalId = v.ConsultationVitalId, ConsultationId = v.ConsultationId, TempValue = d(v.TempValue), BpSystolic = d(v.BpSystolic),
+                BpDiastolic = d(v.BpDiastolic), PulseBpm = d(v.PulseBpm), SpO2 = d(v.SpO2), HeightCm = d(v.HeightCm), WeightKg = d(v.WeightKg),
+                RespRate = d(v.RespRate), PainScale = d(v.PainScale), WaistCircCm = d(v.WaistCircCm), HeadCircCm = d(v.HeadCircCm), Bmi = d(v.Bmi),
+                RecordedAt = DocNyle.InstantOrMin(v.RecordedAt), RecordedBy = v.RecordedBy,
+            };
+            foreach (var kv in v.CustomValues ?? new List<KeyValueInfo>())
+            {
+                double x;
+                if (kv.Key != null && double.TryParse(kv.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out x)) m.CustomValues[kv.Key] = x;
+            }
+            return m;
+        }
+
+        private static ConsultationVitals ApiGetVitals(string consultationId)
+        {
+            return RequestCache.Get("vitals:" + consultationId, () => ToModel(cnHelperObj.GetConsultationVitals(AppSession.ApiHospitalId, AppSession.ApiUserId, consultationId, AppSession.ApiHashValue).EnsureSuccess().Vitals));
+        }
+
+        /// <summary>SaveVitals replaces the visit's row with the merged values; BMI is computed by the procedure.</summary>
+        private static ConsultationVitals ApiSaveVitals(string consultationId, IDictionary<string, double?> values)
+        {
+            var merged = ApiGetVitals(consultationId) ?? new ConsultationVitals { ConsultationId = consultationId };
+            foreach (var kv in values) SetVital(merged, kv.Key, kv.Value);
+            Func<double?, decimal?> m = x => x.HasValue ? (decimal)x.Value : (decimal?)null;
+            var saved = cnHelperObj.SaveVitals(new CON_SaveVitalsReq
+            {
+                HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue,
+                ConsultationId = consultationId, TempValue = m(merged.TempValue), BpSystolic = m(merged.BpSystolic), BpDiastolic = m(merged.BpDiastolic),
+                PulseBpm = m(merged.PulseBpm), SpO2 = m(merged.SpO2), HeightCm = m(merged.HeightCm), WeightKg = m(merged.WeightKg),
+                RespRate = m(merged.RespRate), PainScale = m(merged.PainScale), WaistCircCm = m(merged.WaistCircCm), HeadCircCm = m(merged.HeadCircCm),
+                CustomValues = (merged.CustomValues ?? new Dictionary<string, double?>()).Where(kv => kv.Value.HasValue)
+                    .Select(kv => new KeyValueInfo { Key = kv.Key, Value = kv.Value.Value.ToString(CultureInfo.InvariantCulture) }).ToList(),
+            }).EnsureSuccess().Vitals;
+            RequestCache.Remove("vitals:" + consultationId);
+            return ToModel(saved) ?? merged;
+        }
+
+        /* ── Complaints ── */
+
+        private static List<SymptomCatalogItem> ApiSymptomCatalog()
+        {
+            return HospitalCache.Get("symptom-catalog", () =>
+                (cnHelperObj.ListSymptomCatalog(AppSession.ApiHospitalId, AppSession.ApiUserId, AppSession.ApiHashValue).EnsureSuccess().Symptoms ?? new List<CON_SymptomInfo>()).Select(s => new SymptomCatalogItem
+                {
+                    SymptomCatalogId = s.SymptomCatalogId, SymptomCode = s.SymptomCode, DisplayLabel = s.SymptomName, IsQuickPick = s.IsQuickPick, IsActive = true,
+                }).ToList());
+        }
+
+        /// <summary>The API's NOT_ASKED is the page's UNSET.</summary>
+        private static string ToPageState(string apiState) { return apiState == "NOT_ASKED" || string.IsNullOrEmpty(apiState) ? "UNSET" : apiState; }
+
+        private static Dictionary<string, string> ApiSymptomStates(string consultationId)
+        {
+            return RequestCache.Get("symptoms:" + consultationId, () =>
+                (cnHelperObj.ListConsultationSymptoms(AppSession.ApiHospitalId, AppSession.ApiUserId, consultationId, AppSession.ApiHashValue).EnsureSuccess().Symptoms ?? new List<CON_ConsultationSymptomInfo>())
+                    .Where(s => !string.IsNullOrEmpty(s.SymptomCode)).GroupBy(s => s.SymptomCode)
+                    .ToDictionary(g => g.Key, g => ToPageState(g.First().State)));
+        }
+
+        private static void ApiSetSymptom(string consultationId, string code, string pageState)
+        {
+            cnHelperObj.UpdateSymptomState(new CON_UpdateSymptomStateReq
+            {
+                HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue,
+                ConsultationId = consultationId, SymptomName = code, State = pageState == "UNSET" ? "NOT_ASKED" : pageState,
+            }).EnsureSuccess();
+            RequestCache.Remove("symptoms:" + consultationId);
+        }
+
+        /* ── Diagnoses ── */
+
+        private static ConsultationDiagnosis ToModel(CON_DiagnosisInfo d)
+        {
+            return new ConsultationDiagnosis
+            {
+                DiagnosisId = d.ConsultationDiagnosisId, ConsultationId = d.ConsultationId, Icd10Code = d.Icd10Code, Icd10Description = d.Description,
+                ClinicalNotes = d.ClinicalNotes, Laterality = d.Laterality, AcuteChronic = d.Chronicity, IsPrimary = d.IsPrimary, SequenceOrder = d.SequenceOrder ?? 0,
+            };
+        }
+
+        private static Icd10Entry ToModel(CON_Icd10Info i)
+        {
+            return new Icd10Entry { Icd10CatalogId = i.Icd10CatalogId, Icd10Code = i.Code, Description = i.Description, SynonymTerms = i.Synonyms };
+        }
+
+        /* ── Prescriptions ── */
+
+        private static Prescription ToModel(CON_PrescriptionInfo p)
+        {
+            return new Prescription
+            {
+                PrescriptionId = p.PrescriptionId, ConsultationId = p.ConsultationId, PatientId = p.PatientId, Category = p.Category,
+                MedicineName = p.MedicineName, Strength = p.Strength, DrugForm = p.DrugForm, DeliveryRoute = p.DeliveryRoute, TakeInUnit = p.TakeInUnit,
+                TakeInQty = (double)(p.TakeInQty ?? 0), TimesPerDay = p.TimesPerDay ?? 0, DurationValue = p.DurationValue ?? 0, DurationUnit = p.DurationUnit,
+                PeriodStart = DocNyle.ParseLocal(p.PeriodStart), PeriodEnd = DocNyle.ParseLocal(p.PeriodEnd), TimingBf = p.TimingBf == true,
+                TimingAn = p.TimingAn == true, TimingNi = p.TimingNi == true, TimingEm = p.TimingEm == true, Prn = p.Prn == true,
+                Instructions = p.Instructions, FrequencyMode = p.FrequencyMode, FrequencyPeriod = p.FrequencyPeriod, DynamicInstruction = p.DynamicInstruction,
+                GenericClass = p.GenericClass, TherapeuticClass = p.TherapeuticClass, ValidityDays = p.ValidityDays ?? 0,
+                ValidUntil = DocNyle.ParseLocal(p.ValidUntil), TotalDispenseQty = (double)(p.TotalDispenseQty ?? 0), Status = p.Status,
+                PrescribedDate = DocNyle.ParseInstant(p.PrescribedDate) ?? DocNyle.InstantOrMin(p.CreatedAt), Source = p.Source, SourceDetail = p.SourceDetail,
+            };
+        }
+
+        private static List<Prescription> Map(CON_PrescriptionListResp r)
+        {
+            return (r.Prescriptions ?? new List<CON_PrescriptionInfo>()).Select(ToModel).ToList();
+        }
+
+        /// <summary>
+        /// CreatePrescription (the service runs the drug-allergy check and fills the drug classes). The contract has no
+        /// TakeInUnit, FrequencyMode / FrequencyPeriod, DynamicInstruction, TargetArea or PeriodStart members; those are derived by the service.
+        /// </summary>
+        private static Prescription ApiAddPrescription(Prescription r)
+        {
+            var saved = cnHelperObj.CreatePrescription(new CON_CreatePrescriptionReq
+            {
+                HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue,
+                ConsultationId = r.ConsultationId, PatientId = r.PatientId, Source = string.IsNullOrEmpty(r.Source) ? null : r.Source, SourceDetail = r.SourceDetail,
+                MedicineName = r.MedicineName, Strength = r.Strength, GenericClass = r.GenericClass, TherapeuticClass = r.TherapeuticClass, DrugForm = r.DrugForm,
+                DeliveryRoute = r.DeliveryRoute, Category = r.Category, TakeInQty = (decimal)r.TakeInQty, TimesPerDay = r.TimesPerDay,
+                DurationValue = r.DurationValue, DurationUnit = r.DurationUnit, Instructions = r.Instructions, Prn = r.Prn, TimingBf = r.TimingBf,
+                TimingAn = r.TimingAn, TimingNi = r.TimingNi, TimingEm = r.TimingEm, ValidityDays = r.ValidityDays > 0 ? r.ValidityDays : (int?)null,
+                RepeatedFromConsultationId = r.RepeatedFromConsultationId,
+            }).EnsureSuccess().Prescription;
+            return saved != null ? ToModel(saved) : r;
+        }
+
+        private static Prescription ApiSaveOutsideMedication(Prescription r)
+        {
+            var saved = cnHelperObj.SaveOutsideMedication(new CON_SaveOutsideMedicationReq
+            {
+                HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue,
+                PrescriptionId = string.IsNullOrEmpty(r.PrescriptionId) ? null : r.PrescriptionId, PatientId = r.PatientId, MedicineName = r.MedicineName,
+                Strength = r.Strength, DrugForm = r.DrugForm, TakeInQty = (decimal)r.TakeInQty, TakeInUnit = r.TakeInUnit, TimesPerDay = r.TimesPerDay,
+                TimingNi = r.TimingNi, Prn = r.Prn, FrequencyMode = r.FrequencyMode, DynamicInstruction = r.DynamicInstruction, Instructions = r.Instructions,
+                PeriodStart = DocNyle.Date(r.PeriodStart), SourceDetail = r.SourceDetail,
+            }).EnsureSuccess().Prescription;
+            return saved != null ? ToModel(saved) : r;
+        }
+
+        /* ── Orders, referrals, services ── */
+
+        private static InvestigationOrder ToModel(CON_InvestigationOrderInfo o)
+        {
+            return new InvestigationOrder
+            {
+                OrderId = o.OrderId, HospitalId = CallerHospital, ConsultationId = o.ConsultationId, PatientId = o.PatientId, TestId = o.TestId,
+                TestName = o.TestName, TestType = o.TestType, Status = o.Status, OrderedAt = DocNyle.InstantOrMin(o.OrderedAt), LabPartnerId = o.LabPartnerId,
+            };
+        }
+
+        private static Referral ToModel(CON_ReferralInfo r)
+        {
+            return new Referral
+            {
+                ReferralId = r.ReferralId, ConsultationId = r.ConsultationId, PatientId = r.PatientId, Specialty = r.Specialty, DoctorName = r.DoctorName,
+                Urgency = r.Urgency, Reason = r.Reason, CreatedAt = DocNyle.InstantOrMin(r.CreatedAt),
+            };
+        }
+
+        internal static ConsultationServiceItem ToModel(CON_ServiceItemInfo s)
+        {
+            return new ConsultationServiceItem
+            {
+                ConsultationServiceId = s.ConsultationServiceId, ConsultationId = s.ConsultationId, PatientId = s.PatientId, ServiceChargeId = s.ServiceChargeId,
+                ServiceName = s.ServiceName, Category = s.Category, Qty = s.Qty ?? 1, InventoryItemId = s.InventoryItemId, ItemName = s.ItemName,
+                ItemUnit = s.ItemUnit, ItemQty = s.ItemQty, Notes = s.Notes ?? "", AddedByUserId = s.AddedByUserId, CreatedAt = DocNyle.InstantOrMin(s.CreatedAt),
+            };
+        }
+
+        internal static List<ConsultationServiceItem> ApiServiceItems(string consultationId)
+        {
+            return RequestCache.Get("service-items:" + consultationId, () =>
+                (cnHelperObj.ListConsultationServiceItems(AppSession.ApiHospitalId, AppSession.ApiUserId, consultationId, AppSession.ApiHashValue).EnsureSuccess().ServiceItems ?? new List<CON_ServiceItemInfo>()).Select(ToModel).OrderBy(s => s.CreatedAt).ToList());
+        }
+
+        private static ConsultationSketch ToModel(CON_SketchInfo s)
+        {
+            var data = s.ImageDataBase64 ?? "";
+            if (data.Length > 0 && !data.StartsWith("data:")) data = "data:" + (string.IsNullOrEmpty(s.ContentType) ? "image/png" : s.ContentType) + ";base64," + data;
+            return new ConsultationSketch
+            {
+                SketchId = s.SketchId, ConsultationId = s.ConsultationId, PatientId = s.PatientId, DoctorId = s.DoctorId, Title = s.Title,
+                ImageData = data, CreatedAt = DocNyle.InstantOrMin(s.CreatedAt),
+            };
         }
     }
 }

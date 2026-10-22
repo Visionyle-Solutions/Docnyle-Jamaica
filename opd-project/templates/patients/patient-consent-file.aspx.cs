@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Web;
 using OpdProject.Services;
 using OpdProject.Web;
@@ -16,8 +15,8 @@ namespace OpdProject.templates.patients
         {
             var doc = PatientService.GetConsentDocument(RouteValue("documentId"));
             if (doc == null || doc.HospitalId != HospitalId || doc.PatientId != RouteValue("patientId")) { NotFound(); return; }
-            var path = PatientService.ConsentDocumentPath(doc);
-            if (!File.Exists(path)) { NotFound(); return; }
+            var content = PatientService.GetConsentDocumentContent(doc);
+            if (content == null) { NotFound(); return; }
 
             Audit("VIEW", "PatientConsentDocument", doc.ConsentDocumentId, doc.FileName);
             Response.Clear();
@@ -26,7 +25,7 @@ namespace OpdProject.templates.patients
             Response.AddHeader("X-Content-Type-Options", "nosniff");
             Response.Cache.SetCacheability(HttpCacheability.Private);
             Response.Cache.SetNoStore();
-            Response.TransmitFile(path);
+            Response.BinaryWrite(content);
             Response.End();
         }
 

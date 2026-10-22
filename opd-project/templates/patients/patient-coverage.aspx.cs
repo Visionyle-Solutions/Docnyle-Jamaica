@@ -114,9 +114,9 @@ namespace OpdProject.templates.patients
         protected void CoverageRepeater_ItemCommand(object source, RepeaterCommandEventArgs e)
         {
             if (e.CommandName != "Deactivate") return;
-            var cov = PatientService.GetCoverage((string)e.CommandArgument);
+            var cov = PatientService.GetCoverage((string)e.CommandArgument, _patient.PatientId);
             if (cov == null || cov.PatientId != _patient.PatientId) return;
-            PatientService.DeactivateCoverage(cov.CoverageId);
+            PatientService.DeactivateCoverage(cov.CoverageId, _patient.PatientId);
             Audit("UPDATE", "PatientCoverage", cov.CoverageId, "Deactivated");
             ToastSuccess("Coverage deactivated");
             Bind();

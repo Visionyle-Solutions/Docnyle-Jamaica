@@ -108,7 +108,7 @@ namespace OpdProject.templates.patients
 
         protected void MedsRepeater_ItemCommand(object source, RepeaterCommandEventArgs e)
         {
-            var p = ConsultationService.GetPrescription((string)e.CommandArgument);
+            var p = ConsultationService.GetPrescription((string)e.CommandArgument, PatientId);
             if (p == null || p.PatientId != PatientId || !p.IsOutside) return;
             if (e.CommandName == "Discontinue")
             {

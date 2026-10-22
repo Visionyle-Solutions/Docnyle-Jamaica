@@ -193,6 +193,8 @@ namespace OpdProject.Models
         public string FromEmail { get; set; }
         public string FromName { get; set; }
         public bool Enabled { get; set; }
+        /// <summary>API mode: a key is stored on the service (GetNotificationConfig never returns the key itself).</summary>
+        public bool HasApiKey { get; set; }
     }
 
     public class MessageTemplate

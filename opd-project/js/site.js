@@ -6,11 +6,52 @@
      • sidebar accordion groups (one open at a time)
      • toast auto-dismiss
      • session-expiry warning (server session = 15 minutes)
+     • duplicate-submit guard + busy state while a postback (and the
+       API calls behind it) is in flight
      • small helpers used by individual pages (live vitals calc,
        vital unit switch, phrase-chip insert, chip-select into hidden fields)
    ============================================================ */
 (function () {
   'use strict';
+
+  /* Duplicate-submit guard: one postback at a time. Validation failures (defaultPrevented) do not lock;
+     the lock lifts after 15 s or when the page is shown again (e.g. after a file download or Back). */
+  (function () {
+    var busyUntil = 0;
+    var lock = function (source) {
+      busyUntil = Date.now() + 15000;
+      document.body.classList.add('is-submitting');
+      if (source && source.classList) { source.classList.add('is-busy'); source.setAttribute('aria-busy', 'true'); }
+      setTimeout(unlock, 15000);
+    };
+    var unlock = function () {
+      busyUntil = 0;
+      document.body.classList.remove('is-submitting');
+      document.querySelectorAll('.is-busy').forEach(function (b) { b.classList.remove('is-busy'); b.removeAttribute('aria-busy'); });
+    };
+    var lastClicked = null;
+    document.addEventListener('click', function (e) {
+      lastClicked = e.target.closest ? e.target.closest('button, input[type=submit], a') : null;
+    }, true);
+    document.addEventListener('submit', function (e) {
+      if (e.defaultPrevented) return;
+      if (Date.now() < busyUntil) { e.preventDefault(); return; }
+      lock(e.submitter || lastClicked);
+    });
+    window.addEventListener('pageshow', unlock);
+    var wrap = function () {
+      if (typeof window.__doPostBack !== 'function' || window.__doPostBack.c360Guarded) return;
+      var inner = window.__doPostBack;
+      window.__doPostBack = function (target, arg) {
+        if (Date.now() < busyUntil) return;
+        lock(lastClicked);
+        return inner.apply(this, arguments);
+      };
+      window.__doPostBack.c360Guarded = true;
+    };
+    wrap();
+    document.addEventListener('DOMContentLoaded', wrap);
+  })();
 
   /* Sidebar groups */
   document.addEventListener('click', function (e) {

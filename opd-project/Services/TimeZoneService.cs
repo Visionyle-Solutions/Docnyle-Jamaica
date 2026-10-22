@@ -54,6 +54,13 @@ namespace OpdProject.Services
         /// <summary>Set by the web layer (Global.asax): the signed-in viewer's browser zone (IANA), or null when unknown.</summary>
         public static Func<string> ViewerZoneProvider { get; set; }
 
+        /// <summary>Adds an IANA → Windows mapping (from the API's ListTimeZones) so a hospital zone outside the built-in list resolves.</summary>
+        public static void Register(string ianaId, string windowsId)
+        {
+            if (string.IsNullOrEmpty(ianaId) || string.IsNullOrEmpty(windowsId)) return;
+            lock (IanaToWindows) if (!IanaToWindows.ContainsKey(ianaId)) IanaToWindows[ianaId] = windowsId;
+        }
+
         public static bool IsKnown(string ianaId) { return !string.IsNullOrEmpty(ianaId) && IanaToWindows.ContainsKey(ianaId); }
 
         public static TimeZoneInfo Find(string ianaId)

@@ -35,7 +35,7 @@ namespace OpdProject.templates.settings
             Select(HpCountry, country);
             Select(HpCurrency, !string.IsNullOrEmpty(h.Currency) ? h.Currency : CountryCurrency.ContainsKey(country) ? CountryCurrency[country] : null);
             HpTimeZone.Items.Clear();
-            foreach (var z in TimeZoneService.HospitalZones) HpTimeZone.Items.Add(new ListItem(z.Value, z.Key));
+            foreach (var z in HospitalService.ListTimeZones()) HpTimeZone.Items.Add(new ListItem(z.Value, z.Key));
             Select(HpTimeZone, TimeZoneService.HospitalZoneId(HospitalId));
             HpLicense.Text = h.LicenseNumber; HpRxValidity.Text = h.DefaultRxValidityDays.ToString();
             Select(HpTempUnit, h.DefaultTempUnit ?? "F");

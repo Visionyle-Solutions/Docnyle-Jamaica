@@ -21,3 +21,4 @@
 # Logs
 
 *.log
+opd-project/App_Data/api-secrets.config

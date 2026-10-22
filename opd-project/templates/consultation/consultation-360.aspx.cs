@@ -503,15 +503,34 @@ namespace OpdProject.templates.consultation
                 return;
             }
             foreach (var c in Contradictions()) Audit("ACKNOWLEDGE_CONTRADICTION", "Contradiction", cid, c.Type + ": " + c.Message);
-            ConsultationService.SignOff(cid, UserId);
+            try
+            {
+                ConsultationService.SignOff(cid, UserId);
+            }
+            catch (ApiException ex) when (ex.ErrorNumber == 50040)
+            {
+                // API mode: ConfirmSignOff deducts the stock itself and refuses when another visit used it first.
+                AttestValidator.IsValid = false;
+                AttestValidator.Text = HttpUtility.HtmlEncode("Stock ran out — reduce or remove in Services & Procedures: " + ex.UserMessage);
+                SignOffModal.Visible = true;
+                return;
+            }
             Audit("SIGN_OFF", "Consultation", cid, "4-point attestation confirmed");
 
-            var existing = BillingService.GetInvoiceForConsultation(cid);
-            if (existing == null)
+            try
             {
-                var inv = BillingService.GenerateInvoiceForConsultation(cid);
-                Audit("CREATE", "Invoice", inv.InvoiceId, "Auto-generated at sign-off");
-                ToastInfo("Invoice " + inv.InvoiceNumber + " auto-generated", inv.ChargeNote);
+                var existing = BillingService.GetInvoiceForConsultation(cid);
+                if (existing == null)
+                {
+                    var inv = BillingService.GenerateInvoiceForConsultation(cid);
+                    Audit("CREATE", "Invoice", inv.InvoiceId, "Auto-generated at sign-off");
+                    ToastInfo("Invoice " + inv.InvoiceNumber + " auto-generated", inv.ChargeNote);
+                }
+            }
+            catch (ApiException ex) when (ex.Kind == ApiFaultKind.Forbidden)
+            {
+                // API mode: invoices need the billing feature; the front desk generates it at checkout.
+                ToastInfo("Invoice not generated", "Billing will generate the invoice at checkout.");
             }
             ToastSuccess("Consultation signed and locked", "Visit marked as completed");
             Go(Urls.Consultation(Patient.PatientId) + "?cid=" + HttpUtility.UrlEncode(cid));

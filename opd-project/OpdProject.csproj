@@ -49,6 +49,7 @@
     <Reference Include="System.ComponentModel.Composition" />
     <Reference Include="System.Configuration" />
     <Reference Include="System.Core" />
+    <Reference Include="System.Runtime.Caching" />
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.Web" />
     <Reference Include="System.Web.Extensions" />
@@ -59,6 +60,16 @@
       <DependentUpon>Global.asax</DependentUpon>
     </Compile>
     <Compile Include="Helpers\CommonHelper.cs" />
+    <Compile Include="Services\Api\ApiContracts.cs" />
+    <Compile Include="Web\DocNyle.cs" />
+    <Compile Include="Web\DataSource.cs" />
+    <Compile Include="templates\shared\service-error.aspx.cs">
+      <DependentUpon>service-error.aspx</DependentUpon>
+      <SubType>ASPXCodeBehind</SubType>
+    </Compile>
+    <Compile Include="templates\shared\service-error.aspx.designer.cs">
+      <DependentUpon>service-error.aspx</DependentUpon>
+    </Compile>
     <Compile Include="Site.Master.cs">
       <DependentUpon>Site.Master</DependentUpon>
       <SubType>ASPXCodeBehind</SubType>
@@ -101,6 +112,7 @@
     <Compile Include="Services\TableExport.cs" />
     <Compile Include="Services\PatientService.cs" />
     <Compile Include="Services\SchedulingService.cs" />
+    <Compile Include="Services\PortalService.cs" />
     <Compile Include="Services\UserService.cs" />
     <Compile Include="Web\AppSession.cs" />
     <Compile Include="Web\ConsultCards.cs" />
@@ -649,6 +661,7 @@
     <Content Include="templates\shared\access-denied.aspx" />
     <Content Include="templates\shared\error-state.ascx" />
     <Content Include="templates\shared\patient-identifier-strip.ascx" />
+    <Content Include="templates\shared\service-error.aspx" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

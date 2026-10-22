@@ -10,8 +10,8 @@ namespace OpdProject
     {
         protected void Application_Start(object sender, EventArgs e)
         {
-            /* In-memory demo data (no database) — lives until the application restarts */
-            DataStore.Seed();
+            /* In-memory demo data — only needed while a module still reads it (Web.config DataSource:{Module} = InProc) */
+            if (DataSource.AnyInProc) DataStore.Seed();
             RouteConfig.Register(RouteTable.Routes);
             // System times are shown in the viewer's browser timezone (falls back to the hospital's).
             TimeZoneService.ViewerZoneProvider = () => AppSession.BrowserTimeZone;

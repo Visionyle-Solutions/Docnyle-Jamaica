@@ -21,9 +21,10 @@ namespace OpdProject.templates.communications
         private void Bind()
         {
             var all = NotificationService.ListLog(HospitalId);
-            SentCount.Text = all.Count(m => m.Status == "SENT").ToString();
-            SimulatedCount.Text = all.Count(m => m.Status == "SIMULATED").ToString();
-            TotalCount.Text = all.Count.ToString();
+            var stats = NotificationService.Stats(all);
+            SentCount.Text = stats.Sent.ToString();
+            SimulatedCount.Text = stats.Simulated.ToString();
+            TotalCount.Text = stats.Total.ToString();
             var rows = all.Where(m => StatusFilter.SelectedValue == "" || m.Status == StatusFilter.SelectedValue).ToList();
             LogRepeater.DataSource = rows;
             LogRepeater.DataBind();

@@ -240,6 +240,24 @@ namespace OpdProject.templates.settings
         protected global::System.Web.UI.WebControls.TextBox DpBio;
 
         /// <summary>
+        /// DpPasswordGroup control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.PlaceHolder DpPasswordGroup;
+
+        /// <summary>
+        /// DpPassword control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.TextBox DpPassword;
+
+        /// <summary>
         /// SaveProfileButton control.
         /// </summary>
         /// <remarks>

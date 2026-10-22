@@ -17,7 +17,7 @@ namespace OpdProject.templates.patients
 
         public void LoadAllergy(string allergyId)
         {
-            var a = PatientService.GetAllergy(allergyId);
+            var a = PatientService.GetAllergy(allergyId, PatientId);
             if (a == null) return;
             EditingId.Value = a.AllergyId;
             AllergyTypeInput.SelectedValue = a.AllergyType;

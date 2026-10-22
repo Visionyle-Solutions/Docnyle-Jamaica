@@ -23,7 +23,8 @@ namespace OpdProject.templates.settings
             var key = (string)e.CommandArgument;
             var csv = ExportService.ToCsv(key, HospitalId);
             if (csv == null) { ToastWarning("No data in " + ExportService.TableLabel(key)); return; }
-            Audit("EXPORT", "DataExport", key, "Exported " + ExportService.TableLabel(key) + " to CSV");
+            // ListExportData records its own EXPORT audit entry in API mode.
+            if (!DataSource.IsApi("Operations")) Audit("EXPORT", "DataExport", key, "Exported " + ExportService.TableLabel(key) + " to CSV");
             Response.Clear();
             Response.ContentType = "text/csv";
             Response.ContentEncoding = Encoding.UTF8;

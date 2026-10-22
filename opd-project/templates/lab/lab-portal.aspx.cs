@@ -37,12 +37,15 @@ namespace OpdProject.templates.lab
 
         protected string PatientLabel(string patientId)
         {
+            // API mode: a lab partner may not read patient records; the order rows carry the name and MRN.
+            if (DataSource.IsApi("Lab")) return LabService.PatientLabel(patientId) ?? "Unknown";
             var p = PatientService.Get(patientId);
             return p != null ? p.FullName + " · " + p.Mrn : "Unknown";
         }
 
         protected string DoctorName(string consultationId)
         {
+            if (DataSource.IsApi("Lab")) return "";
             var c = ConsultationService.Get(consultationId);
             return c != null ? UserService.UserName(c.DoctorId) : "";
         }
@@ -86,7 +89,16 @@ namespace OpdProject.templates.lab
             if (!LabService.IsValidMobile(mobile)) { ShowClaimError("Enter the patient's full 10-digit mobile number."); return; }
             if (LabService.IsClaimLocked(UserId)) { ShowClaimError("Too many searches with no matching orders. Please try again in 15 minutes."); return; }
 
-            var found = LabService.FindOrdersByMobile(CurrentUser, mobile) ?? new List<InvestigationOrder>();
+            List<InvestigationOrder> found;
+            try
+            {
+                found = LabService.FindOrdersByMobile(CurrentUser, mobile) ?? new List<InvestigationOrder>();
+            }
+            catch (ApiException ex) when (ex.ErrorNumber == 50231)
+            {
+                ShowClaimError("Too many searches with no matching orders. Please try again in 15 minutes.");
+                return;
+            }
             Audit(found.Count == 0 ? "CLAIM_FAILED" : "READ", "InvestigationOrder", "", "Lab requisition lookup by mobile " + MaskedMobile(mobile) + ": " + found.Count + " open order(s)");
             if (found.Count == 0)
             {
@@ -224,12 +236,20 @@ namespace OpdProject.templates.lab
                 Audit("CREATE", "LabResultAttachment", att.AttachmentId, att.FileName + " (" + LabService.FormatSize(att.SizeBytes) + ") for " + order.TestName);
             }
 
+            if (DataSource.IsApi("Lab"))
+            {
+                // SubmitLabResult records the result and notifies the ordering doctor on the service side.
+                ToastSuccess("Result submitted for " + order.TestName);
+                ReloadPage();
+                return;
+            }
             var patient = PatientService.Get(order.PatientId);
             Audit("CREATE", "LabResult", order.OrderId, "Result uploaded for " + order.TestName + " (" + (patient != null ? patient.FullName : "") + ")"
                 + (files.Count > 0 ? " with " + files.Count + " file(s)" : ""));
             NotificationService.SendSingle("LAB_RESULTS_READY", HospitalId, patient, DoctorName(order.ConsultationId),
                 new Dictionary<string, string> { { "TestName", order.TestName } });
-            NotifyOrderingDoctor(order, result, files.Count);
+            // API mode: SubmitLabResult notifies the ordering doctor itself.
+            if (!DataSource.IsApi("UserNotifications")) NotifyOrderingDoctor(order, result, files.Count);
             ToastSuccess("Result submitted for " + order.TestName);
             ReloadPage();
         }

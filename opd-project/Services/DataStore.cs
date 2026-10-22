@@ -146,18 +146,8 @@ namespace OpdProject.Services
                 RxPrefix = "RX", ReceiptPrefix = "RCP", InvoicePrefix = "INV", LabChargePerTest = 150
             });
 
-            string[] features = { "consultation", "patients", "scheduling", "billing", "reports", "admin_hospital", "admin_scheduling",
-                "admin_vitals", "admin_specialty", "admin_formulary", "admin_phrases", "admin_users", "audit_log", "data_export",
-                "data_import", "print", "lab_portal", "admin_consultation", "admin_inventory" };
-            var grants = new Dictionary<string, string[]>
-            {
-                { "ADMIN", features },
-                { "DOCTOR", new[] { "consultation", "patients", "scheduling", "reports", "admin_scheduling", "admin_phrases", "admin_consultation", "print" } },
-                { "RECEPTIONIST", new[] { "patients", "scheduling", "billing" } },
-                { "BILLING", new[] { "patients", "billing", "reports", "print" } },
-                { "NURSE", new[] { "patients", "scheduling" } },
-                { "LAB_PARTNER", new[] { "lab_portal" } },
-            };
+            var features = UserService.DefaultFeatures;
+            var grants = UserService.DefaultGrants;
             foreach (var role in grants)
             {
                 var row = new Dictionary<string, bool>();

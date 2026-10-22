@@ -102,11 +102,11 @@ namespace OpdProject.templates.patients
 
         protected void ConditionsRepeater_ItemCommand(object source, RepeaterCommandEventArgs e)
         {
-            var h = PatientService.GetMedicalHistory((string)e.CommandArgument);
+            var h = PatientService.GetMedicalHistory((string)e.CommandArgument, PatientId);
             if (h == null || h.PatientId != PatientId) return;
             if (e.CommandName == "Delete")
             {
-                PatientService.DeleteMedicalHistoryRecord(h.PatientMedHistoryId);
+                PatientService.DeleteMedicalHistoryRecord(h);
                 Audit("DELETE", "PatientMedicalHistory", h.PatientMedHistoryId, "Removed " + ConditionLabel(h));
                 AppPage.ToastSuccess("Condition removed");
                 if (EditingId.Value == h.PatientMedHistoryId) Reset();

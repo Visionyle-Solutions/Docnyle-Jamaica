@@ -1,9 +1,14 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
+using System.Text;
+using System.Threading;
+using System;
+using Newtonsoft.Json;
+using OpdProject.Helpers;
 using OpdProject.Models;
+using OpdProject.Services.Api;
+using OpdProject.Web;
 
 namespace OpdProject.Services
 {
@@ -14,8 +19,10 @@ namespace OpdProject.Services
     /// The Consultation 360 page reads only the published copy (<see cref="GetView"/>), so a half-finished draft
     /// never reaches a doctor. Structure (keys, labels, what is required) comes from <see cref="Catalog"/>.
     /// </summary>
-    public static class ConsultationConfigService
+    public static partial class ConsultationConfigService
     {
+        private static readonly CommonHelper cnHelperObj = new CommonHelper();
+
         /* ── Catalogue: every configurable part of the consultation page ── */
 
         private static ConsultFormValue V(string key, string label, bool required = false)
@@ -191,9 +198,9 @@ namespace OpdProject.Services
         /* Callers hold DataStore.Sync */
         private static List<VitalUnitSetting> DefaultVitalUnits(string hospitalId, bool factoryOnOff = false)
         {
-            var hospital = DataStore.Hospitals.FirstOrDefault(h => h.HospitalId == hospitalId);
+            var hospital = HospitalService.GetHospital(hospitalId);
             var tempUnit = hospital != null ? hospital.DefaultTempUnit : "F";
-            return DataStore.VitalsConfig.Where(v => v.HospitalId == hospitalId).OrderBy(v => v.SortOrder)
+            return HospitalService.ListVitalsConfig(hospitalId, false).OrderBy(v => v.SortOrder)
                 .Select(v => VitalUnitService.DefaultSetting(v, tempUnit, factoryOnOff ? v.IsCustom || VitalUnitService.OnByDefault(v.VitalCode) : v.IsEnabled)).ToList();
         }
 
@@ -218,6 +225,7 @@ namespace OpdProject.Services
 
         private static ConsultFormConfig PublishedRaw(string hospitalId)
         {
+            if (Api) return WithVitalUnits(ApiPublished(hospitalId));
             ConsultFormConfig c;
             if (!DataStore.ConsultFormPublished.TryGetValue(hospitalId, out c))
                 DataStore.ConsultFormPublished[hospitalId] = c = Defaults(hospitalId);
@@ -226,6 +234,7 @@ namespace OpdProject.Services
 
         private static ConsultFormConfig DraftRaw(string hospitalId)
         {
+            if (Api) return WithVitalUnits(ApiDraftState(hospitalId).Config);
             ConsultFormConfig c;
             if (!DataStore.ConsultFormDrafts.TryGetValue(hospitalId, out c))
                 DataStore.ConsultFormDrafts[hospitalId] = c = Clone(PublishedRaw(hospitalId));
@@ -266,7 +275,7 @@ namespace OpdProject.Services
 
         public static string ToggleSection(string hospitalId, string sectionKey)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var s = DraftSection(hospitalId, sectionKey);
                 if (s == null) return "Unknown section.";
@@ -278,7 +287,7 @@ namespace OpdProject.Services
 
         public static string ToggleField(string hospitalId, string sectionKey, string fieldKey)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var f = DraftField(hospitalId, sectionKey, fieldKey);
                 if (f == null) return "Unknown field.";
@@ -290,7 +299,7 @@ namespace OpdProject.Services
 
         public static string ToggleValue(string hospitalId, string sectionKey, string fieldKey, string valueKey)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var f = DraftField(hospitalId, sectionKey, fieldKey);
                 var v = f != null ? f.Values.FirstOrDefault(x => x.Key == valueKey) : null;
@@ -305,7 +314,7 @@ namespace OpdProject.Services
         /// <summary>Moves a section one place up (delta −1) or down (+1).</summary>
         public static void MoveSection(string hospitalId, string sectionKey, int delta)
         {
-            lock (DataStore.Sync) Move(DraftRaw(hospitalId).Sections, s => s.Key == sectionKey, delta);
+            using (EditDraft(hospitalId)) Move(DraftRaw(hospitalId).Sections, s => s.Key == sectionKey, delta);
         }
 
         /// <summary>
@@ -320,7 +329,7 @@ namespace OpdProject.Services
         /// <summary>Moves a movable field one place up or down among the section's movable fields.</summary>
         public static void MoveField(string hospitalId, string sectionKey, string fieldKey, int delta)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var s = DraftSection(hospitalId, sectionKey);
                 if (s == null) return;
@@ -342,7 +351,7 @@ namespace OpdProject.Services
         /// </summary>
         public static void ReorderFields(string hospitalId, string sectionKey, IList<string> orderedKeys)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var s = DraftSection(hospitalId, sectionKey);
                 if (s == null) return;
@@ -369,7 +378,7 @@ namespace OpdProject.Services
         /// <summary>Applies a full section order (from drag and drop). Unknown keys are ignored; missing ones keep their relative order at the end.</summary>
         public static void ReorderSections(string hospitalId, IList<string> orderedKeys)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var draft = DraftRaw(hospitalId);
                 var keys = (orderedKeys ?? new List<string>()).ToList();
@@ -417,12 +426,12 @@ namespace OpdProject.Services
         public static string AddSection(string hospitalId, string label, string description, string icon, out string sectionKey)
         {
             sectionKey = null;
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var draft = DraftRaw(hospitalId);
                 var error = CheckLabel(ref label, draft.Sections.Select(s => s.Label), "section");
                 if (error != null) return error;
-                sectionKey = DataStore.NextId("cs");
+                sectionKey = NewKey("cs");
                 draft.Sections.Add(new ConsultFormSection
                 {
                     Key = sectionKey, Label = label, Description = Clip(description, 160), Icon = ValidIcon(icon) ? icon : SectionIcons[0][0],
@@ -434,7 +443,7 @@ namespace OpdProject.Services
 
         public static string UpdateSection(string hospitalId, string sectionKey, string label, string description, string icon)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var draft = DraftRaw(hospitalId);
                 var s = draft.Sections.FirstOrDefault(x => x.Key == sectionKey);
@@ -450,7 +459,7 @@ namespace OpdProject.Services
 
         public static string DeleteSection(string hospitalId, string sectionKey)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var draft = DraftRaw(hospitalId);
                 var s = draft.Sections.FirstOrDefault(x => x.Key == sectionKey);
@@ -464,7 +473,7 @@ namespace OpdProject.Services
             bool requiredAtSignOff, IEnumerable<string> options, out string fieldKey)
         {
             fieldKey = null;
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var s = DraftSection(hospitalId, sectionKey);
                 if (s == null) return "Unknown section.";
@@ -474,7 +483,7 @@ namespace OpdProject.Services
                 if (error != null) return error;
                 var field = new ConsultFormField
                 {
-                    Key = DataStore.NextId("cf"), Label = label, Description = Clip(description, 160), Enabled = true, IsCustom = true,
+                    Key = NewKey("cf"), Label = label, Description = Clip(description, 160), Enabled = true, IsCustom = true,
                     InputType = inputType, RequiredAtSignOff = requiredAtSignOff, Values = new List<ConsultFormValue>(),
                 };
                 if (field.AcceptsOptions)
@@ -492,7 +501,7 @@ namespace OpdProject.Services
 
         public static string UpdateField(string hospitalId, string sectionKey, string fieldKey, string label, string description, string inputType, bool requiredAtSignOff)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var s = DraftSection(hospitalId, sectionKey);
                 var f = s != null ? s.Fields.FirstOrDefault(x => x.Key == fieldKey) : null;
@@ -510,7 +519,7 @@ namespace OpdProject.Services
 
         public static string DeleteField(string hospitalId, string sectionKey, string fieldKey)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var s = DraftSection(hospitalId, sectionKey);
                 var f = s != null ? s.Fields.FirstOrDefault(x => x.Key == fieldKey) : null;
@@ -522,7 +531,7 @@ namespace OpdProject.Services
 
         public static string AddOption(string hospitalId, string sectionKey, string fieldKey, string label)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var f = DraftField(hospitalId, sectionKey, fieldKey);
                 if (f == null || !f.AcceptsOptions) return "Options cannot be added to this field.";
@@ -535,7 +544,7 @@ namespace OpdProject.Services
 
         public static string DeleteOption(string hospitalId, string sectionKey, string fieldKey, string valueKey)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var f = DraftField(hospitalId, sectionKey, fieldKey);
                 var v = f != null ? f.Values.FirstOrDefault(x => x.Key == valueKey) : null;
@@ -568,7 +577,7 @@ namespace OpdProject.Services
         public static string AddCustomVital(string hospitalId, string label, string unit, double? min, double? max, out string vitalCode)
         {
             vitalCode = null;
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var draft = DraftRaw(hospitalId);
                 label = (label ?? "").Trim();
@@ -576,12 +585,12 @@ namespace OpdProject.Services
                 if (label.Length < 2 || label.Length > 40) return "Enter a vital name of 2–40 characters.";
                 var l = label;
                 if (draft.VitalUnits.Any(v => string.Equals(v.VitalLabel, l, StringComparison.OrdinalIgnoreCase))
-                    || DataStore.VitalsConfig.Any(v => v.HospitalId == hospitalId && string.Equals(v.DisplayLabel, l, StringComparison.OrdinalIgnoreCase)))
+                    || HospitalService.ListVitalsConfig(hospitalId, false).Any(v => string.Equals(v.DisplayLabel, l, StringComparison.OrdinalIgnoreCase)))
                     return "There is already a vital called “" + label + "”.";
                 if (unit.Length > 20) return "Keep the unit to 20 characters.";
                 if (min.HasValue && max.HasValue && max.Value <= min.Value) return "The maximum must be greater than the minimum.";
                 vitalCode = HospitalService.NewCustomVitalCode(hospitalId, label, draft.VitalUnits.Select(v => v.VitalCode));
-                var hospital = DataStore.Hospitals.FirstOrDefault(h => h.HospitalId == hospitalId);
+                var hospital = HospitalService.GetHospital(hospitalId);
                 var setting = VitalUnitService.DefaultSetting(new VitalConfig { VitalCode = vitalCode, DisplayLabel = label, AllowedUnits = unit, IsCustom = true },
                     hospital != null ? hospital.DefaultTempUnit : "F", true);
                 setting.IsPending = true;
@@ -595,7 +604,7 @@ namespace OpdProject.Services
         /// <summary>Removes a custom vital that was added in this draft (published vitals can only be switched off).</summary>
         public static string RemoveCustomVital(string hospitalId, string vitalCode)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var draft = DraftRaw(hospitalId);
                 var s = draft.VitalUnits.FirstOrDefault(x => x.VitalCode == vitalCode);
@@ -609,7 +618,7 @@ namespace OpdProject.Services
         /// <summary>Switches whether a vital is captured. At least one vital stays on (vitals are required for sign-off).</summary>
         public static string ToggleVital(string hospitalId, string vitalCode)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var all = DraftRaw(hospitalId).VitalUnits;
                 var s = all.FirstOrDefault(x => x.VitalCode == vitalCode);
@@ -622,7 +631,7 @@ namespace OpdProject.Services
 
         public static string ToggleUnit(string hospitalId, string vitalCode, string unitKey)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var s = DraftUnits(hospitalId, vitalCode);
                 var u = s != null ? s.Units.FirstOrDefault(x => x.Key == unitKey) : null;
@@ -636,7 +645,7 @@ namespace OpdProject.Services
 
         public static string MakeDefaultUnit(string hospitalId, string vitalCode, string unitKey)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var s = DraftUnits(hospitalId, vitalCode);
                 var u = s != null ? s.Units.FirstOrDefault(x => x.Key == unitKey) : null;
@@ -649,7 +658,7 @@ namespace OpdProject.Services
 
         public static string AddStandardUnit(string hospitalId, string vitalCode, string unitKey)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var s = DraftUnits(hospitalId, vitalCode);
                 var u = s != null ? VitalUnitService.AvailableStandardUnits(s).FirstOrDefault(x => x.Key == unitKey) : null;
@@ -664,7 +673,7 @@ namespace OpdProject.Services
         /// <summary>Adds the hospital's own unit: 1 [label] = <paramref name="factor"/> × the vital's base unit.</summary>
         public static string AddCustomUnit(string hospitalId, string vitalCode, string label, double factor)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var s = DraftUnits(hospitalId, vitalCode);
                 if (s == null) return "Unknown vital.";
@@ -674,7 +683,7 @@ namespace OpdProject.Services
                 if (VitalUnitService.AvailableStandardUnits(s).Any(u => string.Equals(u.Label, label, StringComparison.OrdinalIgnoreCase)))
                     return "“" + label + "” is a standard unit — add it from Common units instead.";
                 if (!(factor > 0) || double.IsInfinity(factor)) return "Enter how many base units one " + label + " equals (a positive number).";
-                s.Units.Add(new VitalUnit { Key = DataStore.NextId("U"), Label = label, Factor = factor, Decimals = 2, Enabled = true, IsCustom = true });
+                s.Units.Add(new VitalUnit { Key = NewKey("U"), Label = label, Factor = factor, Decimals = 2, Enabled = true, IsCustom = true });
                 FixDefault(s);
                 return null;
             }
@@ -683,7 +692,7 @@ namespace OpdProject.Services
         /// <summary>Removes a custom unit (standard units can only be switched off).</summary>
         public static string RemoveUnit(string hospitalId, string vitalCode, string unitKey)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var s = DraftUnits(hospitalId, vitalCode);
                 var u = s != null ? s.Units.FirstOrDefault(x => x.Key == unitKey) : null;
@@ -701,7 +710,7 @@ namespace OpdProject.Services
             changed = false;
             var preset = VitalUnitService.Presets.FirstOrDefault(p => p.Item1 == presetKey);
             if (preset == null) return "Unknown unit system.";
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
                 foreach (var s in DraftRaw(hospitalId).VitalUnits)
                 {
                     string want;
@@ -823,6 +832,8 @@ namespace OpdProject.Services
                 var draft = DraftRaw(hospitalId);
                 if (Problems(draft).Count > 0) return -1;
                 if (Diff(draft, live).Count == 0) return 0;
+                // The service creates the pending custom vitals and switches vitals on/off as it publishes.
+                if (Api) return ApiPublish(hospitalId);
                 var next = Clone(draft);
                 next.Version = live.Version + 1;
                 next.PublishedAt = DateTime.UtcNow;
@@ -849,6 +860,7 @@ namespace OpdProject.Services
         /// <summary>Throws the draft away — back to the live configuration.</summary>
         public static void DiscardDraft(string hospitalId)
         {
+            if (Api) { cnHelperObj.CancelConsultationFormDraft(new CFG_CancelConsultationFormDraftReq() { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue }).EnsureSuccess(); RequestCache.Remove("form-draft"); return; }
             lock (DataStore.Sync) DataStore.ConsultFormDrafts[hospitalId] = Clone(PublishedRaw(hospitalId));
         }
 
@@ -858,7 +870,7 @@ namespace OpdProject.Services
         /// </summary>
         public static void RestoreDefaults(string hospitalId)
         {
-            lock (DataStore.Sync)
+            using (EditDraft(hospitalId))
             {
                 var draft = DraftRaw(hospitalId);
                 var fresh = Catalog();
@@ -895,6 +907,7 @@ namespace OpdProject.Services
         /// <summary>Custom field values of a consultation, by field key.</summary>
         public static Dictionary<string, string> GetCustomValues(string consultationId)
         {
+            if (Api) return ApiCustomValues(consultationId).Where(v => v.FieldKey != null).GroupBy(v => v.FieldKey).ToDictionary(g => g.Key, g => g.First().Value);
             lock (DataStore.Sync)
                 return DataStore.CustomFieldValues.Where(v => v.ConsultationId == consultationId).ToDictionary(v => v.FieldKey, v => v.Value);
         }
@@ -915,6 +928,18 @@ namespace OpdProject.Services
         /// </summary>
         public static void SaveCustomValues(string hospitalId, string consultationId, string sectionKey, IDictionary<string, string> values, string userId)
         {
+            if (Api)
+            {
+                // The service fills labels, input type and display text from the published form.
+                cnHelperObj.SaveConsultationCustomValues(new CON_SaveConsultationCustomValuesReq
+                {
+                    HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue,
+                    ConsultationId = consultationId, SectionKey = sectionKey,
+                    Values = values.Select(kv => new CON_CustomFieldValueInput { FieldKey = kv.Key, Value = kv.Value ?? "" }).ToList(),
+                }).EnsureSuccess();
+                RequestCache.Remove("custom-values:" + consultationId);
+                return;
+            }
             lock (DataStore.Sync)
             {
                 var section = PublishedRaw(hospitalId).Sections.FirstOrDefault(s => s.Key == sectionKey);
@@ -944,7 +969,8 @@ namespace OpdProject.Services
             lock (DataStore.Sync)
             {
                 var sections = PublishedRaw(hospitalId).Sections;
-                return DataStore.CustomFieldValues.Where(v => v.ConsultationId == consultationId && !string.IsNullOrEmpty(v.Value))
+                var stored = Api ? ApiCustomValues(consultationId) : DataStore.CustomFieldValues.Where(v => v.ConsultationId == consultationId);
+                return stored.Where(v => !string.IsNullOrEmpty(v.Value))
                     .Select((v, i) =>
                     {
                         var si = sections.FindIndex(s => s.Key == v.SectionKey);
@@ -963,6 +989,122 @@ namespace OpdProject.Services
                     })
                     .OrderBy(x => x.rank).ThenBy(x => x.i).Select(x => x.copy).ToList();
             }
+        }
+
+        private static bool Api { get { return DataSource.IsApi("ConsultationConfig"); } }
+
+        private static readonly JsonSerializerSettings Json = new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore };
+
+        /// <summary>The draft as loaded this request, with the ModifiedAt it was read with and its JSON at that point.</summary>
+        private class DraftState
+        {
+            public ConsultFormConfig Config;
+            public string ModifiedAt;
+            public string Snapshot;
+        }
+
+        private static ConsultFormConfig FromDocument(CFG_ConsultFormDocumentInfo d, string hospitalId)
+        {
+            if (d == null || string.IsNullOrEmpty(d.Sections)) return null;
+            return new ConsultFormConfig
+            {
+                HospitalId = hospitalId, Version = d.Version, PublishedAt = DocNyle.ParseInstant(d.PublishedAt), PublishedBy = d.PublishedBy,
+                Sections = JsonConvert.DeserializeObject<List<ConsultFormSection>>(d.Sections, Json) ?? new List<ConsultFormSection>(),
+                VitalUnits = string.IsNullOrEmpty(d.VitalUnits) ? new List<VitalUnitSetting>()
+                    : JsonConvert.DeserializeObject<List<VitalUnitSetting>>(d.VitalUnits, Json) ?? new List<VitalUnitSetting>(),
+            };
+        }
+
+        /// <summary>The published form (cached per hospital, cleared on publish); null when the hospital has never published.</summary>
+        private static ConsultFormConfig ApiPublished(string hospitalId)
+        {
+            return HospitalCache.Get("form-published", () =>
+                FromDocument(cnHelperObj.GetConsultationFormConfig(AppSession.ApiHospitalId, AppSession.ApiUserId, "PUBLISHED", AppSession.ApiHashValue).EnsureSuccess().Document, hospitalId) ?? Defaults(hospitalId));
+        }
+
+        private static DraftState ApiDraftState(string hospitalId)
+        {
+            return RequestCache.Get("form-draft", () =>
+            {
+                var doc = cnHelperObj.GetConsultationFormConfig(AppSession.ApiHospitalId, AppSession.ApiUserId, "DRAFT", AppSession.ApiHashValue).EnsureSuccess().Document;
+                var c = FromDocument(doc, hospitalId) ?? Clone(ApiPublished(hospitalId));
+                return new DraftState { Config = c, ModifiedAt = doc != null ? doc.ModifiedAt : null, Snapshot = Serialize(c) };
+            });
+        }
+
+        private static string Serialize(ConsultFormConfig c)
+        {
+            return JsonConvert.SerializeObject(c.Sections, Json) + "\n" + JsonConvert.SerializeObject(c.VitalUnits, Json);
+        }
+
+        /// <summary>
+        /// Saves the draft when this request changed it. ExpectedModifiedAt guards against two people editing at once:
+        /// fault 50241 (Conflict) means someone else saved first — the page shows it and the user reloads.
+        /// </summary>
+        private static void SaveDraftIfChanged(string hospitalId)
+        {
+            var state = ApiDraftState(hospitalId);
+            var now = Serialize(state.Config);
+            if (now == state.Snapshot) return;
+            var saved = cnHelperObj.SaveConsultationFormDraft(new CFG_SaveConsultationFormDraftReq
+            {
+                HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue,
+                Sections = JsonConvert.SerializeObject(state.Config.Sections, Json),
+                VitalUnits = JsonConvert.SerializeObject(state.Config.VitalUnits, Json),
+                ExpectedModifiedAt = state.ModifiedAt,
+            }).EnsureSuccess().Document;
+            state.ModifiedAt = saved != null ? saved.ModifiedAt : state.ModifiedAt;
+            state.Snapshot = now;
+        }
+
+        /// <summary>
+        /// Scope of one designer edit: holds the store lock (in-memory mode) and, in API mode, saves the draft on the
+        /// way out when the edit changed it.
+        /// </summary>
+        private sealed class DraftEdit : IDisposable
+        {
+            private readonly string _hospitalId;
+            public DraftEdit(string hospitalId) { _hospitalId = hospitalId; Monitor.Enter(DataStore.Sync); }
+
+            public void Dispose()
+            {
+                try { if (Api) SaveDraftIfChanged(_hospitalId); }
+                finally { Monitor.Exit(DataStore.Sync); }
+            }
+        }
+
+        private static DraftEdit EditDraft(string hospitalId) { return new DraftEdit(hospitalId); }
+
+        /// <summary>Keys for new sections, fields and units: unique across app restarts in API mode (the draft outlives the process).</summary>
+        private static string NewKey(string prefix)
+        {
+            return Api ? prefix + "-" + Guid.NewGuid().ToString("N").Substring(0, 12) : DataStore.NextId(prefix);
+        }
+
+        private static int ApiPublish(string hospitalId)
+        {
+            SaveDraftIfChanged(hospitalId);
+            var r = cnHelperObj.ConfirmConsultationFormPublish(new CFG_ConfirmConsultationFormPublishReq() { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue }).EnsureSuccess();
+            HospitalCache.Clear("form-published");
+            HospitalCache.Clear("vitals");
+            RequestCache.Remove("form-draft");
+            return r.Result != null ? r.Result.Version : 0;
+        }
+
+        private static ConsultationCustomValue ToModel(CON_CustomFieldValueInfo v, string consultationId)
+        {
+            return new ConsultationCustomValue
+            {
+                ConsultationId = consultationId, SectionKey = v.SectionKey, FieldKey = v.FieldKey, Value = v.Value, SectionLabel = v.SectionLabel,
+                FieldLabel = v.FieldLabel, InputType = v.InputType, DisplayValue = v.DisplayValue, UpdatedAt = DocNyle.InstantOrMin(v.UpdatedAt), UpdatedBy = v.UpdatedBy,
+            };
+        }
+
+        private static List<ConsultationCustomValue> ApiCustomValues(string consultationId)
+        {
+            return RequestCache.Get("custom-values:" + consultationId, () =>
+                (cnHelperObj.ListConsultationCustomValues(AppSession.ApiHospitalId, AppSession.ApiUserId, consultationId, AppSession.ApiHashValue).EnsureSuccess().CustomValues ?? new List<CON_CustomFieldValueInfo>())
+                    .Select(v => ToModel(v, consultationId)).ToList());
         }
     }
 

@@ -38,7 +38,7 @@ namespace OpdProject.templates.consultation
             var events = PatientService.ListMedicalEvents(pid);
             var family = PatientService.ListFamilyHistory(pid);
             var appt = SchedulingService.AppointmentForConsultation(Visit);
-            var intake = appt != null ? SchedulingService.GetIntakeForAppointment(appt.AppointmentId) : null;
+            var intake = appt != null ? SchedulingService.GetIntakeForAppointment(appt.AppointmentId, Visit.ConsultationId) : null;
             var consent = SchedulingService.GetConsentRecord(Visit, appt);
 
             RowsRepeater.DataSource = new List<ContextRow>
@@ -214,7 +214,7 @@ namespace OpdProject.templates.consultation
         private void BindIntakeConsent(bool locked)
         {
             var appt = SchedulingService.AppointmentForConsultation(Visit);
-            var intake = appt != null ? SchedulingService.GetIntakeForAppointment(appt.AppointmentId) : null;
+            var intake = appt != null ? SchedulingService.GetIntakeForAppointment(appt.AppointmentId, Visit.ConsultationId) : null;
             IntakeText.Text = intake == null
                 ? "<div class=\"zone-a-empty\">No pre-visit intake submitted" + (appt != null ? "" : " (no appointment found for this visit)") + ".</div>"
                 : "<div class=\"text-xs text-muted mb-1\">Patient-submitted · " + H(AppPage.FmtDateTime(intake.SubmittedAt)) + "</div>";

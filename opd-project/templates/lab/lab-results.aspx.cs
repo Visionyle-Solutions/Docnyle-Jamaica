@@ -58,7 +58,8 @@ namespace OpdProject.templates.lab
             var r = LabService.GetResult(ReviewResultId.Value);
             if (r == null || r.HospitalId != HospitalId) return;
             LabService.MarkReviewed(r.ResultId, ReviewNotes.Text.Trim());
-            UserNotificationService.MarkReadForEntity(r.ResultId);
+            // API mode: UpdateLabResultStatus clears the notification itself.
+            if (!DataSource.IsApi("Lab")) UserNotificationService.MarkReadForEntity(r.ResultId);
             Audit("UPDATE", "LabResult", r.ResultId, "Marked reviewed: " + r.TestName);
             ToastSuccess(r.TestName + " marked as reviewed");
             ReviewModal.Visible = false;

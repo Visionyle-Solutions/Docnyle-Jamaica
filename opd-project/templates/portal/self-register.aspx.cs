@@ -17,15 +17,8 @@ namespace OpdProject.templates.portal
         protected override bool AllowAnonymous { get { return true; } }
         public override string PageTitle { get { return "Patient Registration"; } }
 
-        /// <summary>Portal hospital: ?h=HOSP-xxx, else the signed-in user's, else the first demo hospital.</summary>
-        protected Hospital PortalHospital
-        {
-            get
-            {
-                var h = Request.QueryString["h"] != null ? HospitalService.GetHospital(Request.QueryString["h"]) : null;
-                return h ?? Hospital;
-            }
-        }
+        /// <summary>Portal hospital: ?h=HOSP-xxx, else the signed-in user's, else the first demo hospital (API mode: the service's portal hospital).</summary>
+        protected Hospital PortalHospital { get { return PortalService.GetHospital(Request.QueryString["h"], Hospital); } }
 
         protected string PatientIdLabelText { get { return string.IsNullOrEmpty(PortalHospital.PatientIdLabel) ? "MRN" : PortalHospital.PatientIdLabel; } }
         protected string BookUrl { get { return Urls.To("portal/book") + "?h=" + HttpUtility.UrlEncode(PortalHospital.HospitalId); } }
@@ -52,20 +45,19 @@ namespace OpdProject.templates.portal
             var record = new Patient { HospitalId = PortalHospital.HospitalId, RegisteredVia = "PATIENT_PORTAL" };
             PatientFields.ApplyTo(record);
 
-            var dup = PatientService.FindDuplicate(record);
-            if (dup != null)
+            string duplicateField;
+            var p = PortalService.Register(record, out duplicateField);
+            if (p == null)
             {
-                DuplicateText.Text = "A patient with this " + Server.HtmlEncode(PatientFields.DuplicateFieldLabel(dup.Field))
+                DuplicateText.Text = (string.IsNullOrEmpty(duplicateField) ? "A patient with these details" : "A patient with this " + Server.HtmlEncode(PatientFields.DuplicateFieldLabel(duplicateField)))
                     + " is already registered with the clinic. Use <a href=\"" + Server.HtmlEncode(BookUrl) + "\">Book an appointment</a> with your "
                     + Server.HtmlEncode(PatientIdLabelText) + " or phone number, or contact the clinic"
                     + (string.IsNullOrEmpty(PortalHospital.ContactNumber) ? "" : " on " + Server.HtmlEncode(PortalHospital.ContactNumber)) + " if your details have changed.";
                 DuplicatePanel.Visible = true;
-                PatientFields.FocusDuplicate(dup.Field);
+                if (!string.IsNullOrEmpty(duplicateField)) PatientFields.FocusDuplicate(duplicateField);
                 return;
             }
 
-            var p = PatientService.Create(record);
-            AuditService.Record(PortalHospital.HospitalId, null, "CREATE", "Patient", p.PatientId, "Self-registered via patient portal");
             NewMrn.Text = HttpUtility.HtmlEncode(p.Mrn);
             FormPanel.Visible = false;
             SuccessPanel.Visible = true;

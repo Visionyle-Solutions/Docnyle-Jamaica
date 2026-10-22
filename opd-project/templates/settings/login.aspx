@@ -13,7 +13,7 @@
     </asp:Panel>
     <div class="form-group">
       <label class="form-label" for="<%= EmailInput.ClientID %>">Email</label>
-      <asp:TextBox ID="EmailInput" runat="server" CssClass="form-control" TextMode="Email" placeholder="doctor@clinic.com" Text="drsharma@sunrise.in" />
+      <asp:TextBox ID="EmailInput" runat="server" CssClass="form-control" TextMode="Email" placeholder="doctor@clinic.com" />
       <asp:RequiredFieldValidator runat="server" ControlToValidate="EmailInput" ErrorMessage="Enter your email" CssClass="field-error" Display="Dynamic" />
     </div>
     <div class="form-group">
@@ -24,6 +24,7 @@
     <asp:Button ID="SignInButton" runat="server" Text="Sign in" CssClass="btn btn--primary mt-3" style="width:100%; justify-content:center;" OnClick="SignInButton_Click" />
     <div class="text-xs text-muted mt-2" style="text-align:center; line-height:1.4;">By signing in you confirm you are the account holder.<br/>Credential sharing violates clinic policy and data protection regulations.</div>
     <div class="text-xs text-muted mt-3" style="border-top:1px solid var(--border-default); padding-top:10px;">
+      <asp:Panel ID="DemoLoginsPanel" runat="server" Visible="false">
       <strong>Demo accounts</strong> (password <code>demo123</code> unless noted):
       <div style="display:grid; grid-template-columns:auto 1fr; gap:2px 8px; margin-top:4px;">
         <span>Doctor</span><span>drsharma@sunrise.in</span>
@@ -33,6 +34,7 @@
         <span>Admin</span><span>admin@sunrise.in · <code>admin123</code></span>
         <span>Lab partner</span><span>lab@sunrisediag.in · <code>lab123</code></span>
       </div>
+      </asp:Panel>
       <div class="mt-2"><a href="<%: ResolveUrl("~/portal/register") %>">Patient self-registration</a> · <a href="<%: ResolveUrl("~/portal/book") %>">Book an appointment</a></div>
     </div>
   </asp:Panel>

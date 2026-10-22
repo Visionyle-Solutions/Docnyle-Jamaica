@@ -85,10 +85,11 @@ namespace OpdProject.templates.settings
         private void BindDefaults()
         {
             var s = HospitalService.GetSettings(HospitalId);
-            SlotMins.Text = s["APPT_SLOT_MINS"];
-            BufferMins.Text = s["APPT_BUFFER_MINS"];
-            FreeAllowed.Checked = s["FREE_FOLLOWUP_ALLOWED"] == "true";
-            FreeDays.Text = s["FREE_FOLLOWUP_DAYS"];
+            Func<string, string> get = k => { string v; return s.TryGetValue(k, out v) ? v : ""; };
+            SlotMins.Text = get("APPT_SLOT_MINS");
+            BufferMins.Text = get("APPT_BUFFER_MINS");
+            FreeAllowed.Checked = get("FREE_FOLLOWUP_ALLOWED") == "true";
+            FreeDays.Text = get("FREE_FOLLOWUP_DAYS");
         }
 
         protected void SaveDefaultsButton_Click(object sender, EventArgs e)
@@ -162,7 +163,8 @@ namespace OpdProject.templates.settings
             if (!IsAdmin) return;
             SelectedDoctorId = null;
             ProfileTitle.Text = "New Doctor";
-            foreach (var tb in new[] { DpFirst, DpMiddle, DpLast, DpQualifications, DpDisplayOverride, DpLicense, DpRoom, DpEmail, DpPhone, DpLanguages, DpBio }) tb.Text = "";
+            foreach (var tb in new[] { DpFirst, DpMiddle, DpLast, DpQualifications, DpDisplayOverride, DpLicense, DpRoom, DpEmail, DpPhone, DpLanguages, DpBio, DpPassword }) tb.Text = "";
+            DpPasswordGroup.Visible = true;
             DpPrefix.Text = "Dr.";
             FillSpecialties(new string[0]);
             ProfilePanel.Visible = true;
@@ -178,6 +180,7 @@ namespace OpdProject.templates.settings
             DpPrefix.Text = d.Prefix; DpFirst.Text = d.FirstName; DpMiddle.Text = d.MiddleName; DpLast.Text = d.LastName;
             DpQualifications.Text = d.Qualifications; DpDisplayOverride.Text = d.DisplayNameOverride; DpLicense.Text = d.LicenseNumber;
             DpRoom.Text = d.Room; DpEmail.Text = d.Email; DpPhone.Text = d.Phone; DpLanguages.Text = d.Languages; DpBio.Text = d.Bio;
+            DpPasswordGroup.Visible = false;
             FillSpecialties(SchedulingService.DoctorSpecialtyIds(doctorId));
             ProfilePanel.Visible = true;
             SchedulePanel.Visible = false;
@@ -186,6 +189,12 @@ namespace OpdProject.templates.settings
         protected void DoctorEmailUnique_ServerValidate(object source, ServerValidateEventArgs args)
         {
             args.IsValid = !UserService.EmailInUse(args.Value.Trim(), SelectedDoctorId);
+        }
+
+        /// <summary>A new doctor gets a password set here (there is no shared default password).</summary>
+        protected void DoctorPassword_ServerValidate(object source, ServerValidateEventArgs args)
+        {
+            args.IsValid = SelectedDoctorId != null || DpPassword.Text.Length >= 8;
         }
 
         protected void SpecialtiesRequired_ServerValidate(object source, ServerValidateEventArgs args)
@@ -204,6 +213,7 @@ namespace OpdProject.templates.settings
                 UserId = SelectedDoctorId, Prefix = DpPrefix.Text.Trim(), FirstName = DpFirst.Text.Trim(), MiddleName = DpMiddle.Text.Trim(), LastName = DpLast.Text.Trim(),
                 Qualifications = DpQualifications.Text.Trim(), DisplayNameOverride = DpDisplayOverride.Text.Trim(), LicenseNumber = DpLicense.Text.Trim(),
                 Email = DpEmail.Text.Trim(), Phone = DpPhone.Text.Trim(), Room = DpRoom.Text.Trim(), Languages = DpLanguages.Text.Trim(), Bio = DpBio.Text.Trim(),
+                Password = isNew ? DpPassword.Text : null,
             }, DpSpecialties.Items.Cast<ListItem>().Where(i => i.Selected).Select(i => i.Value).ToList());
             Audit(isNew ? "CREATE" : "UPDATE", "DoctorProfile", saved.UserId, saved.FullName);
             ToastSuccess(isNew ? "Doctor added" : "Doctor saved", saved.FullName + (isNew ? " — set the weekly timetable next" : ""));
@@ -280,7 +290,7 @@ namespace OpdProject.templates.settings
         protected void WindowsRepeater_ItemCommand(object source, RepeaterCommandEventArgs e)
         {
             if (e.CommandName != "RemoveWindow" || (!IsAdmin && SelectedDoctorId != UserId)) return;
-            SchedulingService.RemoveSlotWindow((string)e.CommandArgument);
+            SchedulingService.RemoveSlotWindow((string)e.CommandArgument, SelectedDoctorId);
             Audit("UPDATE", "DoctorSlotConfig", SelectedDoctorId, "Removed window " + e.CommandArgument);
             ToastSuccess("Availability removed");
             BindWeek();

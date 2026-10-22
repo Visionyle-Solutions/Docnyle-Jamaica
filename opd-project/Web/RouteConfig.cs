@@ -13,6 +13,7 @@ namespace OpdProject.Web
         {
             routes.MapPageRoute("login", "login", "~/templates/settings/login.aspx");
             routes.MapPageRoute("access-denied", "access-denied", "~/templates/shared/access-denied.aspx");
+            routes.MapPageRoute("service-unavailable", "service-unavailable", "~/templates/shared/service-error.aspx");
 
             routes.MapPageRoute("patients", "patients", "~/templates/patients/patient-today-list.aspx");
             routes.MapPageRoute("patient-search", "patients/search", "~/templates/patients/patient-search.aspx");

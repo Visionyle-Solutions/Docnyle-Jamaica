@@ -1,12 +1,15 @@
-using System;
-using System.Collections;
 using System.Collections.Generic;
+using System.Collections;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System;
+using OpdProject.Helpers;
 using OpdProject.Models;
+using OpdProject.Services.Api;
+using OpdProject.Web;
 
 namespace OpdProject.Services
 {
@@ -22,6 +25,15 @@ namespace OpdProject.Services
         public decimal Invoiced { get; set; }
         public decimal Paid { get; set; }
         public int Count { get; set; }
+    }
+
+    /// <summary>Outgoing message counts by delivery status.</summary>
+    public class MessageStats
+    {
+        public int Total { get; set; }
+        public int Sent { get; set; }
+        public int Simulated { get; set; }
+        public int Failed { get; set; }
     }
 
     /// <summary>Counts for today, this week (Monday–Sunday) and this calendar month.</summary>
@@ -42,8 +54,10 @@ namespace OpdProject.Services
     }
 
     /// <summary>The five dashboard reports, each over an inclusive date range.</summary>
-    public static class ReportService
+    public static partial class ReportService
     {
+        private static readonly CommonHelper cnHelperObj = new CommonHelper();
+
         /// <summary>Inclusive range of hospital-local calendar dates; pass a local date, never a UTC instant.</summary>
         private static bool InRange(DateTime d, DateTime from, DateTime to) { return d.Date >= from.Date && d.Date <= to.Date; }
 
@@ -94,6 +108,7 @@ namespace OpdProject.Services
         /// <summary>Appointment Summary with a custom date range (both days inclusive), oldest first.</summary>
         public static List<AppointmentView> AppointmentList(string hid, string doctorId, string kind, DateTime from, DateTime to)
         {
+            if (Api) return ApiRange(doctorId, kind, null, from.Date, to.Date);
             lock (DataStore.Sync)
                 return SchedulingService.ToViews(AppointmentsInRange(hid, doctorId, kind, from.Date, to.Date).OrderBy(a => a.SlotStart));
         }
@@ -102,6 +117,7 @@ namespace OpdProject.Services
         /// plus today's visits by status. A null doctorId counts the whole hospital.</summary>
         public static DashboardStats Dashboard(string hid, string doctorId, DateTime today)
         {
+            if (Api) return ApiDashboard(today);
             lock (DataStore.Sync)
             {
                 Func<string, PeriodCounts> counts = kind => new PeriodCounts
@@ -124,6 +140,12 @@ namespace OpdProject.Services
         /// <summary>The appointments behind one dashboard number (optionally narrowed to one status), oldest first.</summary>
         public static List<AppointmentView> DashboardList(string hid, string doctorId, string kind, string period, string status, DateTime today)
         {
+            if (Api)
+            {
+                DateTime from, to;
+                PeriodRange(period, today, out from, out to);
+                return ApiRange(doctorId, kind, status, from, to);
+            }
             lock (DataStore.Sync)
                 return SchedulingService.ToViews(DashboardAppointments(hid, doctorId, kind, period, today)
                     .Where(a => status == null || a.Status == status).OrderBy(a => a.SlotStart));
@@ -131,6 +153,10 @@ namespace OpdProject.Services
 
         public static List<CountRow> ConsultationVolume(string hid, DateTime from, DateTime to)
         {
+            if (Api)
+                return (cnHelperObj.ListConsultationVolumeReport(AppSession.ApiHospitalId, AppSession.ApiUserId, DocNyle.Date(from), DocNyle.Date(to), AppSession.ApiHashValue).EnsureSuccess().Rows ?? new List<RPT_ConsultationVolumeInfo>())
+                    .Select(x => new { Date = DocNyle.ParseLocal(x.Date), x.ConsultationCount }).OrderBy(x => x.Date)
+                    .Select(x => new CountRow { Label = x.Date.HasValue ? HospitalService.FormatDate(hid, x.Date.Value) : "", Count = x.ConsultationCount }).ToList();
             lock (DataStore.Sync)
                 return DataStore.Consultations.Where(c => c.HospitalId == hid && InRange(c.VisitLocalDate, from, to))
                     .GroupBy(c => c.VisitLocalDate).OrderBy(g => g.Key).Select(g => new CountRow { Label = HospitalService.FormatDate(hid, g.Key), Count = g.Count() }).ToList();
@@ -138,6 +164,9 @@ namespace OpdProject.Services
 
         public static List<CountRow> DiagnosisFrequency(string hid, DateTime from, DateTime to)
         {
+            if (Api)
+                return (cnHelperObj.ListDiagnosisFrequencyReport(AppSession.ApiHospitalId, AppSession.ApiUserId, DocNyle.Date(from), DocNyle.Date(to), AppSession.ApiHashValue).EnsureSuccess().Rows ?? new List<RPT_DiagnosisFrequencyInfo>())
+                    .Select(x => new CountRow { Label = x.Icd10Code + " " + x.Description, Count = x.DiagnosisCount }).OrderByDescending(x => x.Count).ToList();
             lock (DataStore.Sync)
                 return DataStore.Diagnoses.Join(DataStore.Consultations, d => d.ConsultationId, c => c.ConsultationId, (d, c) => new { d, c })
                     .Where(x => x.c.HospitalId == hid && InRange(x.c.VisitLocalDate, from, to))
@@ -147,6 +176,9 @@ namespace OpdProject.Services
 
         public static List<CountRow> Prescribing(string hid, DateTime from, DateTime to)
         {
+            if (Api)
+                return (cnHelperObj.ListPrescribingReport(AppSession.ApiHospitalId, AppSession.ApiUserId, DocNyle.Date(from), DocNyle.Date(to), AppSession.ApiHashValue).EnsureSuccess().Rows ?? new List<RPT_PrescribingInfo>())
+                    .Select(x => new CountRow { Label = x.MedicineName, Count = x.PrescriptionCount }).OrderByDescending(x => x.Count).ToList();
             lock (DataStore.Sync)
                 return DataStore.Prescriptions.Join(DataStore.Consultations, p => p.ConsultationId, c => c.ConsultationId, (p, c) => new { p, c })
                     .Where(x => x.c.HospitalId == hid && InRange(x.c.VisitLocalDate, from, to))
@@ -156,6 +188,14 @@ namespace OpdProject.Services
 
         public static List<CountRow> AppointmentStatus(string hid, DateTime from, DateTime to, out int total, out int noShowRate)
         {
+            if (Api)
+            {
+                var rep = cnHelperObj.ListNoShowReport(AppSession.ApiHospitalId, AppSession.ApiUserId, DocNyle.Date(from), DocNyle.Date(to), AppSession.ApiHashValue).EnsureSuccess().Report ?? new RPT_NoShowReportInfo();
+                total = rep.Total;
+                noShowRate = rep.NoShowRate;
+                return (rep.ByStatus ?? new List<RPT_StatusCountInfo>()).Select(x => new CountRow { Label = x.Status, Count = x.StatusCount })
+                    .OrderByDescending(x => x.Count).ToList();
+            }
             lock (DataStore.Sync)
             {
                 var appts = DataStore.Appointments.Where(a => a.HospitalId == hid && InRange(a.AppointmentDate, from, to)).ToList();
@@ -167,6 +207,11 @@ namespace OpdProject.Services
 
         public static List<RevenueRow> Revenue(string hid, DateTime from, DateTime to)
         {
+            if (Api)
+                return (cnHelperObj.ListRevenueReport(AppSession.ApiHospitalId, AppSession.ApiUserId, DocNyle.Date(from), DocNyle.Date(to), AppSession.ApiHashValue).EnsureSuccess().Rows ?? new List<RPT_RevenueInfo>()).Select(x => new RevenueRow
+                {
+                    DoctorName = UserService.UserName(x.DoctorId), Invoiced = x.TotalInvoiced, Paid = x.TotalPaid, Count = x.InvoiceCount,
+                }).ToList();
             lock (DataStore.Sync)
                 return DataStore.Invoices.Where(i => i.HospitalId == hid && i.Status != "CANCELLED" && InRange(TimeZoneService.LocalDate(i.CreatedAt, TimeZoneService.HospitalZoneId(hid)), from, to))
                     .GroupBy(i => i.DoctorId).Select(g => new RevenueRow
@@ -174,23 +219,59 @@ namespace OpdProject.Services
                         DoctorName = UserService.UserName(g.Key), Invoiced = g.Sum(i => i.TotalAmount), Paid = g.Sum(i => i.PaidAmount), Count = g.Count()
                     }).ToList();
         }
+
+        private static bool Api { get { return DataSource.IsApi("Operations"); } }
+
+        /// <summary>GetAppointmentDashboard — the service scopes a doctor-only caller to their own appointments.</summary>
+        private static DashboardStats ApiDashboard(DateTime today)
+        {
+            var d = cnHelperObj.GetAppointmentDashboard(AppSession.ApiHospitalId, AppSession.ApiUserId, DocNyle.Date(today), AppSession.ApiHashValue).EnsureSuccess().Dashboard ?? new SCH_AppointmentDashboardInfo();
+            var counts = d.Counts ?? new List<SCH_DashboardCountInfo>();
+            Func<string, PeriodCounts> pick = kind =>
+            {
+                var c = counts.FirstOrDefault(x => string.Equals(x.Kind, kind, StringComparison.OrdinalIgnoreCase));
+                return c == null ? new PeriodCounts() : new PeriodCounts { Today = c.TodayCount, Week = c.WeekCount, Month = c.MonthCount };
+            };
+            return new DashboardStats
+            {
+                Consultations = pick("consultations"), Appointments = pick("appointments"), Cancelled = pick("cancelled"),
+                TodayStatus = (d.TodayByStatus ?? new List<SCH_StatusCountInfo>()).Select(s => new CountRow { Label = s.Status, Count = s.Count })
+                    .OrderByDescending(r => r.Count).ToList(),
+            };
+        }
+
+        private static List<AppointmentView> ApiRange(string doctorId, string kind, string status, DateTime from, DateTime to)
+        {
+            return (cnHelperObj.ListAppointmentsForRange(AppSession.ApiHospitalId, AppSession.ApiUserId, DocNyle.Date(from), DocNyle.Date(to), doctorId, kind, status, AppSession.ApiHashValue).EnsureSuccess().Appointments ?? new List<SCH_AppointmentInfo>())
+                .Select(SchedulingService.ToView).OrderBy(v => v.Appointment.SlotStart).ToList();
+        }
     }
 
     /// <summary>Message templates, channel configuration and the outgoing message queue (simulated delivery).</summary>
-    public static class NotificationService
+    public static partial class NotificationService
     {
+        private static readonly CommonHelper cnHelperObj = new CommonHelper();
+
         public static List<MessageTemplate> ListTemplates()
         {
+            if (Api) return ApiTemplates();
             lock (DataStore.Sync) return DataStore.MessageTemplates.ToList();
         }
 
         public static MessageTemplate GetTemplate(string templateId)
         {
+            if (Api) return ApiTemplates().FirstOrDefault(t => t.TemplateId == templateId);
             lock (DataStore.Sync) return DataStore.MessageTemplates.FirstOrDefault(t => t.TemplateId == templateId);
         }
 
         public static void UpdateTemplate(string templateId, string name, string channel, string text)
         {
+            if (Api)
+            {
+                cnHelperObj.UpdateMessageTemplate(new MSG_UpdateMessageTemplateReq { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue, MessageTemplateId = templateId, Name = name, Channel = channel, Text = text }).EnsureSuccess();
+                RequestCache.Remove("msg-templates");
+                return;
+            }
             lock (DataStore.Sync)
             {
                 var t = GetTemplate(templateId);
@@ -201,6 +282,15 @@ namespace OpdProject.Services
 
         public static void SetTemplateEnabled(string templateId, bool enabled)
         {
+            if (Api)
+            {
+                // UpdateMessageTemplateStatus toggles, so it is only called when the state differs.
+                var t = GetTemplate(templateId);
+                if (t == null || t.IsEnabled == enabled) return;
+                cnHelperObj.UpdateMessageTemplateStatus(new MSG_UpdateMessageTemplateStatusReq { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue, MessageTemplateId = templateId }).EnsureSuccess();
+                RequestCache.Remove("msg-templates");
+                return;
+            }
             lock (DataStore.Sync)
             {
                 var t = GetTemplate(templateId);
@@ -217,6 +307,7 @@ namespace OpdProject.Services
         /// <summary>Queues a message; it is SENT when the channel is enabled, otherwise SIMULATED (no provider is wired up).</summary>
         public static QueuedMessage Queue(string hospitalId, Patient patient, MessageTemplate template, string text)
         {
+            if (Api) return ApiQueue(patient, template, text);
             lock (DataStore.Sync)
             {
                 bool enabled = template.Channel == "EMAIL" ? DataStore.EmailConfig.Enabled : DataStore.WhatsAppConfig.Enabled;
@@ -255,6 +346,7 @@ namespace OpdProject.Services
                 Queue(hospitalId, a.Patient, tpl, Render(tpl.Text, vars));
                 n++;
             }
+            if (Api && n > 0) cnHelperObj.SubmitQueuedMessages(new MSG_SubmitQueuedMessagesReq() { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue }).EnsureSuccess();
             return n;
         }
 
@@ -272,6 +364,7 @@ namespace OpdProject.Services
                 Queue(hospitalId, a.Patient, tpl, Render(tpl.Text, BaseVars(h, a.Patient, a.DoctorName, date)));
                 n++;
             }
+            if (Api && n > 0) cnHelperObj.SubmitQueuedMessages(new MSG_SubmitQueuedMessagesReq() { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue }).EnsureSuccess();
             return n;
         }
 
@@ -286,11 +379,107 @@ namespace OpdProject.Services
 
         public static List<QueuedMessage> ListLog(string hospitalId)
         {
+            if (Api)
+                return (cnHelperObj.ListMessageLog(AppSession.ApiHospitalId, AppSession.ApiUserId, AppSession.ApiHashValue).EnsureSuccess().Messages ?? new List<MSG_QueuedMessageInfo>()).Select(m => new QueuedMessage
+                {
+                    MessageId = m.MessageId, HospitalId = hospitalId, PatientId = m.PatientId, PatientName = m.PatientName, Channel = m.Channel,
+                    TemplateName = m.TemplateName, Status = m.Status, QueuedAt = DocNyle.InstantOrMin(m.QueuedAt), SentAt = DocNyle.ParseInstant(m.SentAt),
+                }).OrderByDescending(m => m.QueuedAt).ToList();
             lock (DataStore.Sync) return DataStore.Messages.Where(m => m.HospitalId == hospitalId).OrderByDescending(m => m.QueuedAt).ToList();
         }
 
-        public static ChannelConfig WhatsApp { get { return DataStore.WhatsAppConfig; } }
-        public static ChannelConfig Email { get { return DataStore.EmailConfig; } }
+        /// <summary>Delivery counts for the message log header: GetMessageStats in API mode, else counted from <paramref name="log"/>.</summary>
+        public static MessageStats Stats(List<QueuedMessage> log)
+        {
+            if (Api)
+            {
+                var s = cnHelperObj.GetMessageStats(AppSession.ApiHospitalId, AppSession.ApiUserId, AppSession.ApiHashValue).EnsureSuccess().Stats ?? new MSG_MessageStatsInfo();
+                return new MessageStats { Total = s.Total, Sent = s.Sent, Simulated = s.Simulated, Failed = s.Failed };
+            }
+            return new MessageStats
+            {
+                Total = log.Count, Sent = log.Count(m => m.Status == "SENT"), Simulated = log.Count(m => m.Status == "SIMULATED"),
+                Failed = log.Count(m => m.Status == "FAILED"),
+            };
+        }
+
+        public static ChannelConfig WhatsApp { get { return Api ? ApiChannel("WHATSAPP") : DataStore.WhatsAppConfig; } }
+        public static ChannelConfig Email { get { return Api ? ApiChannel("EMAIL") : DataStore.EmailConfig; } }
+
+        /// <summary>
+        /// Saves a channel's settings (SaveNotificationConfig in API mode). A blank <see cref="ChannelConfig.ApiKey"/> keeps the stored key.
+        /// </summary>
+        public static void SaveChannelConfig(string channel, ChannelConfig values)
+        {
+            if (Api)
+            {
+                cnHelperObj.SaveNotificationConfig(new MSG_SaveNotificationConfigReq
+                {
+                    HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue,
+                    Channel = channel, Provider = values.Provider, ApiKey = string.IsNullOrEmpty(values.ApiKey) ? null : values.ApiKey,
+                    PhoneNumberId = values.PhoneNumberId, BusinessAccountId = values.BusinessAccountId, SmtpHost = values.SmtpHost,
+                    SmtpPort = channel == "EMAIL" ? values.SmtpPort : (int?)null, FromEmail = values.FromEmail, FromName = values.FromName, Enabled = values.Enabled,
+                }).EnsureSuccess();
+                RequestCache.Remove("msg-config");
+                return;
+            }
+            lock (DataStore.Sync)
+            {
+                var c = channel == "EMAIL" ? DataStore.EmailConfig : DataStore.WhatsAppConfig;
+                c.Provider = values.Provider; c.PhoneNumberId = values.PhoneNumberId; c.BusinessAccountId = values.BusinessAccountId;
+                c.SmtpHost = values.SmtpHost; c.SmtpPort = values.SmtpPort; c.FromEmail = values.FromEmail; c.FromName = values.FromName; c.Enabled = values.Enabled;
+                if (!string.IsNullOrEmpty(values.ApiKey)) c.ApiKey = values.ApiKey;
+            }
+        }
+
+        private static bool Api { get { return DataSource.IsApi("Operations"); } }
+
+        /// <summary>ListMessageTemplates needs admin_hospital; for other callers no template is available (null list).</summary>
+        private static List<MessageTemplate> ApiTemplates()
+        {
+            return RequestCache.Get("msg-templates", () =>
+            {
+                try
+                {
+                    return (cnHelperObj.ListMessageTemplates(AppSession.ApiHospitalId, AppSession.ApiUserId, AppSession.ApiHashValue).EnsureSuccess().Templates ?? new List<MSG_MessageTemplateInfo>()).Select(t => new MessageTemplate
+                    {
+                        TemplateId = t.MessageTemplateId, Name = t.Name, Trigger = t.TriggerEvent, Channel = t.Channel, IsEnabled = t.IsEnabled, Text = t.TemplateText,
+                    }).ToList();
+                }
+                catch (ApiException ex) when (ex.Kind == ApiFaultKind.Forbidden)
+                {
+                    return new List<MessageTemplate>();
+                }
+            });
+        }
+
+        /// <summary>GetNotificationConfig never returns the API key — only whether one is stored (HasApiKey).</summary>
+        private static ChannelConfig ApiChannel(string channel)
+        {
+            var rows = RequestCache.Get("msg-config", () => cnHelperObj.GetNotificationConfig(AppSession.ApiHospitalId, AppSession.ApiUserId, AppSession.ApiHashValue).EnsureSuccess().Configs ?? new List<MSG_ChannelConfigInfo>());
+            var c = rows.FirstOrDefault(x => string.Equals(x.Channel, channel, StringComparison.OrdinalIgnoreCase));
+            if (c == null) return new ChannelConfig { Provider = "", SmtpPort = 587 };
+            return new ChannelConfig
+            {
+                Provider = c.Provider, ApiKey = null, HasApiKey = c.HasApiKey, PhoneNumberId = c.PhoneNumberId, BusinessAccountId = c.BusinessAccountId,
+                SmtpHost = c.SmtpHost, SmtpPort = c.SmtpPort ?? 587, FromEmail = c.FromEmail, FromName = c.FromName, Enabled = c.IsEnabled,
+            };
+        }
+
+        private static QueuedMessage ApiQueue(Patient patient, MessageTemplate template, string text)
+        {
+            var m = cnHelperObj.CreateQueuedMessage(new MSG_CreateQueuedMessageReq
+            {
+                HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue,
+                PatientId = patient.PatientId, Channel = template.Channel, TemplateName = template.Name, PatientName = patient.FullName,
+                PatientPhone = string.IsNullOrEmpty(patient.Phone) ? null : patient.Phone, MessageText = text,
+            }).EnsureSuccess().QueuedMessage;
+            return m == null ? null : new QueuedMessage
+            {
+                MessageId = m.MessageId, PatientId = m.PatientId, PatientName = m.PatientName, Channel = m.Channel, TemplateName = m.TemplateName,
+                MessageText = text, Status = m.Status, QueuedAt = DocNyle.InstantOrMin(m.QueuedAt), SentAt = DocNyle.ParseInstant(m.SentAt),
+            };
+        }
     }
 
     public class ExportTable
@@ -301,8 +490,10 @@ namespace OpdProject.Services
     }
 
     /// <summary>CSV export of the in-memory tables and CSV import of patients.</summary>
-    public static class ExportService
+    public static partial class ExportService
     {
+        private static readonly CommonHelper cnHelperObj = new CommonHelper();
+
         private static IList Rows(string key, string hospitalId)
         {
             switch (key)
@@ -331,6 +522,9 @@ namespace OpdProject.Services
 
         public static List<ExportTable> ListTables(string hospitalId)
         {
+            if (Api)
+                return (cnHelperObj.ListExportTables(AppSession.ApiHospitalId, AppSession.ApiUserId, AppSession.ApiHashValue).EnsureSuccess().ExportTables ?? new List<SEC_ExportTableInfo>())
+                    .Select(t => new ExportTable { Key = t.TableKey, Label = TableLabel(t.TableKey), Count = t.RowCount }).ToList();
             lock (DataStore.Sync)
                 return Tables.Select(t => new ExportTable { Key = t[0], Label = t[1], Count = Rows(t[0], hospitalId).Count }).ToList();
         }
@@ -338,12 +532,14 @@ namespace OpdProject.Services
         public static string TableLabel(string key)
         {
             var t = Tables.FirstOrDefault(x => x[0] == key);
+            if (t == null && key == "paymentTransactions") return "Payment Transactions";   // the API's key for payments
             return t != null ? t[1] : key;
         }
 
         /// <summary>Serialises a table's simple (non-collection) properties to CSV; null when empty or unknown.</summary>
         public static string ToCsv(string key, string hospitalId)
         {
+            if (Api) return ApiCsv(key);
             lock (DataStore.Sync)
             {
                 var rows = Rows(key, hospitalId);
@@ -424,6 +620,7 @@ namespace OpdProject.Services
         /// <summary>Registers each valid row as a patient (MRNs are issued as usual).</summary>
         public static int ImportPatients(string hospitalId, List<Dictionary<string, string>> rows)
         {
+            if (Api) return ApiImport(rows);
             Func<Dictionary<string, string>, string, string> get = (r, k) => r.ContainsKey(k) ? r[k] : "";
             foreach (var r in rows)
                 PatientService.Create(new Patient
@@ -433,6 +630,35 @@ namespace OpdProject.Services
                     Address = get(r, "Address"), NationalHealthId = get(r, "NationalHealthId"), RegisteredVia = "CSV_IMPORT"
                 });
             return rows.Count;
+        }
+
+        private static bool Api { get { return DataSource.IsApi("Operations"); } }
+
+        /// <summary>ListExportData returns the CSV built by the service (UTF-8 with BOM, base64).</summary>
+        private static string ApiCsv(string key)
+        {
+            var f = DocNyle.OrNull(() => cnHelperObj.ListExportData(AppSession.ApiHospitalId, AppSession.ApiUserId, key, AppSession.ApiHashValue).EnsureSuccess())?.File;
+            if (f == null || string.IsNullOrEmpty(f.ContentBase64)) return null;
+            var text = Encoding.UTF8.GetString(Convert.FromBase64String(f.ContentBase64)).TrimStart('﻿');
+            // Header row only = no data.
+            return text.Replace("\r\n", "\n").Split('\n').Count(l => l.Trim().Length > 0) < 2 ? null : text;
+        }
+
+        /// <summary>CreatePatientsBatch — every row or none (RegisteredVia CSV_IMPORT); a bad row comes back as fault 50204 naming it.</summary>
+        private static int ApiImport(List<Dictionary<string, string>> rows)
+        {
+            Func<Dictionary<string, string>, string, string> get = (r, k) => r.ContainsKey(k) && !string.IsNullOrWhiteSpace(r[k]) ? r[k].Trim() : null;
+            var created = cnHelperObj.CreatePatientsBatch(new PAT_CreatePatientsBatchReq
+            {
+                HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue,
+                Rows = rows.Select(r => new PAT_ImportPatientRowInfo
+                {
+                    FullName = r["FullName"], Gender = r["Gender"].ToUpperInvariant(),
+                    Dob = DocNyle.Date(DateTime.Parse(r["Dob"], CultureInfo.InvariantCulture)), Phone = r["Phone"],
+                    Email = get(r, "Email"), Address = get(r, "Address"), NationalHealthId = get(r, "NationalHealthId"),
+                }).ToList(),
+            }).EnsureSuccess().Patients;
+            return created != null ? created.Count : rows.Count;
         }
     }
 }

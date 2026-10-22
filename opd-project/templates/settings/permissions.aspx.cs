@@ -30,7 +30,7 @@ namespace OpdProject.templates.settings
 
         private void Bind()
         {
-            RolesHeader.DataSource = UserService.Roles;
+            RolesHeader.DataSource = UserService.ListRoles();
             RolesHeader.DataBind();
             MatrixRepeater.DataSource = UserService.GetPermissionMatrix();
             MatrixRepeater.DataBind();
@@ -41,7 +41,7 @@ namespace OpdProject.templates.settings
             var row = e.Item.DataItem as PermissionRow;
             if (row == null) return;
             var cells = (Repeater)e.Item.FindControl("CellsRepeater");
-            cells.DataSource = UserService.Roles.Select(r => new PermissionCell { Role = r, Feature = row.Feature, Allowed = row.Access[r] }).ToList();
+            cells.DataSource = UserService.ListRoles().Select(r => new PermissionCell { Role = r, Feature = row.Feature, Allowed = row.Access.ContainsKey(r) && row.Access[r] }).ToList();
             cells.DataBind();
         }
 

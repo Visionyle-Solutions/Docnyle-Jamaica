@@ -38,8 +38,18 @@ namespace OpdProject.Web
                 + "\" style=\"font-size:" + fontSize + ";\">" + HttpUtility.HtmlEncode(r) + "</span>"));
         }
 
-        /// <summary>Signed-in user's hospital; for anonymous pages, the first (demo) hospital.</summary>
-        protected string HospitalId { get { return CurrentUser != null ? CurrentUser.HospitalId : "HOSP-001"; } }
+        /// <summary>
+        /// Signed-in user's hospital. For anonymous pages: the portal hospital (appSettings PortalHospitalId) in API mode —
+        /// display only, the portal operations take the hospital from the service's configuration — else the first demo hospital.
+        /// </summary>
+        protected string HospitalId
+        {
+            get
+            {
+                if (CurrentUser != null) return CurrentUser.HospitalId;
+                return DataSource.IsApi("Hospital") ? (System.Configuration.ConfigurationManager.AppSettings["PortalHospitalId"] ?? "") : "HOSP-001";
+            }
+        }
 
         private Hospital _hospital;
         protected Hospital Hospital { get { return _hospital ?? (_hospital = HospitalService.GetHospital(HospitalId)); } }
@@ -62,6 +72,88 @@ namespace OpdProject.Web
         }
 
         protected bool Can(string feature) { return UserService.HasPermission(CurrentUser, feature); }
+
+        /* ── API failures (API-INTEGRATION-GUIDE.md §4.4) ── */
+
+        /// <summary>
+        /// An ApiException that escapes a page event lands here: expired session → sign out and back to login;
+        /// access denied → access-denied page; a refused postback (validation / business rule / conflict / not found)
+        /// → error toast and the page reloads with its current data; anything else (service unreachable, a page
+        /// that cannot load) → the service-error page with a retry link.
+        /// </summary>
+        protected override void OnError(EventArgs e)
+        {
+            var api = FindApiException(Server.GetLastError());
+            if (api == null) { base.OnError(e); return; }
+            Server.ClearError();
+            HandleApiFailure(api);
+        }
+
+        private static ApiException FindApiException(Exception ex)
+        {
+            for (var x = ex; x != null; x = x.InnerException)
+            {
+                var api = x as ApiException;
+                if (api != null) return api;
+            }
+            return null;
+        }
+
+        /// <summary>Shows an API failure the standard way and ends the request (see <see cref="OnError"/>).</summary>
+        protected void HandleApiFailure(ApiException api)
+        {
+            System.Diagnostics.Trace.TraceWarning("API " + api.Operation + " failed (" + api.Kind + "): " + api.Message);
+            string target;
+            switch (api.Kind)
+            {
+                case ApiFaultKind.Unauthenticated:
+                    AppSession.SignOut();
+                    ToastWarning("Session expired", api.UserMessage);
+                    target = Urls.Login + "?returnUrl=" + HttpUtility.UrlEncode(Request.RawUrl);
+                    break;
+                case ApiFaultKind.Forbidden:
+                    target = Urls.To("access-denied") + "?page=" + HttpUtility.UrlEncode(PageTitle);
+                    break;
+                case ApiFaultKind.Network:
+                    if (!api.AlreadyShown) ToastDanger("Service unavailable", api.UserMessage);
+                    target = Urls.To("service-unavailable") + "?returnUrl=" + HttpUtility.UrlEncode(Request.RawUrl);
+                    break;
+                default:
+                    if (IsPostBack)
+                    {
+                        ToastDanger(api.Kind == ApiFaultKind.Conflict ? "Changed by someone else" : api.Kind == ApiFaultKind.NotFound ? "Not found" : "Not saved", api.UserMessage);
+                        target = Request.RawUrl;
+                    }
+                    else
+                    {
+                        ToastDanger("Could not load this page", api.UserMessage);
+                        target = Urls.To("service-unavailable") + "?returnUrl=" + HttpUtility.UrlEncode(Request.RawUrl);
+                    }
+                    break;
+            }
+            if (this is OpdProject.templates.shared.service_error) target = Urls.Login;
+            Response.Redirect(target, false);
+            Context.ApplicationInstance.CompleteRequest();
+        }
+
+        /// <summary>
+        /// Runs a page action that calls the API and turns a refusal into an inline error toast instead of a reload.
+        /// Returns false when the action failed (the caller should stay on the form).
+        /// </summary>
+        protected bool TryApi(Action action, string failureTitle = "Not saved")
+        {
+            try
+            {
+                action();
+                return true;
+            }
+            catch (ApiException ex) when (ex.Kind == ApiFaultKind.Validation || ex.Kind == ApiFaultKind.BusinessRule
+                                          || ex.Kind == ApiFaultKind.Conflict || ex.Kind == ApiFaultKind.NotFound)
+            {
+                ToastDanger(failureTitle, ex.UserMessage);
+                return false;
+            }
+        }
 
         /* ── Route / query values ── */
 

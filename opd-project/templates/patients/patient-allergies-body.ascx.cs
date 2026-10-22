@@ -34,8 +34,8 @@ namespace OpdProject.templates.patients
             }
             if (e.CommandName == "Deactivate")
             {
-                var a = PatientService.GetAllergy(id);
-                PatientService.DeactivateAllergy(id);
+                var a = PatientService.GetAllergy(id, PatientId);
+                PatientService.DeactivateAllergy(id, PatientId);
                 var page = (BasePage)Page;
                 AuditService.Record(AppSession.CurrentUser.HospitalId, AppSession.CurrentUser.UserId, "UPDATE", "PatientAllergy", id, "Deactivated " + (a != null ? a.AllergyName : ""));
                 page.ToastSuccess("Allergy deactivated");

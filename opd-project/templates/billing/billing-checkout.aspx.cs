@@ -213,7 +213,7 @@ namespace OpdProject.templates.billing
                     ToastSuccess("Coverage removed from invoice");
                     break;
                 case "History":
-                    var cov = PatientService.GetCoverage(coverageId);
+                    var cov = PatientService.GetCoverage(coverageId, _patient.PatientId);
                     HistoryTitle.Text = "Eligibility History — " + H(CoverageLabel(cov));
                     var rows = BillingService.ListVerifications(coverageId);
                     HistoryRepeater.DataSource = rows;
@@ -222,7 +222,7 @@ namespace OpdProject.templates.billing
                     HistoryModal.Visible = true;
                     return;
                 case "Deactivate":
-                    PatientService.DeactivateCoverage(coverageId);
+                    PatientService.DeactivateCoverage(coverageId, _patient.PatientId);
                     Audit("UPDATE", "PatientCoverage", coverageId, "Deactivated");
                     ToastSuccess("Coverage deactivated");
                     break;
@@ -277,7 +277,7 @@ namespace OpdProject.templates.billing
         protected void LinesRepeater_ItemCommand(object source, RepeaterCommandEventArgs e)
         {
             if (e.CommandName != "Remove" || !Editable) return;
-            BillingService.RemoveLineItem((string)e.CommandArgument);
+            BillingService.RemoveLineItem((string)e.CommandArgument, Inv.InvoiceId);
             BillingService.RecalculateTotals(Inv.InvoiceId);
             Audit("UPDATE", "Invoice", Inv.InvoiceId, "Line removed");
             ToastSuccess("Charge removed");

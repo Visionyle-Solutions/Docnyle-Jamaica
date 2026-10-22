@@ -19,6 +19,21 @@ namespace OpdProject
 
         public void ProcessRequest(HttpContext context)
         {
+            try
+            {
+                Handle(context);
+            }
+            catch (ApiException ex)
+            {
+                // site.js retries on the next poll; an expired service session is a sign-in problem.
+                System.Diagnostics.Trace.TraceWarning("Notifications: " + ex.Message);
+                context.Response.Clear();
+                context.Response.StatusCode = ex.Kind == ApiFaultKind.Unauthenticated ? 401 : 503;
+            }
+        }
+
+        private static void Handle(HttpContext context)
+        {
             var res = context.Response;
             res.Cache.SetCacheability(HttpCacheability.NoCache);
             res.Cache.SetNoStore();

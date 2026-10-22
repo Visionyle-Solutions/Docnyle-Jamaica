@@ -180,22 +180,21 @@ namespace OpdProject.templates.settings
         {
             var wa = NotificationService.WhatsApp;
             WaProvider.SelectedValue = wa.Provider; WaPhoneId.Text = wa.PhoneNumberId; WaBusinessId.Text = wa.BusinessAccountId; WaEnabled.Checked = wa.Enabled;
-            WaApiKey.Attributes["placeholder"] = string.IsNullOrEmpty(wa.ApiKey) ? "Enter API key" : "••••" + wa.ApiKey.Substring(Math.Max(0, wa.ApiKey.Length - 4));
+            WaApiKey.Attributes["placeholder"] = wa.HasApiKey ? "Key configured — leave blank to keep" : string.IsNullOrEmpty(wa.ApiKey) ? "Enter API key" : "••••" + wa.ApiKey.Substring(Math.Max(0, wa.ApiKey.Length - 4));
             var em = NotificationService.Email;
             EmProvider.SelectedValue = em.Provider; EmHost.Text = em.SmtpHost; EmPort.Text = em.SmtpPort.ToString(); EmFromEmail.Text = em.FromEmail; EmFromName.Text = em.FromName; EmEnabled.Checked = em.Enabled;
-            EmApiKey.Attributes["placeholder"] = string.IsNullOrEmpty(em.ApiKey) ? "Enter key" : "••••" + em.ApiKey.Substring(Math.Max(0, em.ApiKey.Length - 4));
+            EmApiKey.Attributes["placeholder"] = em.HasApiKey ? "Key configured — leave blank to keep" : string.IsNullOrEmpty(em.ApiKey) ? "Enter key" : "••••" + em.ApiKey.Substring(Math.Max(0, em.ApiKey.Length - 4));
             TemplatesRepeater.DataSource = NotificationService.ListTemplates();
             TemplatesRepeater.DataBind();
         }
 
         protected void SaveWhatsAppButton_Click(object sender, EventArgs e)
         {
-            lock (DataStore.Sync)
+            NotificationService.SaveChannelConfig("WHATSAPP", new Models.ChannelConfig
             {
-                var wa = NotificationService.WhatsApp;
-                wa.Provider = WaProvider.SelectedValue; wa.PhoneNumberId = WaPhoneId.Text.Trim(); wa.BusinessAccountId = WaBusinessId.Text.Trim(); wa.Enabled = WaEnabled.Checked;
-                if (WaApiKey.Text.Length > 0) wa.ApiKey = WaApiKey.Text;
-            }
+                Provider = WaProvider.SelectedValue, PhoneNumberId = WaPhoneId.Text.Trim(), BusinessAccountId = WaBusinessId.Text.Trim(),
+                Enabled = WaEnabled.Checked, ApiKey = WaApiKey.Text,
+            });
             Audit("UPDATE", "NotificationConfig", "whatsapp", WaEnabled.Checked ? "Enabled" : "Disabled");
             ToastSuccess("WhatsApp configuration saved");
             BindNotifications();
@@ -205,13 +204,11 @@ namespace OpdProject.templates.settings
         {
             Validate("Email");
             if (!IsValid) return;
-            lock (DataStore.Sync)
+            NotificationService.SaveChannelConfig("EMAIL", new Models.ChannelConfig
             {
-                var em = NotificationService.Email;
-                em.Provider = EmProvider.SelectedValue; em.SmtpHost = EmHost.Text.Trim(); em.SmtpPort = ParseInt(EmPort.Text, 587);
-                em.FromEmail = EmFromEmail.Text.Trim(); em.FromName = EmFromName.Text.Trim(); em.Enabled = EmEnabled.Checked;
-                if (EmApiKey.Text.Length > 0) em.ApiKey = EmApiKey.Text;
-            }
+                Provider = EmProvider.SelectedValue, SmtpHost = EmHost.Text.Trim(), SmtpPort = ParseInt(EmPort.Text, 587),
+                FromEmail = EmFromEmail.Text.Trim(), FromName = EmFromName.Text.Trim(), Enabled = EmEnabled.Checked, ApiKey = EmApiKey.Text,
+            });
             Audit("UPDATE", "NotificationConfig", "email", EmEnabled.Checked ? "Enabled" : "Disabled");
             ToastSuccess("Email configuration saved");
             BindNotifications();

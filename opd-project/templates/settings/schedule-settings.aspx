@@ -88,6 +88,8 @@
                 <asp:RequiredFieldValidator runat="server" ControlToValidate="DpEmail" ValidationGroup="DoctorProfile" ErrorMessage="Email is required" Text="Required" CssClass="field-error" Display="Dynamic" />
                 <asp:RegularExpressionValidator runat="server" ControlToValidate="DpEmail" ValidationGroup="DoctorProfile" ValidationExpression="^[^@\s]+@[^@\s]+\.[^@\s]+$" ErrorMessage="Enter a valid email" Text="Invalid email" CssClass="field-error" Display="Dynamic" />
                 <asp:CustomValidator runat="server" ControlToValidate="DpEmail" ValidationGroup="DoctorProfile" OnServerValidate="DoctorEmailUnique_ServerValidate" ErrorMessage="Another user already has this email" Text="Already in use" CssClass="field-error" Display="Dynamic" /></div>
+              <asp:PlaceHolder ID="DpPasswordGroup" runat="server" Visible="false"><div class="form-group"><label class="form-label" for="<%= DpPassword.ClientID %>">Password *</label><asp:TextBox ID="DpPassword" runat="server" CssClass="form-control" TextMode="Password" MaxLength="100" autocomplete="new-password" />
+                <asp:CustomValidator runat="server" ValidationGroup="DoctorProfile" OnServerValidate="DoctorPassword_ServerValidate" ErrorMessage="Set a password of at least 8 characters for the new doctor" Text="At least 8 characters" CssClass="field-error" Display="Dynamic" /></div></asp:PlaceHolder>
               <div class="form-group"><label class="form-label" for="<%= DpPhone.ClientID %>">Phone</label><asp:TextBox ID="DpPhone" runat="server" CssClass="form-control" MaxLength="20" placeholder="876-555-1234" />
                 <c360:PhoneValidator runat="server" ControlToValidate="DpPhone" ValidationGroup="DoctorProfile" /></div>
               <div class="form-group"><label class="form-label" for="<%= DpLanguages.ClientID %>">Languages</label><asp:TextBox ID="DpLanguages" runat="server" CssClass="form-control" placeholder="English, Telugu" /></div>
@@ -95,7 +97,7 @@
                 <asp:CustomValidator runat="server" ValidationGroup="DoctorProfile" OnServerValidate="SpecialtiesRequired_ServerValidate" ErrorMessage="Choose at least one specialty" Text="Choose at least one" CssClass="field-error" Display="Dynamic" /></div>
               <div class="form-group form-group--full"><label class="form-label" for="<%= DpBio.ClientID %>">Bio</label><asp:TextBox ID="DpBio" runat="server" CssClass="form-control" TextMode="MultiLine" /></div>
             </div>
-            <div class="text-xs text-muted">New doctors sign in with the password <code>demo123</code>. Display name preview follows Settings → Formats.</div>
+            <div class="text-xs text-muted">New doctors sign in with the e-mail and password set here. Display name preview follows Settings → Formats.</div>
             <asp:LinkButton ID="SaveProfileButton" runat="server" CssClass="btn btn--primary mt-2" ValidationGroup="DoctorProfile" OnClick="SaveProfileButton_Click"><i class="ti ti-device-floppy" aria-hidden="true"></i> Save Doctor</asp:LinkButton>
           </asp:Panel>
 

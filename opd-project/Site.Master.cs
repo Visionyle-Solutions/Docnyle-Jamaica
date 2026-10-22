@@ -36,7 +36,9 @@ namespace OpdProject
             if (!ChromeSidebar.Visible) return;
             if (bell) TopbarBell.Text = BellHtml(user.UserId, false);
 
-            var hospital = HospitalService.GetHospital(user.HospitalId);
+            Models.Hospital hospital = null;
+            try { hospital = HospitalService.GetHospital(user.HospitalId); }
+            catch (ApiException ex) { System.Diagnostics.Trace.TraceWarning("Top bar hospital: " + ex.Message); }
             HospitalName.Text = HttpUtility.HtmlEncode(hospital != null ? hospital.Name : "");
             if (hospital != null && !string.IsNullOrEmpty(hospital.LogoBase64))
                 HospitalLogo.Text = "<img src=\"" + HttpUtility.HtmlAttributeEncode(hospital.LogoBase64) + "\" alt=\"\" style=\"max-height:28px; margin-right:10px;\" />";
@@ -49,7 +51,9 @@ namespace OpdProject
         /// <summary>Notification bell; site.js fills the list and polls for new notifications.</summary>
         private string BellHtml(string userId, bool floating)
         {
-            int unread = UserNotificationService.UnreadCount(userId);
+            int unread = 0;
+            try { unread = UserNotificationService.UnreadCount(userId); }
+            catch (ApiException ex) { System.Diagnostics.Trace.TraceWarning("Notification count: " + ex.Message); }
             return "<div class=\"notif" + (floating ? " notif--floating" : "") + "\" data-notif data-endpoint=\"" + HttpUtility.HtmlAttributeEncode(ResolveUrl("~/notifications.ashx")) + "\">"
                 + "<button type=\"button\" class=\"notif-bell\" data-action=\"toggle-notif\" aria-haspopup=\"true\" aria-expanded=\"false\" aria-label=\"Notifications\" title=\"Notifications\">"
                 + "<i class=\"ti ti-bell\" aria-hidden=\"true\"></i><span class=\"notif-count\" data-notif-count" + (unread == 0 ? " hidden" : "") + ">" + (unread > 9 ? "9+" : unread.ToString()) + "</span></button>"
@@ -72,6 +76,7 @@ namespace OpdProject
         protected void SignOutButton_Click(object sender, EventArgs e)
         {
             var user = AppSession.CurrentUser;
+            // The API has no sign-out operation: the service session ends at its ExpiresAt; the site forgets the token now.
             if (user != null) AuditService.Record(user.HospitalId, user.UserId, "LOGOUT", "Session", Session.SessionID, "Signed out");
             AppSession.SignOut();
             Response.Redirect(Urls.Login, true);

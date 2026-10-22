@@ -115,7 +115,7 @@ namespace OpdProject.templates.settings
         protected void Page_Load(object sender, EventArgs e)
         {
             if (IsPostBack) return;
-            foreach (var r in UserService.AssignableRoles) UserRoles.Items.Add(r);
+            foreach (var r in UserService.ListRoles()) UserRoles.Items.Add(r);
             UserSpecialty.Items.Add(new ListItem("—", ""));
             foreach (var s in HospitalService.ListSpecialties(HospitalId, true)) UserSpecialty.Items.Add(new ListItem(s.SpecialtyName, s.SpecialtyId));
             Bind();
@@ -137,6 +137,7 @@ namespace OpdProject.templates.settings
             BindLabPartners(null);
             ApplyRoleFields();
             PasswordHolder.Visible = PasswordRequired.Enabled = true;
+            UserEmail.ReadOnly = false;
             UserModal.Visible = true;
         }
 
@@ -162,6 +163,8 @@ namespace OpdProject.templates.settings
             BindLabPartners(u.LabPartnerId);
             ApplyRoleFields();
             PasswordHolder.Visible = PasswordRequired.Enabled = false;
+            // API mode: UpdateUser has no e-mail member, so the sign-in e-mail is fixed once the account exists.
+            UserEmail.ReadOnly = DataSource.IsApi("Users");
             UserModal.Visible = true;
         }
 

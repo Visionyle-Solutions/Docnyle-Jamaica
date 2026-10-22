@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Web;
 using OpdProject.Services;
 using OpdProject.Web;
@@ -18,8 +17,8 @@ namespace OpdProject.templates.lab
         {
             var att = LabService.GetAttachment(RouteValue("attachmentId"));
             if (!LabService.CanViewAttachment(CurrentUser, att)) { NotFound(); return; }
-            var path = LabService.StoredPath(att);
-            if (!File.Exists(path)) { NotFound(); return; }
+            var content = LabService.GetAttachmentContent(att);
+            if (content == null) { NotFound(); return; }
 
             Audit("VIEW", "LabResultAttachment", att.AttachmentId, att.FileName);
             bool inline = att.ContentType == "application/pdf" || att.ContentType.StartsWith("image/");
@@ -29,7 +28,7 @@ namespace OpdProject.templates.lab
             Response.AddHeader("X-Content-Type-Options", "nosniff");
             Response.Cache.SetCacheability(HttpCacheability.Private);
             Response.Cache.SetNoStore();
-            Response.TransmitFile(path);
+            Response.BinaryWrite(content);
             Response.End();
         }
 

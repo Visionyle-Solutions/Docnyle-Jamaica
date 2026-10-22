@@ -1,10 +1,13 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Web.Hosting;
+using System;
+using OpdProject.Helpers;
 using OpdProject.Models;
+using OpdProject.Services.Api;
+using OpdProject.Web;
 
 namespace OpdProject.Services
 {
@@ -14,8 +17,10 @@ namespace OpdProject.Services
     /// A LAB_PARTNER user only ever sees and touches orders claimed by its own LabPartnerId;
     /// clinic staff with the lab_portal permission see every order of their hospital.
     /// </summary>
-    public static class LabService
+    public static partial class LabService
     {
+        private static readonly CommonHelper cnHelperObj = new CommonHelper();
+
         public const long MaxFileBytes = 20L * 1024 * 1024;
         public const int MaxFilesPerUpload = 10;
 
@@ -34,11 +39,24 @@ namespace OpdProject.Services
 
         public static List<LabPartner> ListLabPartners(string hospitalId)
         {
+            if (Api)
+                return HospitalCache.Get("lab-partners", () => cnHelperObj.ListLabPartners(AppSession.ApiHospitalId, AppSession.ApiUserId, AppSession.ApiHashValue).EnsureSuccess().LabPartners ?? new List<LAB_LabPartnerInfo>())
+                    .Where(p => p.IsActive).Select(ToModel).OrderBy(p => p.Name).ToList();
             lock (DataStore.Sync) return DataStore.LabPartners.Where(p => p.HospitalId == hospitalId && p.IsActive).OrderBy(p => p.Name).ToList();
         }
 
+        /// <summary>API mode: GetLabPartner needs lab_portal or admin_users; for anyone else the name is not available (null).</summary>
         public static LabPartner GetLabPartner(string labPartnerId)
         {
+            if (Api)
+            {
+                if (string.IsNullOrEmpty(labPartnerId)) return null;
+                return RequestCache.Get("lab-partner:" + labPartnerId, () =>
+                {
+                    try { return ToModel(DocNyle.OrNull(() => cnHelperObj.GetLabPartner(AppSession.ApiHospitalId, AppSession.ApiUserId, labPartnerId, AppSession.ApiHashValue).EnsureSuccess())?.LabPartner); }
+                    catch (ApiException ex) when (ex.Kind == ApiFaultKind.Forbidden) { return null; }
+                });
+            }
             lock (DataStore.Sync) return DataStore.LabPartners.FirstOrDefault(p => p.LabPartnerId == labPartnerId);
         }
 
@@ -52,6 +70,12 @@ namespace OpdProject.Services
         public static LabPartner SaveLabPartner(string hospitalId, string name)
         {
             name = (name ?? "").Trim();
+            if (Api)
+            {
+                var saved = ToModel(cnHelperObj.SaveLabPartner(new LAB_SaveLabPartnerReq { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue, Name = name }).EnsureSuccess().LabPartner);
+                HospitalCache.Clear("lab-partners");
+                return saved;
+            }
             lock (DataStore.Sync)
             {
                 var p = DataStore.LabPartners.FirstOrDefault(x => x.HospitalId == hospitalId && string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
@@ -81,18 +105,23 @@ namespace OpdProject.Services
         /// <summary>Orders shown in the Lab Portal for this user (open orders plus ones awaiting the doctor's review).</summary>
         public static List<InvestigationOrder> ListPortalOrders(AppUser user)
         {
+            if (Api) return ApiPortalOrders().Where(o => CanHandle(user, o)).ToList();
             lock (DataStore.Sync)
                 return DataStore.Orders.Where(o => (o.Status == "ORDERED" || o.Status == "SENT" || o.Status == "RESULTS_READY") && CanHandle(user, o))
                     .OrderByDescending(o => o.OrderedAt).ToList();
         }
 
+        /// <summary>API mode: an order this user was shown (portal list or mobile lookup), else from ListPendingLabOrders.</summary>
         public static InvestigationOrder GetOrder(string orderId)
         {
+            if (Api) return SessionIndex.Get<InvestigationOrder>("laborder", orderId) ?? ApiPortalOrders().FirstOrDefault(o => o.OrderId == orderId);
             lock (DataStore.Sync) return DataStore.Orders.FirstOrDefault(o => o.OrderId == orderId);
         }
 
+        /// <summary>API mode: the lockout lives in SearchLabOrdersByMobile (fault 50231), so this pre-check passes.</summary>
         public static bool IsClaimLocked(string userId)
         {
+            if (Api) return false;
             lock (DataStore.Sync)
             {
                 List<DateTime> list;
@@ -129,6 +158,7 @@ namespace OpdProject.Services
         {
             if (!IsPartner(user) || string.IsNullOrEmpty(user.LabPartnerId) || !IsValidMobile(mobile)) return null;
             var key = MobileKey(mobile);
+            if (Api) return ApiFindOrdersByMobile(mobile);
             lock (DataStore.Sync)
             {
                 if (IsClaimLocked(user.UserId)) return null;
@@ -152,6 +182,7 @@ namespace OpdProject.Services
         public static InvestigationOrder ClaimOrder(AppUser user, string orderId, string mobile)
         {
             if (!IsPartner(user) || string.IsNullOrEmpty(user.LabPartnerId) || !IsValidMobile(mobile)) return null;
+            if (Api) return ApiClaimOrder(orderId, mobile);
             lock (DataStore.Sync)
             {
                 var o = GetOrder(orderId);
@@ -165,6 +196,15 @@ namespace OpdProject.Services
         /// <summary>Lab marks an order as received/sent for processing.</summary>
         public static void MarkSent(string orderId)
         {
+            if (Api)
+            {
+                var o = GetOrder(orderId);
+                if (o == null || o.Status != "ORDERED") return;
+                cnHelperObj.UpdateOrderStatus(new LAB_UpdateOrderStatusReq { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue, OrderId = orderId, Status = "SENT" }).EnsureSuccess();
+                o.Status = "SENT";
+                RequestCache.Remove("lab-portal-orders");
+                return;
+            }
             lock (DataStore.Sync)
             {
                 var o = GetOrder(orderId);
@@ -175,6 +215,7 @@ namespace OpdProject.Services
         /// <summary>Records the result and moves the order to RESULTS_READY. Returns null if the order already has a result.</summary>
         public static LabResult SubmitResult(LabResult record)
         {
+            if (Api) return ApiSubmitResult(record);
             lock (DataStore.Sync)
             {
                 var o = GetOrder(record.OrderId);
@@ -191,21 +232,37 @@ namespace OpdProject.Services
 
         public static List<LabResult> ListPendingReview(string hospitalId)
         {
+            if (Api)
+                return (cnHelperObj.ListPendingReviewResults(AppSession.ApiHospitalId, AppSession.ApiUserId, AppSession.ApiHashValue).EnsureSuccess().LabResults ?? new List<LAB_LabResultInfo>()).Select(ToModel)
+                    .Where(r => r.Status == "PENDING_REVIEW" || string.IsNullOrEmpty(r.Status)).OrderByDescending(r => r.UploadedAt).ToList();
             lock (DataStore.Sync) return DataStore.LabResults.Where(r => r.HospitalId == hospitalId && r.Status == "PENDING_REVIEW").OrderByDescending(r => r.UploadedAt).ToList();
         }
 
         public static List<LabResult> ListForPatient(string patientId)
         {
+            if (Api)
+                return RequestCache.Get("lab-results:" + patientId, () =>
+                    (cnHelperObj.ListLabResultsForPatient(AppSession.ApiHospitalId, AppSession.ApiUserId, patientId, AppSession.ApiHashValue).EnsureSuccess().LabResults ?? new List<LAB_LabResultInfo>()).Select(ToModel).OrderByDescending(r => r.UploadedAt).ToList());
             lock (DataStore.Sync) return DataStore.LabResults.Where(r => r.PatientId == patientId).OrderByDescending(r => r.UploadedAt).ToList();
         }
 
+        /// <summary>API mode: a result this user was shown (review inbox or patient list).</summary>
         public static LabResult GetResult(string resultId)
         {
+            if (Api) return SessionIndex.Get<LabResult>("labresult", resultId);
             lock (DataStore.Sync) return DataStore.LabResults.FirstOrDefault(r => r.ResultId == resultId);
         }
 
+        /// <summary>API mode: UpdateLabResultStatus also clears the doctor's notification for the result.</summary>
         public static void MarkReviewed(string resultId, string notes)
         {
+            if (Api)
+            {
+                cnHelperObj.UpdateLabResultStatus(new LAB_UpdateLabResultStatusReq { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue, LabResultId = resultId, ReviewNotes = notes ?? "" }).EnsureSuccess();
+                var shown = SessionIndex.Get<LabResult>("labresult", resultId);
+                if (shown != null) { shown.Status = "REVIEWED"; shown.ReviewedAt = DateTime.UtcNow; shown.ReviewNotes = notes ?? ""; }
+                return;
+            }
             lock (DataStore.Sync)
             {
                 var r = GetResult(resultId);
@@ -255,6 +312,7 @@ namespace OpdProject.Services
         /// <summary>Stores a checked file under App_Data (never web-served) and records it against the result.</summary>
         public static LabResultAttachment SaveAttachment(LabResult result, string fileName, long length, Stream content, string userId)
         {
+            if (Api) return ApiSaveAttachment(result, fileName, content);
             var name = Path.GetFileName(fileName);
             var ext = Path.GetExtension(name).ToLowerInvariant();
             var att = new LabResultAttachment
@@ -275,22 +333,37 @@ namespace OpdProject.Services
 
         public static List<LabResultAttachment> ListAttachments(string resultId)
         {
+            if (Api) return (cnHelperObj.ListLabResultAttachments(AppSession.ApiHospitalId, AppSession.ApiUserId, resultId, null, AppSession.ApiHashValue).EnsureSuccess().Attachments ?? new List<LAB_LabAttachmentInfo>()).Select(ToModel).OrderBy(a => a.UploadedAt).ToList();
             lock (DataStore.Sync) return DataStore.LabResultAttachments.Where(a => a.ResultId == resultId).OrderBy(a => a.UploadedAt).ToList();
         }
 
         public static int CountAttachmentsForOrder(string orderId)
         {
+            if (Api) return (cnHelperObj.ListLabResultAttachments(AppSession.ApiHospitalId, AppSession.ApiUserId, null, orderId, AppSession.ApiHashValue).EnsureSuccess().Attachments ?? new List<LAB_LabAttachmentInfo>()).Count;
             lock (DataStore.Sync) return DataStore.LabResultAttachments.Count(a => a.OrderId == orderId);
         }
 
         public static LabResultAttachment GetAttachment(string attachmentId)
         {
+            if (Api) return ToModel(DocNyle.OrNull(() => cnHelperObj.GetLabResultAttachment(AppSession.ApiHospitalId, AppSession.ApiUserId, attachmentId, AppSession.ApiHashValue).EnsureSuccess())?.Attachment);
             lock (DataStore.Sync) return DataStore.LabResultAttachments.FirstOrDefault(a => a.AttachmentId == attachmentId);
         }
 
-        public static string StoredPath(LabResultAttachment att)
+        /// <summary>
+        /// The report file's bytes, or null when missing: GetLabResultAttachmentContent in API mode (the service applies the
+        /// same who-may-view rule), else the copy under App_Data.
+        /// </summary>
+        public static byte[] GetAttachmentContent(LabResultAttachment att)
         {
-            return Path.Combine(StorageRoot, att.HospitalId, att.StoredFileName);
+            if (Api)
+            {
+                FileContentResp file;
+                try { file = DocNyle.OrNull(() => cnHelperObj.GetLabResultAttachmentContent(AppSession.ApiHospitalId, AppSession.ApiUserId, att.AttachmentId, AppSession.ApiHashValue).EnsureSuccess()); }
+                catch (ApiException ex) when (ex.Kind == ApiFaultKind.Forbidden) { return null; }
+                return file != null && file.File != null && !string.IsNullOrEmpty(file.File.ContentBase64) ? Convert.FromBase64String(file.File.ContentBase64) : null;
+            }
+            var path = Path.Combine(StorageRoot, att.HospitalId, att.StoredFileName);
+            return File.Exists(path) ? File.ReadAllBytes(path) : null;
         }
 
         /// <summary>
@@ -308,6 +381,121 @@ namespace OpdProject.Services
         {
             if (bytes >= 1024 * 1024) return (bytes / (1024.0 * 1024)).ToString("0.0") + " MB";
             return Math.Max(1, bytes / 1024) + " KB";
+        }
+
+        private static bool Api { get { return DataSource.IsApi("Lab"); } }
+
+        private static string CallerHospital { get { return AppSession.ApiUser != null ? AppSession.ApiUser.HospitalId : null; } }
+
+        private static LabPartner ToModel(LAB_LabPartnerInfo p)
+        {
+            return p == null ? null : new LabPartner { LabPartnerId = p.LabPartnerId, HospitalId = CallerHospital, Name = p.Name, IsActive = p.IsActive };
+        }
+
+        /// <summary>An order row, remembered in the session index so a later postback (claim / mark sent / upload) can find it by id.</summary>
+        private static InvestigationOrder ToModel(LAB_InvestigationOrderInfo o)
+        {
+            if (o == null) return null;
+            if (!string.IsNullOrEmpty(o.PatientName)) SessionIndex.Put("labpatient", o.PatientId, o.PatientName + (string.IsNullOrEmpty(o.PatientMrn) ? "" : " · " + o.PatientMrn));
+            return SessionIndex.Put("laborder", o.OrderId, new InvestigationOrder
+            {
+                OrderId = o.OrderId, HospitalId = CallerHospital, ConsultationId = o.ConsultationId, PatientId = o.PatientId, TestId = o.TestId,
+                TestName = o.TestName, TestType = o.TestType, Status = o.Status, OrderedAt = DocNyle.InstantOrMin(o.OrderedAt), LabPartnerId = o.LabPartnerId,
+            });
+        }
+
+        /// <summary>"Name · MRN" for a patient on an order this user was shown (lab partners cannot read patient records).</summary>
+        public static string PatientLabel(string patientId)
+        {
+            return string.IsNullOrEmpty(patientId) ? null : SessionIndex.Get<string>("labpatient", patientId);
+        }
+
+        private static LabResult ToModel(LAB_LabResultInfo r)
+        {
+            if (r == null) return null;
+            return SessionIndex.Put("labresult", r.ResultId, new LabResult
+            {
+                ResultId = r.ResultId, OrderId = r.OrderId, HospitalId = CallerHospital, PatientId = r.PatientId, ConsultationId = r.ConsultationId,
+                TestName = r.TestName, ResultSummary = r.ResultSummary, ResultValue = r.ResultValue, ReferenceRange = r.ReferenceRange,
+                Interpretation = r.Interpretation, Technician = r.Technician, Notes = r.Notes, UploadedAt = DocNyle.InstantOrMin(r.UploadedAt),
+                Status = r.Status, ReviewedAt = DocNyle.ParseInstant(r.ReviewedAt), ReviewNotes = r.ReviewNotes,
+            });
+        }
+
+        private static LabResultAttachment ToModel(LAB_LabAttachmentInfo a)
+        {
+            if (a == null) return null;
+            return new LabResultAttachment
+            {
+                AttachmentId = a.AttachmentId, ResultId = a.ResultId, OrderId = a.OrderId, HospitalId = CallerHospital, LabPartnerId = a.LabPartnerId,
+                FileName = a.FileName, ContentType = a.ContentType, SizeBytes = a.SizeBytes, UploadedByUserId = a.UploadedByUserId,
+                UploadedAt = DocNyle.InstantOrMin(a.UploadedAt),
+            };
+        }
+
+        private static List<InvestigationOrder> ApiPortalOrders()
+        {
+            return RequestCache.Get("lab-portal-orders", () =>
+                (cnHelperObj.ListPendingLabOrders(AppSession.ApiHospitalId, AppSession.ApiUserId, AppSession.ApiHashValue).EnsureSuccess().Orders ?? new List<LAB_InvestigationOrderInfo>()).Select(ToModel).OrderByDescending(o => o.OrderedAt).ToList());
+        }
+
+        /// <summary>
+        /// SearchLabOrdersByMobile logs every lookup and enforces the claim lockout on the server (fault 50231, rethrown
+        /// for the page to show "try again in 15 minutes").
+        /// </summary>
+        private static List<InvestigationOrder> ApiFindOrdersByMobile(string mobile)
+        {
+            return (cnHelperObj.SearchLabOrdersByMobile(new LAB_SearchLabOrdersByMobileReq { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue, Mobile = mobile }).EnsureSuccess().Orders ?? new List<LAB_InvestigationOrderInfo>())
+                .Select(ToModel).OrderByDescending(o => o.OrderedAt).ToList();
+        }
+
+        private static InvestigationOrder ApiClaimOrder(string orderId, string mobile)
+        {
+            try
+            {
+                return ToModel(cnHelperObj.ConfirmLabOrderClaim(new LAB_ConfirmLabOrderClaimReq { HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue, OrderId = orderId, Mobile = mobile }).EnsureSuccess().Order);
+            }
+            catch (ApiException ex) when (ex.Kind == ApiFaultKind.Conflict || ex.Kind == ApiFaultKind.NotFound || ex.Kind == ApiFaultKind.BusinessRule)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>SubmitLabResult moves the order to RESULTS_READY and notifies the ordering doctor itself. Null if the order already has a result.</summary>
+        private static LabResult ApiSubmitResult(LabResult r)
+        {
+            try
+            {
+                var saved = cnHelperObj.SubmitLabResult(new LAB_SubmitLabResultReq
+                {
+                    HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue,
+                    OrderId = r.OrderId, ResultSummary = r.ResultSummary, ResultValue = r.ResultValue, ReferenceRange = r.ReferenceRange,
+                    Interpretation = string.IsNullOrEmpty(r.Interpretation) ? null : r.Interpretation, Technician = r.Technician, Notes = r.Notes,
+                }).EnsureSuccess().LabResult;
+                RequestCache.Remove("lab-portal-orders");
+                var m = ToModel(saved) ?? r;
+                if (string.IsNullOrEmpty(m.ResultId)) m.ResultId = r.ResultId;
+                if (m.LabPartnerId == null) m.LabPartnerId = AppSession.ApiUser != null ? AppSession.ApiUser.LabPartnerId : null;
+                return m;
+            }
+            catch (ApiException ex) when (ex.Kind == ApiFaultKind.Conflict)
+            {
+                return null;
+            }
+        }
+
+        private static LabResultAttachment ApiSaveAttachment(LabResult result, string fileName, Stream content)
+        {
+            content.Position = 0;
+            using (var ms = new MemoryStream())
+            {
+                content.CopyTo(ms);
+                return ToModel(cnHelperObj.CreateLabResultAttachment(new LAB_CreateLabResultAttachmentReq
+                {
+                    HospitalId = AppSession.ApiHospitalId, UserId = AppSession.ApiUserId, hashValue = AppSession.ApiHashValue,
+                    ResultId = result.ResultId, FileName = Path.GetFileName(fileName), ContentBase64 = Convert.ToBase64String(ms.ToArray()),
+                }).EnsureSuccess().Attachment);
+            }
         }
     }
 }
