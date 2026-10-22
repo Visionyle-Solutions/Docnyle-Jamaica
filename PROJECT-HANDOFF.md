@@ -1,4 +1,4 @@
-# Consult360 — OPD Consultation Module — Project Handoff & Context Memory
+# DocNyle — OPD Consultation Module — Project Handoff & Context Memory
 
 **Purpose of this document.** This is the single entry point for resuming
 work on this project in a fresh conversation with no prior context. Read
@@ -24,9 +24,9 @@ Anything that still says ASP.NET Core, MVC, Web API, Blazor, `api.js` or
 
 ---
 
-## 1. What Consult360 Is
+## 1. What DocNyle Is
 
-Consult360 is an outpatient (OPD) consultation and small-clinic management
+DocNyle is an outpatient (OPD) consultation and small-clinic management
 application for practices with one to a few doctors. It covers the full
 visit lifecycle: patient registration/search, the doctor's daily queue, a
 structured consultation workspace (vitals, complaints, diagnosis, SOAP

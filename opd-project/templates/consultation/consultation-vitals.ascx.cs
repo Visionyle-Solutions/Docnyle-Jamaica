@@ -110,7 +110,7 @@ namespace OpdProject.templates.consultation
                 var item = VitalsRepeater.Items.Cast<RepeaterItem>().FirstOrDefault(i => ((HiddenField)i.FindControl("VitalCode")).Value == code);
                 return item != null ? item.FindControl("VitalInput").ClientID : "";
             };
-            var script = string.Format("Consult360.liveVitals({{height:'{0}',weight:'{1}',sys:'{2}',dia:'{3}'}}, 'vitalsCalcDisplay');",
+            var script = string.Format("DocNyle.liveVitals({{height:'{0}',weight:'{1}',sys:'{2}',dia:'{3}'}}, 'vitalsCalcDisplay');",
                 idOf("HEIGHT"), idOf("WEIGHT"), idOf("BP_SYS"), idOf("BP_DIA"));
             Page.ClientScript.RegisterStartupScript(GetType(), "liveVitals", script, true);
         }

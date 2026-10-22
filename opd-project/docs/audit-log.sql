@@ -1,5 +1,5 @@
 /* ============================================================
-   Consult360 — Row-level data-change audit (SQL Server 2019)
+   DocNyle — Row-level data-change audit (SQL Server 2019)
 
    Run after schema.sql. Re-runnable: tables are created only if missing,
    the configuration seed is a MERGE, procedures are CREATE OR ALTER.

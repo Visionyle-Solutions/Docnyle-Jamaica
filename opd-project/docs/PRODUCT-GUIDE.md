@@ -1,8 +1,8 @@
-# Consult360 — OPD Consultation Module — Product Guide
+# DocNyle — OPD Consultation Module — Product Guide
 
-## What Consult360 Is
+## What DocNyle Is
 
-Consult360 is an outpatient (OPD) consultation and small-clinic management
+DocNyle is an outpatient (OPD) consultation and small-clinic management
 application for practices with one to a few doctors. It covers the full
 visit lifecycle — patient registration and search, the doctor's daily
 queue, a structured consultation workspace (vitals, complaints, diagnosis,
@@ -261,7 +261,7 @@ below.
 
 ## Architecture and Migration Path
 
-Consult360 is deliberately built as what its own documentation calls "a
+DocNyle is deliberately built as what its own documentation calls "a
 running specification" for a future server-backed system, in four
 phases:
 

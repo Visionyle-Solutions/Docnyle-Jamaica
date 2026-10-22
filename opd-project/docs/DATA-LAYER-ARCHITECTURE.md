@@ -1,4 +1,4 @@
-# Consult360 — Data Layer & Schema Architecture Rules
+# DocNyle — Data Layer & Schema Architecture Rules
 
 ### Governing Rules for data.js, api.js, and SQL Server 2019 Schema
 
@@ -686,5 +686,5 @@ Before adding a new table to `schema.sql` (and its list to `DataStore.cs`), veri
 
 *Document version: 1.1 — October 2026 (dual keys, UTC / time zone rules, metadata columns, two audit logs,*
 *inv schema, stored-procedure rules, phone rule, current encryption list). v1.0 — August 2026.*
-*Applicable to: Consult360 Build v5.7+; schema.sql v4.0, stored-procedures.sql v3.4, audit-log.sql*
+*Applicable to: DocNyle Build v5.7+; schema.sql v4.0, stored-procedures.sql v3.4, audit-log.sql*
 *Companion documents: ENCRYPTION-STRATEGY.md, PEN-TEST-STRATEGY.md*

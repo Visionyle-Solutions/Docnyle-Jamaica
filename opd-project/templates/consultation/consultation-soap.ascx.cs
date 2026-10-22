@@ -36,7 +36,9 @@ namespace OpdProject.templates.consultation
             get
             {
                 var doctor = UserService.GetUser(Host.DoctorId);
-                return doctor != null && doctor.SpecialtyId != null ? doctor.SpecialtyId : "SPEC-GEN";
+                if (doctor != null && !string.IsNullOrEmpty(doctor.SpecialtyId)) return doctor.SpecialtyId;
+                /* "SPEC-GEN" exists only in the demo store; the service rejects it, so with no specialty send none */
+                return CatalogService.Api ? null : "SPEC-GEN";
             }
         }
 

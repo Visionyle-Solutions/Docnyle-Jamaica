@@ -163,7 +163,7 @@ namespace OpdProject.templates.consultation
             int i = 0;
             foreach (var o in orders) t.Append("<tr><td>" + (++i) + "</td><td><strong>" + H(o.OrderId) + "</strong></td><td>" + H(o.TestName) + "</td><td>" + H(o.TestType) + "</td><td>" + H(FmtDateTime(o.OrderedAt)) + "</td><td>" + H(o.Status) + "</td></tr>");
             Section(sb, "Tests requested", t.Append("</tbody></table>").ToString()
-                + "<p><em>These tests are not performed at this clinic and are not included in the clinic bill. Please get them done at a diagnostic lab or imaging centre of your choice. If the lab is a Consult360 partner, show them this requisition: they enter the Order ID and your date of birth and send the report straight to your doctor. Otherwise, bring or send the reports to your doctor.</em></p>");
+                + "<p><em>These tests are not performed at this clinic and are not included in the clinic bill. Please get them done at a diagnostic lab or imaging centre of your choice. If the lab is a DocNyle partner, show them this requisition: they enter the Order ID and your date of birth and send the report straight to your doctor. Otherwise, bring or send the reports to your doctor.</em></p>");
         }
 
         private void ReferralLetter(StringBuilder sb, Consultation c, Patient p)

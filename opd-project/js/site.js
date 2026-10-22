@@ -295,8 +295,8 @@
   });
 
   /* Live BMI / BSA / MAP preview while typing vitals (the saved values are computed on the server) */
-  /* Merge, don't replace: page controls (e.g. the Observations card) define their own Consult360 helpers before this file loads */
-  window.Consult360 = Object.assign(window.Consult360 || {}, {
+  /* Merge, don't replace: page controls (e.g. the Observations card) define their own DocNyle helpers before this file loads */
+  window.DocNyle = Object.assign(window.DocNyle || {}, {
     liveVitals: function (ids, outId) {
       function num(id) { var el = document.getElementById(id); var v = el ? vitalBase(el) : 0; return v > 0 ? v : 0; }
       function update() {

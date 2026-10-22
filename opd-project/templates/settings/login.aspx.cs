@@ -32,7 +32,7 @@ namespace OpdProject.templates.settings
             DemoLoginsPanel.Visible = ShowDemoLogins;
             if (!IsPostBack && ShowDemoLogins && !DataSource.IsApi("Users")) EmailInput.Text = "drsharma@sunrise.in";
             var h = Hospital;
-            HospitalNameText.Text = Server.HtmlEncode(h != null ? h.Name : "Consult360");
+            HospitalNameText.Text = Server.HtmlEncode(h != null ? h.Name : "DocNyle");
             HospitalAddressText.Text = Server.HtmlEncode(h != null ? h.LegalAddress : "");
         }
 

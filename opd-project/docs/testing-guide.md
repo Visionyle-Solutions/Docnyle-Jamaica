@@ -1,9 +1,9 @@
-# Consult360 — OPD Consultation Module — Testing Guide
+# DocNyle — OPD Consultation Module — Testing Guide
 
 No build-version string was found anywhere in the running application
 (`index.html`, `js/layout.js` topbar, or elsewhere in `js/`). This guide
 does not reference a build number for that reason — recommend adding a
-visible version indicator (e.g. in the topbar, alongside "Consult360") so
+visible version indicator (e.g. in the topbar, alongside "DocNyle") so
 future test runs can confirm which build they're on.
 
 This guide is organized to match the real sidebar navigation

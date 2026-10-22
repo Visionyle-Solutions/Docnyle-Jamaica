@@ -90,12 +90,20 @@ namespace OpdProject.templates.consultation
             Host.RefreshAll();
         }
 
-        /// <summary>The picked item, only if it is active, this hospital's and linked to the service.</summary>
+        /// <summary>
+        /// The picked item with its stock, only if it is one of the service's active linked items (ItemsForService —
+        /// the inventory admin lookups are not open to a doctor in a consultation).
+        /// </summary>
+        private StockSummary PickedStock(string serviceChargeId)
+        {
+            if (!ItemHolder.Visible || string.IsNullOrEmpty(ItemPick.SelectedValue) || string.IsNullOrEmpty(serviceChargeId)) return null;
+            return InventoryService.ItemsForService(HospitalId, serviceChargeId).FirstOrDefault(s => s.Item.InventoryItemId == ItemPick.SelectedValue);
+        }
+
         private InventoryItem PickedItem(string serviceChargeId)
         {
-            if (!ItemHolder.Visible || string.IsNullOrEmpty(ItemPick.SelectedValue)) return null;
-            var item = InventoryService.GetItem(ItemPick.SelectedValue);
-            return item != null && item.HospitalId == HospitalId && item.IsActive && item.ServiceChargeIds.Contains(serviceChargeId) ? item : null;
+            var st = PickedStock(serviceChargeId);
+            return st != null ? st.Item : null;
         }
 
         /// <summary>The item quantity may not exceed what is available, less what this visit already lists.</summary>
@@ -103,9 +111,10 @@ namespace OpdProject.templates.consultation
         {
             args.IsValid = true;
             int qty;
-            var item = PickedItem(ServicePick.SelectedValue);
-            if (item == null || !int.TryParse(ItemQty.Text, out qty) || qty < 1) return;
-            var left = InventoryService.Available(item.InventoryItemId) - InventoryService.QtyOnConsultation(ConsultationId, item.InventoryItemId);
+            var st = PickedStock(ServicePick.SelectedValue);
+            if (st == null || !int.TryParse(ItemQty.Text, out qty) || qty < 1) return;
+            var item = st.Item;
+            var left = st.Available - InventoryService.QtyOnConsultation(ConsultationId, item.InventoryItemId);
             if (qty <= left) return;
             args.IsValid = false;
             StockValidator.Text = HttpUtility.HtmlEncode(left > 0 ? "Only " + left + " " + item.Unit + " available" : item.ItemName + " is out of stock");

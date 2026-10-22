@@ -1,4 +1,4 @@
-# Consult360 — OPD Consultation Module
+# DocNyle — OPD Consultation Module
 ## API Integration Guide: Removing Static Data from the Web Forms App
 
 **Document version:** 1.2 — October 2026

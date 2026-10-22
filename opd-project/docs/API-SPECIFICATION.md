@@ -1,14 +1,14 @@
-# Consult360 — WCF Service Specification (DOCNyleUnifiedAPI)
+# DocNyle — WCF Service Specification (DOCNyleUnifiedAPI)
 
 **Version:** 3.3
 **Platform:** .NET Framework 4.8 · Windows Communication Foundation (WCF) hosted in IIS ·
 SQL Server 2019 (`docs/schema.sql`, `docs/stored-procedures.sql`)
 **Service:** `DOCNyleUnifiedAPI` — one `.svc`, one service contract (`IDOCNyleUnifiedAPI`)
-**Consumer:** the Consult360 ASP.NET Web Forms application (`OpdProject`)
+**Consumer:** the DocNyle ASP.NET Web Forms application (`OpdProject`)
 
-This document is the service contract for Consult360's data layer. Every operation below is
+This document is the service contract for DocNyle's data layer. Every operation below is
 one `[OperationContract]` on the single WCF contract `IDOCNyleUnifiedAPI`, and every operation
-names the stored procedure in `docs/stored-procedures.sql` that backs it. Consult360 does not
+names the stored procedure in `docs/stored-procedures.sql` that backs it. DocNyle does not
 use ASP.NET MVC or Web API: the pages are Web Forms, and the data layer is the
 `DOCNyleUnifiedAPI` WCF service.
 

@@ -36,7 +36,7 @@ namespace OpdProject.Services
         /// <summary>The portal hospital: ?h= in memory mode (else the default), the service's portal hospital in API mode.</summary>
         public static Hospital GetHospital(string requestedHospitalId, Hospital fallback)
         {
-            if (Api) return HospitalService.PortalHospital() ?? fallback ?? new Hospital { Name = "Consult360" };
+            if (Api) return HospitalService.PortalHospital() ?? fallback ?? new Hospital { Name = "DocNyle" };
             var h = requestedHospitalId != null ? HospitalService.GetHospital(requestedHospitalId) : null;
             return h ?? fallback;
         }

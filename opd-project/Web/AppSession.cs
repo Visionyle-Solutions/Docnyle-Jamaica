@@ -1,5 +1,8 @@
+using System;
 using System.Collections.Generic;
 using System.Web;
+using System.Web.Security;
+using Newtonsoft.Json;
 using OpdProject.Models;
 using OpdProject.Services;
 
@@ -19,13 +22,27 @@ namespace OpdProject.Web
     /// </summary>
     public static class AppSession
     {
-        private const string UserKey = "Consult360.UserId";
-        private const string ToastKey = "Consult360.Toasts";
+        private const string UserKey = "DocNyle.UserId";
+        private const string ToastKey = "DocNyle.Toasts";
 
         private static HttpContext Ctx { get { return HttpContext.Current; } }
 
-        private const string ApiUserKey = "Consult360.ApiUser";
-        private const string TokenKey = "Consult360.ServiceToken";
+        private const string ApiUserKey = "DocNyle.ApiUser";
+        private const string TokenKey = "DocNyle.ServiceToken";
+
+        /// <summary>
+        /// Encrypted, signed copy of the sign-in (machineKey), so a session lost to an app-pool recycle or another
+        /// worker process is restored instead of sending the user to the login page. Same idle timeout as the session.
+        /// </summary>
+        private const string AuthCookie = "c360auth";
+
+        /* What the sign-in cookie carries (AppUser.Role is derived from Roles, so the user is not serialized whole) */
+        private class SignInData
+        {
+            public string Token;
+            public string UserId, HospitalId, FullName, Email, Phone, SpecialtyId, LicenseNumber, LabPartnerId, Qualifications;
+            public List<string> Roles;
+        }
 
         /// <summary>
         /// The signed-in user. In-memory mode re-reads it each request so a disabled account loses access immediately;
@@ -37,11 +54,18 @@ namespace OpdProject.Web
             get
             {
                 if (Ctx == null || Ctx.Session == null) return null;
+                RestoreFromCookie();
                 if (DataSource.IsApi("Users"))
                 {
                     var stored = ApiUser;
                     if (stored == null) return null;
-                    if (!UserService.IsSessionValid()) { SignOut(); return null; }
+                    if (!UserService.IsSessionValid())
+                    {
+                        /* Signing in again (any browser or device) ends the user's other sessions (sec.usp_CreateUserSession) */
+                        SignOut();
+                        Toast("warning", "Signed out", "This account was signed in somewhere else, or the session expired. Please sign in again.");
+                        return null;
+                    }
                     return stored;
                 }
                 var id = Ctx.Session[UserKey] as string;
@@ -54,13 +78,13 @@ namespace OpdProject.Web
         /// <summary>The user returned by AuthenticateUser (API mode), without re-checking the session.</summary>
         public static AppUser ApiUser
         {
-            get { return Ctx != null && Ctx.Session != null ? Ctx.Session[ApiUserKey] as AppUser : null; }
+            get { RestoreFromCookie(); return Ctx != null && Ctx.Session != null ? Ctx.Session[ApiUserKey] as AppUser : null; }
         }
 
         /// <summary>The token returned by CreateUserSession, sent as the SessionToken header on every later API call.</summary>
         public static string ServiceToken
         {
-            get { return Ctx != null && Ctx.Session != null ? Ctx.Session[TokenKey] as string : null; }
+            get { RestoreFromCookie(); return Ctx != null && Ctx.Session != null ? Ctx.Session[TokenKey] as string : null; }
         }
 
         /* ── The caller's HospitalId / UserId / hashValue sent with every signed-in API call (CommonHelper) ── */
@@ -104,6 +128,7 @@ namespace OpdProject.Web
                 Ctx.Session[ApiUserKey] = user;
                 Ctx.Session[TokenKey] = serviceToken;
             }
+            WriteAuthCookie();
         }
 
         public static void SignOut()
@@ -112,6 +137,64 @@ namespace OpdProject.Web
             Ctx.Session.Remove(UserKey);
             Ctx.Session.Remove(ApiUserKey);
             Ctx.Session.Remove(TokenKey);
+            Ctx.Request.Cookies.Remove(AuthCookie);   // nothing later in this request restores it
+            Ctx.Response.Cookies.Add(new HttpCookie(AuthCookie, "") { Path = "/", HttpOnly = true, Expires = DateTime.UtcNow.AddYears(-1) });
+        }
+
+        /// <summary>
+        /// Called on every page request of a signed-in user: re-issues the sign-in cookie so it slides like the session.
+        /// Background calls (notifications.ashx) don't, so an idle tab still times out.
+        /// </summary>
+        public static void KeepAlive()
+        {
+            if (Ctx != null && Ctx.Session != null && Ctx.Session[UserKey] != null) WriteAuthCookie();
+        }
+
+        private static void WriteAuthCookie()
+        {
+            var userId = Ctx.Session[UserKey] as string;
+            if (userId == null) return;
+            var u = Ctx.Session[ApiUserKey] as AppUser;
+            var data = u == null ? "" : JsonConvert.SerializeObject(new SignInData
+            {
+                Token = Ctx.Session[TokenKey] as string,
+                UserId = u.UserId, HospitalId = u.HospitalId, FullName = u.FullName, Email = u.Email, Phone = u.Phone,
+                SpecialtyId = u.SpecialtyId, LicenseNumber = u.LicenseNumber, LabPartnerId = u.LabPartnerId,
+                Qualifications = u.Qualifications, Roles = u.Roles,
+            });
+            var now = DateTime.Now;
+            var ticket = new FormsAuthenticationTicket(1, userId, now, now.AddMinutes(Ctx.Session.Timeout), false, data, "/");
+            Ctx.Response.Cookies.Set(new HttpCookie(AuthCookie, FormsAuthentication.Encrypt(ticket))
+            {
+                Path = "/", HttpOnly = true, Secure = Ctx.Request.IsSecureConnection, SameSite = SameSiteMode.Lax,
+            });
+        }
+
+        /// <summary>Puts the sign-in back into an empty session from a valid, unexpired sign-in cookie.</summary>
+        private static void RestoreFromCookie()
+        {
+            if (Ctx == null || Ctx.Session == null || Ctx.Session[UserKey] != null) return;
+            var c = Ctx.Request.Cookies[AuthCookie];
+            if (c == null || string.IsNullOrEmpty(c.Value)) return;
+            FormsAuthenticationTicket t;
+            try { t = FormsAuthentication.Decrypt(c.Value); }
+            catch (Exception) { return; }   // tampered, or encrypted with another machineKey
+            if (t == null || t.Expired || string.IsNullOrEmpty(t.Name)) return;
+            if (!string.IsNullOrEmpty(t.UserData))
+            {
+                SignInData d;
+                try { d = JsonConvert.DeserializeObject<SignInData>(t.UserData); }
+                catch (JsonException) { return; }
+                if (d == null || string.IsNullOrEmpty(d.Token)) return;
+                Ctx.Session[ApiUserKey] = new AppUser
+                {
+                    UserId = d.UserId, HospitalId = d.HospitalId, FullName = d.FullName, Email = d.Email, Phone = d.Phone,
+                    SpecialtyId = d.SpecialtyId, LicenseNumber = d.LicenseNumber, LabPartnerId = d.LabPartnerId,
+                    Qualifications = d.Qualifications, Roles = d.Roles, IsActive = true,
+                };
+                Ctx.Session[TokenKey] = d.Token;
+            }
+            Ctx.Session[UserKey] = t.Name;
         }
 
         public static bool Can(string feature)

@@ -22,3 +22,4 @@
 
 *.log
 opd-project/App_Data/api-secrets.config
+opd-project/App_Data/machineKey.config

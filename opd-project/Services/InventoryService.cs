@@ -85,11 +85,11 @@ namespace OpdProject.Services
         /// <summary>Active items linked to the service (its "Used with" list), with their stock position.</summary>
         public static List<StockSummary> ItemsForService(string hospitalId, string serviceChargeId)
         {
+            /* Built from the service's own rows: ListInventoryItems needs admin_inventory, which a doctor in a consultation lacks */
             if (Api)
                 return (cnHelperObj.ListItemsForService(AppSession.ApiHospitalId, AppSession.ApiUserId, serviceChargeId, AppSession.ApiHashValue).EnsureSuccess().Items ?? new List<INV_ServiceStockItemInfo>()).Select(i => new StockSummary
                 {
-                    Item = ListItems(hospitalId, false).FirstOrDefault(x => x.InventoryItemId == i.InventoryItemId)
-                           ?? new InventoryItem { InventoryItemId = i.InventoryItemId, HospitalId = hospitalId, ItemName = i.ItemName, Category = i.Category, Unit = i.Unit, IsActive = true },
+                    Item = new InventoryItem { InventoryItemId = i.InventoryItemId, HospitalId = hospitalId, ItemName = i.ItemName, Category = i.Category, Unit = i.Unit, IsActive = true },
                     Available = i.Available,
                 }).ToList();
             return ListItems(hospitalId, false).Where(i => i.ServiceChargeIds.Contains(serviceChargeId)).Select(Summary).ToList();

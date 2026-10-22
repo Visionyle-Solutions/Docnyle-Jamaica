@@ -16,7 +16,7 @@ namespace OpdProject.templates.settings
     /// </summary>
     public partial class data_import : BasePage
     {
-        private const string PendingKey = "Consult360.PendingImport";
+        private const string PendingKey = "DocNyle.PendingImport";
 
         protected override string RequiredPermission { get { return "data_import"; } }
         public override string PageTitle { get { return "CSV Data Import"; } }
