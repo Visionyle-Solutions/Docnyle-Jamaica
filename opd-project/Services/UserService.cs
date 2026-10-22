@@ -53,8 +53,8 @@ namespace OpdProject.Services
         /* ── Sign-in and session ── */
 
         /// <summary>
-        /// Verifies e-mail + password. API mode: AuthenticateUser, then CreateUserSession with a new 256-bit token;
-        /// the returned user carries the token in <paramref name="serviceToken"/>. Returns null when the credentials
+        /// Verifies e-mail + password. API mode: AuthenticateUser, then CreateUserSession with AuthenticateUser's token
+        /// as its SessionToken header; the token CreateUserSession returns comes back in <paramref name="serviceToken"/>. Returns null when the credentials
         /// do not match; throws ApiException for a lockout or an unreachable service.
         /// </summary>
         public static AppUser Authenticate(string email, string password, out string serviceToken)
@@ -75,19 +75,25 @@ namespace OpdProject.Services
                 var a = auth.AuthenticatedUser;
                 if (a == null || !a.IsActive) return null;
 
-                var token = DocNyle.NewSessionToken();
+                // AuthenticateUser's token authorises CreateUserSession only; the token CreateUserSession returns
+                // is the one every later call sends as its SessionToken header.
+                var authToken = auth.UserSession != null ? auth.UserSession.SessionToken : null;
+                if (string.IsNullOrEmpty(authToken))
+                    throw new ApiException(ApiFaultKind.Unauthenticated, "AuthenticateUser", "The service did not return a session token.");
+
                 var ctx = System.Web.HttpContext.Current;
                 var browser = ctx != null && ctx.Request.Browser != null ? (ctx.Request.Browser.Browser + " " + ctx.Request.Browser.Version) : null;
-                cnHelperObj.CreateUserSession(new SEC_CreateUserSessionReq
+                // The server generates the new token and records the caller's IP itself.
+                var session = cnHelperObj.CreateUserSession(new SEC_CreateUserSessionReq
                 {
-                    UserId = a.UserId, 
-                    SessionToken = token,
+                    UserId = a.UserId,
                     Browser = browser != null && browser.Length > 100 ? browser.Substring(0, 100) : browser,
-                    IpAddress = DocNyle.ClientIp(),
                     ExpiresAt = DocNyle.Instant(DateTime.UtcNow.AddHours(SessionHours)),
                     hashValue = CommonHelper.GetSHA265(a.UserId),
-                }).EnsureSuccess();
-                serviceToken = token;
+                }, authToken).EnsureSuccess().UserSession;
+                if (session == null || string.IsNullOrEmpty(session.SessionToken))
+                    throw new ApiException(ApiFaultKind.Unauthenticated, "CreateUserSession", "The service did not return a session token.");
+                serviceToken = session.SessionToken;
                 return new AppUser
                 {
                     UserId = a.UserId, HospitalId = a.HospitalId, FullName = a.FullName, Email = a.Email, Phone = a.Phone,

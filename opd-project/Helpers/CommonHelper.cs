@@ -64,10 +64,8 @@ namespace OpdProject.Helpers
             return Send<T>("GET", url, null);
         }
 
-        private T _serialized_json_data<T>(string url, string indata) where T : RespInfo, new()
-        {
-            return Send<T>("POST", url, indata ?? string.Empty);
-        }
+        /// <param name="sessionToken">The SessionToken header for this call; null uses the signed-in session's token, "" sends none.</param>
+        
 
         /// <summary>"&amp;name=value" with the value URL-encoded, or "" when the value is null (the parameter is left out).</summary>
         private static string QueryParam(string name, string value)
@@ -79,9 +77,17 @@ namespace OpdProject.Helpers
         /// Sends one request and returns the service's response as it came back — the caller checks Status
         /// (EnsureSuccess). Only a transport failure (no answer, or no readable JSON) throws.
         /// </summary>
-        private T Send<T>(string method, string url, string indata) where T : RespInfo, new()
+        private T _serialized_json_data<T>(string url, string indata, string sessionToken = null) where T : RespInfo, new()
+        {
+            return Send<T>("POST", url, indata ?? string.Empty, sessionToken);
+        }
+
+        private T Send<T>(string method, string url, string indata, string sessionToken = null) where T : RespInfo, new()
         {
             string json_data;
+            DebugLog("API REQUEST  : ", method + " " + url);
+            if (indata != null) DebugLog("REQUEST BODY : ", indata);
+
             try
             {
                 EnsureServicePointConfigured();
@@ -93,10 +99,11 @@ namespace OpdProject.Helpers
                 request.Timeout = TimeoutMs;
                 request.ReadWriteTimeout = TimeoutMs;
 
-                // Headers
                 request.Headers["VenderId"] = VendorId;
                 request.Headers["VenderPwd"] = VendorPwd;
-                if (!string.IsNullOrEmpty(AppSession.ServiceToken)) request.Headers["SessionToken"] = AppSession.ServiceToken;
+
+                var token = !string.IsNullOrEmpty(sessionToken) ? sessionToken : AppSession.ServiceToken;
+                if (!string.IsNullOrEmpty(token)) request.Headers["SessionToken"] = token;
 
                 if (indata != null)
                 {
@@ -111,9 +118,8 @@ namespace OpdProject.Helpers
             }
             catch (WebException ex)
             {
-                // An HTTP error that still carries the service's JSON envelope is read like a normal response.
                 json_data = ErrorBody(ex);
-                System.Diagnostics.Debug.WriteLine($"API {method} {url} failed: {ex.Message}");
+                DebugLog("API FAILED   : ", method + " " + url + " -> " + ex.Message);
                 if (json_data == null)
                 {
                     var http = ex.Response as HttpWebResponse;
@@ -124,12 +130,29 @@ namespace OpdProject.Helpers
 
             try
             {
-                return !string.IsNullOrWhiteSpace(json_data) ? JsonConvert.DeserializeObject<T>(json_data, JsonSettings) ?? new T() : new T();
+                T result = !string.IsNullOrWhiteSpace(json_data)
+                    ? JsonConvert.DeserializeObject<T>(json_data, JsonSettings) ?? new T()
+                    : new T();
+
+                DebugLog("RESPONSE     : ", JsonConvert.SerializeObject(result, JsonSettings));
+                return result;
             }
             catch (JsonException ex)
             {
+                DebugLog("BAD RESPONSE : ", json_data);
                 throw new InvalidOperationException("The service returned an unreadable response.", ex);
             }
+        }
+
+        private const int MaxLogLength = 4000; // keeps big base64 payloads (documents, sketches) from flooding Output
+
+        [System.Diagnostics.Conditional("DEBUG")]
+        private static void DebugLog(string label, string text)
+        {
+            if (text == null) return;
+            if (text.Length > MaxLogLength)
+                text = text.Substring(0, MaxLogLength) + "... [truncated, " + text.Length + " chars]";
+            System.Diagnostics.Debug.WriteLine(label + text);
         }
 
         private static string ErrorBody(WebException ex)
@@ -161,7 +184,8 @@ namespace OpdProject.Helpers
             try
             {
                 string data = JsonConvert.SerializeObject(authenticateUserReq, JsonSettings);
-                resp = _serialized_json_data<SEC_AuthenticateUserResp>(SERVICE_URL + "AuthenticateUser", data);
+                // Anonymous: never send a token left over from an earlier session.
+                resp = _serialized_json_data<SEC_AuthenticateUserResp>(SERVICE_URL + "AuthenticateUser", data, "");
             }
             catch (Exception ex) {
                 AppSession.Toast("danger", "Failed to Authenticate", ex.Message);
@@ -170,13 +194,14 @@ namespace OpdProject.Helpers
             return resp;
         }
 
-        public SEC_UserSessionResp CreateUserSession(SEC_CreateUserSessionReq createUserSessionReq)
+        /// <param name="authToken">The SessionToken returned by AuthenticateUser, sent as this call's SessionToken header.</param>
+        public SEC_UserSessionResp CreateUserSession(SEC_CreateUserSessionReq createUserSessionReq, string authToken)
         {
             SEC_UserSessionResp resp = new SEC_UserSessionResp();
             try
             {
                 string data = JsonConvert.SerializeObject(createUserSessionReq, JsonSettings);
-                resp = _serialized_json_data<SEC_UserSessionResp>(SERVICE_URL + "CreateUserSession", data);
+                resp = _serialized_json_data<SEC_UserSessionResp>(SERVICE_URL + "CreateUserSession", data, authToken ?? "");
             }
             catch (Exception ex)
             {

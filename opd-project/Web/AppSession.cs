@@ -57,7 +57,7 @@ namespace OpdProject.Web
             get { return Ctx != null && Ctx.Session != null ? Ctx.Session[ApiUserKey] as AppUser : null; }
         }
 
-        /// <summary>The token given to CreateUserSession, sent as the SessionToken header on every API call.</summary>
+        /// <summary>The token returned by CreateUserSession, sent as the SessionToken header on every later API call.</summary>
         public static string ServiceToken
         {
             get { return Ctx != null && Ctx.Session != null ? Ctx.Session[TokenKey] as string : null; }

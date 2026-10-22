@@ -3159,6 +3159,8 @@ namespace OpdProject.Services.Api
     public partial class SEC_AuthenticateUserResp : RespInfo
     {
         public SEC_AuthenticatedUserInfo AuthenticatedUser { get; set; }
+        /// <summary>The session opened at sign-in; its SessionToken is the header of CreateUserSession.</summary>
+        public SEC_UserSessionInfo UserSession { get; set; }
     }
 
     public partial class SEC_AuthenticatedUserInfo
