@@ -254,11 +254,12 @@ namespace OpdProject.Services
         {
             if (Api) return ApiBookRecurring(patientId, doctorId, start, everyDays, count, type);
             var t = GetAppointmentType(hospitalId, type);
+            var now = TimeZoneService.Now(hospitalId);   // slots are on the clinic's wall clock
             int booked = 0;
             for (int i = 0; i < count; i++)
             {
                 var date = start.Date.AddDays(i * everyDays);
-                var slot = ListAvailableSlots(doctorId, hospitalId, date, t != null ? t.DurationMinutes : null).FirstOrDefault(s => !s.IsBooked);
+                var slot = ListAvailableSlots(doctorId, hospitalId, date, t != null ? t.DurationMinutes : null).FirstOrDefault(s => !s.IsBooked && s.SlotStart > now);
                 if (slot == null) continue;
                 CreateAppointment(hospitalId, patientId, doctorId, slot.SlotStart, slot.SlotEnd, type, "Recurring " + (i + 1) + "/" + count);
                 booked++;

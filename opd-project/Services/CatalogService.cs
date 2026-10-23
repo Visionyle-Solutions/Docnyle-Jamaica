@@ -280,11 +280,28 @@ namespace OpdProject.Services
             });
         }
 
-        public static List<Phrase> ListAll()
+        public static List<Phrase> ListAll(string hospitalId)
         {
-            if (CatalogService.Api)
-                return (cnHelperObj.SearchPhrases(AppSession.ApiHospitalId, AppSession.ApiUserId, null, null, null, null, "", AppSession.ApiHashValue).EnsureSuccess().Phrases ?? new List<CFG_PhraseInfo>()).Select(ToModel).OrderBy(p => p.TriggerKeyword).ToList();
+            if (CatalogService.Api) return ApiListAll(hospitalId);
             lock (DataStore.Sync) return DataStore.Phrases.Where(p => p.IsActive).OrderBy(p => p.TriggerKeyword).ToList();
+        }
+
+        /// <summary>
+        /// API mode: there is no list-all operation and ListPhrases needs a section, returning hospital-wide phrases plus
+        /// those of the one specialty / doctor passed. So each section is listed hospital-wide, then per specialty and per
+        /// doctor (each alone, so a doctor's phrase never hides a broader one from the merged list), deduplicated by id.
+        /// </summary>
+        private static List<Phrase> ApiListAll(string hospitalId)
+        {
+            var lookups = new List<string[]> { new string[] { null, null } };
+            lookups.AddRange(HospitalService.ListSpecialties(hospitalId, true).Select(s => new[] { s.SpecialtyId, null }));
+            lookups.AddRange(UserService.ListActiveDoctors(hospitalId).Select(d => new[] { null, d.UserId }));
+            var all = new Dictionary<string, Phrase>();
+            foreach (var section in new[] { "S", "O", "P" })
+                foreach (var l in lookups)
+                    foreach (var p in cnHelperObj.ListPhrases(AppSession.ApiHospitalId, AppSession.ApiUserId, section, l[0], l[1], null, AppSession.ApiHashValue).EnsureSuccess().Phrases ?? new List<CFG_PhraseInfo>())
+                        if (!all.ContainsKey(p.PhraseBankId)) all[p.PhraseBankId] = ToModel(p);
+            return all.Values.OrderBy(p => p.TriggerKeyword).ToList();
         }
 
         public static Phrase Get(string phraseId)

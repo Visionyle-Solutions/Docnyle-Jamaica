@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Web;
@@ -58,10 +59,10 @@ namespace OpdProject.templates.scheduling
 
             var slots = SchedulingService.ListAvailableSlots(DoctorId, HospitalId, SelectedDate, null);
             var sched = SchedulingService.GetDoctorSchedule(DoctorId, HospitalId, SelectedDate);
-            var free = slots.Where(s => !s.IsBooked).ToList();
+            var free = UpcomingFree(slots);
             SlotsRepeater.DataSource = free;
             SlotsRepeater.DataBind();
-            NoSlots.Text = free.Count == 0 ? "<div class=\"zone-a-empty\">No Available Slots<br><span class=\"text-xs\">" + HttpUtility.HtmlEncode(SchedulingService.NoSlotReason(sched)) + "</span></div>" : "";
+            NoSlots.Text = free.Count == 0 ? "<div class=\"zone-a-empty\">No Available Slots<br><span class=\"text-xs\">" + HttpUtility.HtmlEncode(NoFreeReason(slots, sched)) + "</span></div>" : "";
             ScheduleInfo.Text = sched.OnLeave || sched.Windows.Count == 0
                 ? "<i class=\"ti ti-calendar-off\" aria-hidden=\"true\"></i> " + HttpUtility.HtmlEncode(SchedulingService.NoSlotReason(sched))
                 : "<i class=\"ti ti-clock\" aria-hidden=\"true\"></i> " + string.Join("<br>", sched.Windows.Select(w => HttpUtility.HtmlEncode(HospitalService.FormatClock(HospitalId, w.StartTime) + "–" + HospitalService.FormatClock(HospitalId, w.EndTime))))
@@ -198,14 +199,28 @@ namespace OpdProject.templates.scheduling
             BookSlot.Items.Clear();
             if (string.IsNullOrEmpty(BookDoctor.SelectedValue)) return;
             var type = SchedulingService.GetAppointmentType(HospitalId, BookType.SelectedValue);
-            var free = SchedulingService.ListAvailableSlots(BookDoctor.SelectedValue, HospitalId, SelectedDate, type != null ? type.DurationMinutes : null).Where(s => !s.IsBooked).ToList();
+            var slots = SchedulingService.ListAvailableSlots(BookDoctor.SelectedValue, HospitalId, SelectedDate, type != null ? type.DurationMinutes : null);
+            var free = UpcomingFree(slots);
             if (free.Count == 0)
             {
                 var sched = SchedulingService.GetDoctorSchedule(BookDoctor.SelectedValue, HospitalId, SelectedDate);
-                BookSlot.Items.Add(new ListItem("No free slots: " + SchedulingService.NoSlotReason(sched), ""));
+                BookSlot.Items.Add(new ListItem("No free slots: " + NoFreeReason(slots, sched), ""));
                 return;
             }
             foreach (var s in free) BookSlot.Items.Add(new ListItem(FmtTime(s.SlotStart) + " — " + FmtTime(s.SlotEnd), s.Value));
+        }
+
+        /// <summary>Free slots that have not started yet on the clinic's clock (past times today are not bookable).</summary>
+        private List<TimeSlot> UpcomingFree(List<TimeSlot> slots)
+        {
+            var now = HospitalNow;
+            return slots.Where(s => !s.IsBooked && s.SlotStart > now).ToList();
+        }
+
+        /// <summary>Why nothing is offered: the day's remaining free slots have all passed, or the usual reason (leave, closed, full).</summary>
+        private static string NoFreeReason(List<TimeSlot> slots, DoctorSchedule sched)
+        {
+            return slots.Any(s => !s.IsBooked) ? "The remaining free times have passed" : SchedulingService.NoSlotReason(sched);
         }
 
         protected void BookButton_Click(object sender, EventArgs e)
@@ -295,7 +310,14 @@ namespace OpdProject.templates.scheduling
                 var s = ParseSlot(BookSlot.SelectedValue);
                 start = s[0]; end = s[1];
             }
-            /* re-check on the server: the slot may have been taken since the dialog opened */
+            /* re-check on the server: the time may have passed, or the slot been taken, since the dialog opened */
+            if (start <= HospitalNow)
+            {
+                ToastWarning("That time has passed", "Choose a later time.");
+                BindBookSlots();
+                BookModal.Visible = true;
+                return;
+            }
             var stillFree = SchedulingService.ListAvailableSlots(doctorId, HospitalId, start.Date, (int)(end - start).TotalMinutes).Any(x => !x.IsBooked && x.SlotStart == start);
             if (!stillFree)
             {

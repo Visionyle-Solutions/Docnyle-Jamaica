@@ -50,7 +50,7 @@ namespace OpdProject.templates.settings
 
         private void Bind()
         {
-            var rows = PhraseService.ListAll().AsEnumerable();
+            var rows = PhraseService.ListAll(HospitalId).AsEnumerable();
             switch (ScopeFilter.SelectedValue)
             {
                 case "MINE": rows = rows.Where(p => p.Scope == "DOCTOR" && p.DoctorId == UserId); break;
