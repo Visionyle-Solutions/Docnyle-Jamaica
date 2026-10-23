@@ -1,7 +1,6 @@
 using System;
 using System.Globalization;
 using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Web;
 using System.Web.UI;
@@ -29,14 +28,6 @@ namespace OpdProject.templates.patients
             new[] { "QID", "Four times daily", "4" }, new[] { "HS", "At bedtime", "1" }, new[] { "WEEKLY", "Once a week", "0" },
             new[] { "PRN", "As needed", "0" },
         };
-
-        protected void Page_Load(object sender, EventArgs e)
-        {
-            var options = new StringBuilder();
-            foreach (var d in CatalogService.SearchFormulary(AppSession.CurrentUser.HospitalId, "", false).Select(d => d.BrandName).Distinct())
-                options.Append("<option value=\"").Append(HttpUtility.HtmlAttributeEncode(d)).Append("\"></option>");
-            FormularyOptions.Text = options.ToString();
-        }
 
         public void Bind()
         {

@@ -71,6 +71,7 @@ namespace OpdProject.templates.patients
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            if (Request.QueryString["medicineSuggest"] != null) { WriteMedicineSuggestions(Request.QueryString["medicineSuggest"]); return; }
             var patient = PatientService.Get(PatientId);
             if (patient == null || patient.HospitalId != HospitalId)
             {
@@ -112,6 +113,28 @@ namespace OpdProject.templates.patients
         private void Body_EditRequested(object sender, CommandEventArgs e)
         {
             AllergyForm.LoadAllergy((string)e.CommandArgument);
+        }
+
+        /* ── Medicine typeahead (Current Medications tab) ── */
+
+        /// <summary>GET ?medicineSuggest=term — JSON list of up to 15 matching formulary drugs for the medicine typeahead.</summary>
+        private void WriteMedicineSuggestions(string term)
+        {
+            var found = (term ?? "").Trim().Length < 2
+                ? new System.Collections.Generic.List<OpdProject.Models.Drug>()
+                : CatalogService.SearchFormulary(HospitalId, term, false).Take(15).ToList();
+            var rows = found.Select(d => new
+            {
+                name = d.BrandName,
+                generic = d.GenericName,
+                composition = d.Composition,
+                form = d.DrugForm
+            });
+            Response.Clear();
+            Response.ContentType = "application/json";
+            Response.Cache.SetCacheability(HttpCacheability.NoCache);
+            Response.Write(new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(rows));
+            Response.End();
         }
 
         protected override void OnPreRender(EventArgs e)
