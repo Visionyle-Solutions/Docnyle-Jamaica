@@ -38,11 +38,9 @@ namespace OpdProject.templates.patients
                 foreach (var n in new[] { "10", "25", "50", "100" }) PageSizeFilter.Items.Add(new ListItem(n, n));
                 PageSizeFilter.Items.Add(new ListItem("All", "0"));
 
-                /* dashboard tiles and pie slices link here with ?kind=[&status=]; unknown values fall back to the defaults */
                 Select(KindFilter, Request.QueryString["kind"]);
                 Select(StatusFilter, Request.QueryString["status"]);
-                /* ?date=yyyy-MM-dd opens another day; missing or invalid = today */
-                DateFilter.Text = DateTime.Today.ToString("yyyy-MM-dd");
+                DateFilter.Text = ParseDate(Request.QueryString["date"]).ToString("yyyy-MM-dd");
                 BindQueue();
             }
         }
