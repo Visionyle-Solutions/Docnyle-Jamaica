@@ -23,7 +23,8 @@
     <!-- App shell — same five regions as the original SPA; every page renders inside #main-content. -->
     <div id="app-shell" class="<%: ShellCss %>">
       <asp:PlaceHolder ID="ChromeSidebar" runat="server">
-        <nav id="sidebar" aria-label="Primary navigation">
+<%--        <button type="button" id="menu-toggle" onclick="document.getElementById('app-shell').classList.toggle('nav-open')">☰</button>        --%>
+          <nav id="sidebar" aria-label="Primary navigation">
           <div style="padding:16px 14px 10px; text-align:center; border-bottom:1px solid rgba(255,255,255,0.08);">
             <div style="display:inline-block; padding:3px; border-radius:18px; background:linear-gradient(135deg, rgba(245,158,11,0.4), rgba(59,130,246,0.4)); margin-bottom:6px;">
               <img src="<%: ResolveUrl("~/assets/Medcity.png") %>" alt="DocNyle" style="width:72px; height:66px; border-radius:16px; display:block;" />

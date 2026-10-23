@@ -64,11 +64,17 @@ namespace OpdProject.templates.patients
             TrnGroup.Visible = IsJamaica;
             RegionList.Visible = IsJamaica;
             RegionInput.Visible = !IsJamaica;
+            RegionListRequired.Enabled = IsJamaica;
+            RegionInputRequired.Enabled = !IsJamaica;
+            RegionListRequired.ErrorMessage = RegionInputRequired.ErrorMessage = RegionLabel + " is required";
+            var today = ((OpdProject.Web.BasePage)Page).Today;
+            DobInput.Attributes["max"] = today.ToString("yyyy-MM-dd");
+            DobInput.Attributes["min"] = today.AddYears(-130).ToString("yyyy-MM-dd");
             if (Page.IsPostBack) return;
 
-            RegionList.Items.Add(new ListItem("—", ""));
+            RegionList.Items.Add(new ListItem("Select", ""));
             foreach (var parish in JamaicaParishes) RegionList.Items.Add(parish);
-            PreferredDoctorInput.Items.Add(new ListItem("—", ""));
+            PreferredDoctorInput.Items.Add(new ListItem("Select", ""));
             foreach (var d in UserService.ListActiveDoctors(Hospital.HospitalId).OrderBy(d => d.FullName))
                 PreferredDoctorInput.Items.Add(new ListItem(d.FullName, d.UserId));
             CountryCodeInput.Text = DefaultDialCode;

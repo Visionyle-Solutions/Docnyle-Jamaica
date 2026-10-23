@@ -7,11 +7,11 @@
 <asp:PlaceHolder ID="CovPrivate" runat="server">
   <div class="form-grid">
     <div class="form-group"><label class="form-label" for="<%= CovPayerPrivate.ClientID %>">Insurance Company *</label><asp:DropDownList ID="CovPayerPrivate" runat="server" CssClass="form-select" /></div>
-    <div class="form-group"><label class="form-label" for="<%= CovPlan.ClientID %>">Plan Name</label><asp:TextBox ID="CovPlan" runat="server" CssClass="form-control" /></div>
+    <div class="form-group"><label class="form-label" for="<%= CovPlan.ClientID %>">Plan Name</label><asp:TextBox ID="CovPlan" runat="server" CssClass="form-control" MaxLength="30" oninput="this.value = this.value.replace(/[^A-Za-z .'\-]/g, '')"/></div>
     <div class="form-group"><label class="form-label" for="<%= CovMember.ClientID %>">Member ID *</label><asp:TextBox ID="CovMember" runat="server" CssClass="form-control" /></div>
     <div class="form-group"><label class="form-label" for="<%= CovPolicy.ClientID %>">Policy Number</label><asp:TextBox ID="CovPolicy" runat="server" CssClass="form-control" /></div>
     <div class="form-group"><label class="form-label" for="<%= CovGroup.ClientID %>">Group Number</label><asp:TextBox ID="CovGroup" runat="server" CssClass="form-control" /></div>
-    <div class="form-group"><label class="form-label" for="<%= CovHolder.ClientID %>">Policy Holder</label><asp:TextBox ID="CovHolder" runat="server" CssClass="form-control" /></div>
+    <div class="form-group"><label class="form-label" for="<%= CovHolder.ClientID %>">Policy Holder</label><asp:TextBox ID="CovHolder" runat="server" CssClass="form-control" MaxLength="30" oninput="this.value = this.value.replace(/[^A-Za-z .'\-]/g, '')"/></div>
     <div class="form-group"><label class="form-label" for="<%= CovRelation.ClientID %>">Relationship</label>
       <asp:DropDownList ID="CovRelation" runat="server" CssClass="form-select"><asp:ListItem>Self</asp:ListItem><asp:ListItem>Spouse</asp:ListItem><asp:ListItem>Child</asp:ListItem><asp:ListItem>Parent</asp:ListItem><asp:ListItem>Dependent</asp:ListItem></asp:DropDownList></div>
     <div class="form-group"><label class="form-label" for="<%= CovMode.ClientID %>">Claim Mode</label>

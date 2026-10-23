@@ -152,3 +152,71 @@ html, body {
 .sidebar-group-items { padding-bottom: 4px; }
 /* A top-level link with no group header (e.g. Dashboard) */
 .sidebar-standalone { padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.form-control:disabled,
+.form-control[readonly] {
+    background-color: #e9ecef;
+    color: #6c757d;
+    cursor: not-allowed;
+    opacity: 1;
+}
+
+/*#menu-toggle {
+    display: none;
+}
+
+@media (max-width: 1280px) {
+    #app-shell:not(.no-chrome) {
+        grid-template-columns: 0 1fr;
+    }
+
+    #sidebar {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: var(--sidebar-width);
+        z-index: 1001;
+        transform: translateX(-100%);*/ /* hidden */
+        /*transition: transform .2s ease;
+    }
+
+    #app-shell.nav-open #sidebar {
+        transform: none;
+    }*/
+    /* shown */
+
+    /*#menu-toggle {
+        display: block;
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 1002;
+        width: 36px;
+        height: 36px;
+        border: 0;
+        border-radius: 8px;
+        background: #0f2a3d;
+        color: #fff;
+        font-size: 18px;
+        cursor: pointer;
+        box-shadow: 0 2px 6px rgba(0,0,0,.3);
+    }
+
+    #topbar {
+        padding-left: 60px;
+        transition: padding-left .25s cubic-bezier(.4, 0, .2, 1);
+    }*/
+    /* room for the button */
+    /* Animate the content column so the page slides over smoothly */
+    /*#app-shell:not(.no-chrome) {
+        transition: grid-template-columns .25s cubic-bezier(.4, 0, .2, 1);
+    }*/
+
+        /* While the menu is open (cursor on the edge strip or on the menu), reserve its width */
+        /*#app-shell:not(.no-chrome):has(#sidebar-handle:hover),
+        #app-shell:not(.no-chrome):has(#sidebar:hover),
+        #app-shell:not(.no-chrome):has(#sidebar:focus-visible),
+        #app-shell:not(.no-chrome).nav-open {
+            grid-template-columns: var(--sidebar-width) 1fr;
+        }
+}*/

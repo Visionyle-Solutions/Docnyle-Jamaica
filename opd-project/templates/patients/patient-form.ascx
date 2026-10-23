@@ -8,23 +8,23 @@
   <div class="form-group">
     <label class="form-label" for="<%= PrefixInput.ClientID %>">Prefix</label>
     <asp:DropDownList ID="PrefixInput" runat="server" CssClass="form-select">
-      <asp:ListItem Value="">—</asp:ListItem>
+      <asp:ListItem Value="">Select</asp:ListItem>
       <asp:ListItem>Mr.</asp:ListItem><asp:ListItem>Ms.</asp:ListItem><asp:ListItem>Mrs.</asp:ListItem>
       <asp:ListItem>Master</asp:ListItem><asp:ListItem>Baby</asp:ListItem>
     </asp:DropDownList>
   </div>
   <div class="form-group">
     <label class="form-label" for="<%= FirstNameInput.ClientID %>">First name <span class="required">*</span></label>
-    <asp:TextBox ID="FirstNameInput" runat="server" CssClass="form-control" MaxLength="60" />
+    <asp:TextBox ID="FirstNameInput" runat="server" CssClass="form-control" MaxLength="60" oninput="this.value = this.value.replace(/[^A-Za-z .'\-]/g, '')"/>
     <asp:RequiredFieldValidator runat="server" ControlToValidate="FirstNameInput" ErrorMessage="First name is required" Text="Required" CssClass="field-error" Display="Dynamic" />
   </div>
   <div class="form-group">
     <label class="form-label" for="<%= MiddleNameInput.ClientID %>">Middle name</label>
-    <asp:TextBox ID="MiddleNameInput" runat="server" CssClass="form-control" MaxLength="60" />
+    <asp:TextBox ID="MiddleNameInput" runat="server" CssClass="form-control" MaxLength="60" oninput="this.value = this.value.replace(/[^A-Za-z .'\-]/g, '')"/>
   </div>
   <div class="form-group">
     <label class="form-label" for="<%= LastNameInput.ClientID %>">Last name <span class="required">*</span></label>
-    <asp:TextBox ID="LastNameInput" runat="server" CssClass="form-control" MaxLength="60" />
+    <asp:TextBox ID="LastNameInput" runat="server" CssClass="form-control" MaxLength="60" oninput="this.value = this.value.replace(/[^A-Za-z .'\-]/g, '')"/>
     <asp:RequiredFieldValidator runat="server" ControlToValidate="LastNameInput" ErrorMessage="Last name is required" Text="Required" CssClass="field-error" Display="Dynamic" />
   </div>
 </div>
@@ -49,7 +49,7 @@
   <div class="form-group">
     <label class="form-label" for="<%= BloodGroupInput.ClientID %>">Blood group</label>
     <asp:DropDownList ID="BloodGroupInput" runat="server" CssClass="form-select">
-      <asp:ListItem Value="">—</asp:ListItem>
+      <asp:ListItem Value="">Select</asp:ListItem>
       <asp:ListItem>A+</asp:ListItem><asp:ListItem>A-</asp:ListItem>
       <asp:ListItem>B+</asp:ListItem><asp:ListItem>B-</asp:ListItem>
       <asp:ListItem>O+</asp:ListItem><asp:ListItem>O-</asp:ListItem>
@@ -77,32 +77,33 @@
 <div class="reg-fields">
   <div class="form-group">
     <label class="form-label" for="<%= CountryCodeInput.ClientID %>">Country code</label>
-    <asp:TextBox ID="CountryCodeInput" runat="server" CssClass="form-control" MaxLength="5" />
+    <asp:TextBox ID="CountryCodeInput" runat="server" CssClass="form-control field-locked" MaxLength="5" Enabled="false"/>
     <asp:RegularExpressionValidator ID="CountryCodeValidator" runat="server" ControlToValidate="CountryCodeInput" ValidationExpression="^\+?[0-9]{1,4}$" ErrorMessage="Country code must look like +1 or +91" Text="Invalid code" CssClass="field-error" Display="Dynamic" />
   </div>
   <div class="form-group">
     <label class="form-label" for="<%= MobileInput.ClientID %>">Mobile <span class="required">*</span></label>
-    <asp:TextBox ID="MobileInput" runat="server" CssClass="form-control" MaxLength="16" />
+    <asp:TextBox ID="MobileInput" runat="server" CssClass="form-control" MaxLength="10" oninput="this.value = this.value.replace(/[^0-9\-]/g, '')"/>
     <asp:RequiredFieldValidator runat="server" ControlToValidate="MobileInput" ErrorMessage="Mobile number is required" Text="Required" CssClass="field-error" Display="Dynamic" />
     <c360:PhoneValidator ID="MobileValidator" runat="server" ControlToValidate="MobileInput" />
   </div>
   <div class="form-group">
     <label class="form-label" for="<%= EmailInput.ClientID %>">Email</label>
-    <asp:TextBox ID="EmailInput" runat="server" CssClass="form-control" TextMode="Email" MaxLength="100" />
+    <asp:TextBox ID="EmailInput" runat="server" CssClass="form-control" TextMode="Email" MaxLength="60" />
     <asp:RegularExpressionValidator runat="server" ControlToValidate="EmailInput" ValidationExpression="^[^@\s]+@[^@\s]+\.[^@\s]+$" ErrorMessage="Enter a valid email address" Text="Invalid email" CssClass="field-error" Display="Dynamic" />
   </div>
   <div class="form-group">
     <label class="form-label" for="<%= LanguageInput.ClientID %>">Preferred language</label>
-    <asp:TextBox ID="LanguageInput" runat="server" CssClass="form-control" MaxLength="40" />
+    <asp:TextBox ID="LanguageInput" runat="server" CssClass="form-control" MaxLength="40" oninput="this.value = this.value.replace(/[^A-Za-z, '\-]/g, '')"/>
   </div>
 </div>
 
 <div class="reg-section-title">Address</div>
 <div class="reg-fields" style="grid-template-columns: repeat(2, minmax(170px, 1fr));">
   <div class="form-group">
-    <label class="form-label" for="<%= AddrLine1Input.ClientID %>">Line 1</label>
-    <asp:TextBox ID="AddrLine1Input" runat="server" CssClass="form-control" MaxLength="150" />
-  </div>
+  <label class="form-label" for="<%= AddrLine1Input.ClientID %>">Line 1 <span class="required">*</span></label>
+  <asp:TextBox ID="AddrLine1Input" runat="server" CssClass="form-control" MaxLength="150" />
+  <asp:RequiredFieldValidator runat="server" ControlToValidate="AddrLine1Input" ErrorMessage="Address line 1 is required" Text="Required" CssClass="field-error" Display="Dynamic" />
+</div>
   <div class="form-group">
     <label class="form-label" for="<%= AddrLine2Input.ClientID %>">Line 2</label>
     <asp:TextBox ID="AddrLine2Input" runat="server" CssClass="form-control" MaxLength="150" />
@@ -110,24 +111,27 @@
 </div>
 <div class="reg-fields">
   <div class="form-group">
-    <label class="form-label" for="<%= CityInput.ClientID %>">City / Town</label>
-    <asp:TextBox ID="CityInput" runat="server" CssClass="form-control" MaxLength="80" />
-  </div>
-  <div class="form-group">
-    <label class="form-label" for="<%= RegionList.Visible ? RegionList.ClientID : RegionInput.ClientID %>"><%: RegionLabel %></label>
-    <asp:DropDownList ID="RegionList" runat="server" CssClass="form-select" />
-    <asp:TextBox ID="RegionInput" runat="server" CssClass="form-control" MaxLength="80" />
-  </div>
+  <label class="form-label" for="<%= CityInput.ClientID %>">City / Town <span class="required">*</span></label>
+  <asp:TextBox ID="CityInput" runat="server" CssClass="form-control" MaxLength="80" oninput="this.value = this.value.replace(/[^A-Za-z .'\-]/g, '')"/>
+  <asp:RequiredFieldValidator runat="server" ControlToValidate="CityInput" ErrorMessage="City / Town is required" Text="Required" CssClass="field-error" Display="Dynamic" />
+</div>
+<div class="form-group">
+  <label class="form-label" for="<%= RegionList.Visible ? RegionList.ClientID : RegionInput.ClientID %>"><%: RegionLabel %> <span class="required">*</span></label>
+  <asp:DropDownList ID="RegionList" runat="server" CssClass="form-select" />
+  <asp:RequiredFieldValidator ID="RegionListRequired" runat="server" ControlToValidate="RegionList" InitialValue="" Text="Required" CssClass="field-error" Display="Dynamic" />
+  <asp:TextBox ID="RegionInput" runat="server" CssClass="form-control" MaxLength="80" />
+  <asp:RequiredFieldValidator ID="RegionInputRequired" runat="server" ControlToValidate="RegionInput" Text="Required" CssClass="field-error" Display="Dynamic" />
+</div>
   <div class="form-group">
     <label class="form-label" for="<%= CountryInput.ClientID %>">Country</label>
-    <asp:TextBox ID="CountryInput" runat="server" CssClass="form-control" MaxLength="60" />
+    <asp:TextBox ID="CountryInput" runat="server" CssClass="form-control" MaxLength="60" Enabled="false"/>
   </div>
 </div>
 
 <div class="reg-section-title">Emergency contact</div>
 <div class="reg-fields">
-  <div class="form-group"><label class="form-label" for="<%= EmergencyNameInput.ClientID %>">Name</label><asp:TextBox ID="EmergencyNameInput" runat="server" CssClass="form-control" MaxLength="120" /></div>
-  <div class="form-group"><label class="form-label" for="<%= EmergencyPhoneInput.ClientID %>">Phone</label><asp:TextBox ID="EmergencyPhoneInput" runat="server" CssClass="form-control" MaxLength="20" />
+  <div class="form-group"><label class="form-label" for="<%= EmergencyNameInput.ClientID %>">Name</label><asp:TextBox ID="EmergencyNameInput" runat="server" CssClass="form-control" MaxLength="120" oninput="this.value = this.value.replace(/[^A-Za-z .'\-]/g, '')"/></div>
+  <div class="form-group"><label class="form-label" for="<%= EmergencyPhoneInput.ClientID %>">Phone</label><asp:TextBox ID="EmergencyPhoneInput" runat="server" CssClass="form-control" MaxLength="10" oninput="this.value = this.value.replace(/[^0-9'\-]/g, '')"/>
     <c360:PhoneValidator ID="EmergencyPhoneValidator" runat="server" ControlToValidate="EmergencyPhoneInput" /></div>
 </div>
 
@@ -136,7 +140,7 @@
   <div class="form-group">
     <label class="form-label" for="<%= MaritalInput.ClientID %>">Marital status</label>
     <asp:DropDownList ID="MaritalInput" runat="server" CssClass="form-select">
-      <asp:ListItem Value="">—</asp:ListItem>
+      <asp:ListItem Value="">Select</asp:ListItem>
       <asp:ListItem Value="SINGLE">Single</asp:ListItem>
       <asp:ListItem Value="MARRIED">Married</asp:ListItem>
       <asp:ListItem Value="OTHER">Other</asp:ListItem>
@@ -144,11 +148,11 @@
   </div>
   <div class="form-group">
     <label class="form-label" for="<%= OccupationInput.ClientID %>">Occupation</label>
-    <asp:TextBox ID="OccupationInput" runat="server" CssClass="form-control" MaxLength="80" />
+    <asp:TextBox ID="OccupationInput" runat="server" CssClass="form-control" MaxLength="80" oninput="this.value = this.value.replace(/[^A-Za-z .'\-]/g, '')"/>
   </div>
   <div class="form-group">
     <label class="form-label" for="<%= ReferralInput.ClientID %>">Referral source</label>
-    <asp:TextBox ID="ReferralInput" runat="server" CssClass="form-control" MaxLength="80" />
+    <asp:TextBox ID="ReferralInput" runat="server" CssClass="form-control" MaxLength="80" oninput="this.value = this.value.replace(/[^A-Za-z .'\-]/g, '')"/>
   </div>
   <div class="form-group">
     <label class="form-label" for="<%= PreferredDoctorInput.ClientID %>">Preferred physician</label>
@@ -168,6 +172,17 @@
       if (t.getMonth() < d.getMonth() || (t.getMonth() === d.getMonth() && t.getDate() < d.getDate())) age--;
       hint.textContent = age < 0 ? 'date is in the future' : '→ age ' + age;
     }
-    dob.addEventListener('input', refresh); dob.addEventListener('change', refresh); refresh();
+      dob.addEventListener('input', refresh); dob.addEventListener('change', refresh); refresh();
+      var v = document.getElementById('<%= DobValidator.ClientID %>');
+      dob.addEventListener('change', function () { if (typeof ValidatorValidate === 'function' && v) ValidatorValidate(v); });
   })();
+</script>
+<script>
+    function validateDob(src, args) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(args.Value)) { args.IsValid = false; return; }
+        var d = new Date(args.Value + 'T00:00:00');
+        var now = new Date(); now.setHours(0, 0, 0, 0);
+        var min = new Date(now); min.setFullYear(min.getFullYear() - 130);
+        args.IsValid = !isNaN(d) && d <= now && d >= min;
+    }
 </script>

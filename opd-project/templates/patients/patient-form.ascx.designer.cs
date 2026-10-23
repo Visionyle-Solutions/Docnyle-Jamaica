@@ -140,8 +140,13 @@ namespace OpdProject.templates.patients
         /// </remarks>
         protected global::System.Web.UI.WebControls.TextBox CountryCodeInput;
 
-        /// <summary>CountryCodeValidator control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        /// <summary>
+        /// CountryCodeValidator control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
         protected global::System.Web.UI.WebControls.RegularExpressionValidator CountryCodeValidator;
 
         /// <summary>
@@ -153,8 +158,13 @@ namespace OpdProject.templates.patients
         /// </remarks>
         protected global::System.Web.UI.WebControls.TextBox MobileInput;
 
-        /// <summary>MobileValidator control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        /// <summary>
+        /// MobileValidator control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
         protected global::OpdProject.Web.PhoneValidator MobileValidator;
 
         /// <summary>
@@ -212,6 +222,15 @@ namespace OpdProject.templates.patients
         protected global::System.Web.UI.WebControls.DropDownList RegionList;
 
         /// <summary>
+        /// RegionListRequired control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.RequiredFieldValidator RegionListRequired;
+
+        /// <summary>
         /// RegionInput control.
         /// </summary>
         /// <remarks>
@@ -219,6 +238,15 @@ namespace OpdProject.templates.patients
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
         protected global::System.Web.UI.WebControls.TextBox RegionInput;
+
+        /// <summary>
+        /// RegionInputRequired control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.RequiredFieldValidator RegionInputRequired;
 
         /// <summary>
         /// CountryInput control.
@@ -247,8 +275,13 @@ namespace OpdProject.templates.patients
         /// </remarks>
         protected global::System.Web.UI.WebControls.TextBox EmergencyPhoneInput;
 
-        /// <summary>EmergencyPhoneValidator control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        /// <summary>
+        /// EmergencyPhoneValidator control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
         protected global::OpdProject.Web.PhoneValidator EmergencyPhoneValidator;
 
         /// <summary>
