@@ -53,6 +53,214 @@
     document.addEventListener('DOMContentLoaded', wrap);
   })();
 
+  /* Date picker: every <input type="date"> is shown as a DD-MM-YYYY text box with a popup calendar
+     (month/year dropdowns, Today / Done). The original input stays in the form as a hidden field that
+     still posts yyyy-MM-dd, so server code, validators, AutoPostBack and page scripts are unchanged.
+     The input's min/max (default 1900–2099) limit the year list, disable days and reject typed dates. */
+  (function () {
+    var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+    var valueProp = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    var iso = function (d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
+    var fromIso = function (s) {
+      var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
+      if (!m) return null;
+      var d = new Date(+m[1], m[2] - 1, +m[3]);
+      return d.getMonth() === m[2] - 1 ? d : null;
+    };
+    var display = function (d) { return d ? pad(d.getDate()) + '-' + pad(d.getMonth() + 1) + '-' + d.getFullYear() : ''; };
+    var fromDisplay = function (s) {
+      var m = /^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})$/.exec((s || '').trim());
+      if (!m) return null;
+      var d = new Date(+m[3], m[2] - 1, +m[1]);
+      return d.getDate() === +m[1] && d.getMonth() === m[2] - 1 ? d : null;
+    };
+    var today = function () { var t = new Date(); return new Date(t.getFullYear(), t.getMonth(), t.getDate()); };
+
+    var popup, current;   // one shared popup; current = the field it is open for
+
+    function Field(hidden) {
+      var self = this;
+      this.hidden = hidden;
+      this.min = fromIso(hidden.getAttribute('min')) || new Date(1900, 0, 1);
+      this.max = fromIso(hidden.getAttribute('max')) || new Date(2099, 11, 31);
+      var box = this.box = document.createElement('input');
+      box.type = 'text';
+      box.id = hidden.id ? hidden.id + '_display' : '';
+      box.className = hidden.className + ' datepicker-input';
+      box.style.cssText = hidden.style.cssText;
+      box.placeholder = 'DD-MM-YYYY';
+      box.autocomplete = 'off';
+      box.inputMode = 'numeric';
+      box.maxLength = 10;
+      box.disabled = hidden.disabled;
+      box.readOnly = hidden.readOnly;
+      ['aria-label', 'title', 'required'].forEach(function (a) { if (hidden.hasAttribute(a)) box.setAttribute(a, hidden.getAttribute(a)); });
+      box.value = display(fromIso(valueProp.get.call(hidden)));
+      hidden.parentNode.insertBefore(box, hidden);
+      hidden.type = 'hidden';
+      if (hidden.id) document.querySelectorAll('label[for="' + hidden.id + '"]').forEach(function (l) { l.htmlFor = box.id; });
+      // A page script that sets input.value keeps the visible box in step.
+      Object.defineProperty(hidden, 'value', {
+        configurable: true,
+        get: function () { return valueProp.get.call(hidden); },
+        set: function (v) { valueProp.set.call(hidden, v); box.value = display(fromIso(v)); }
+      });
+
+      box.addEventListener('focus', function () { self.open(); });
+      box.addEventListener('click', function () { self.open(); });
+      box.addEventListener('input', function () {
+        // Typing digits fills in the dashes: 23102026 → 23-10-2026.
+        var digits = box.value.replace(/\D/g, '').slice(0, 8);
+        box.value = digits.length > 4 ? digits.slice(0, 2) + '-' + digits.slice(2, 4) + '-' + digits.slice(4)
+          : digits.length > 2 ? digits.slice(0, 2) + '-' + digits.slice(2) : digits;
+        box.setCustomValidity('');
+        box.classList.remove('is-invalid');
+        var d = fromDisplay(box.value);
+        if (d && self.allowed(d) && current === self) { self.view = new Date(d.getFullYear(), d.getMonth(), 1); render(); }
+      });
+      box.addEventListener('change', function () { self.commitTyped(); });
+      box.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' || e.key === 'Tab') close();
+        if (e.key === 'Enter') { e.preventDefault(); self.commitTyped(); close(); }
+      });
+    }
+    Field.prototype.allowed = function (d) { return d >= this.min && d <= this.max; };
+    Field.prototype.selected = function () { return fromIso(valueProp.get.call(this.hidden)); };
+    Field.prototype.set = function (d) {
+      var v = d ? iso(d) : '';
+      this.box.value = display(d);
+      this.box.setCustomValidity('');
+      this.box.classList.remove('is-invalid');
+      if (v === valueProp.get.call(this.hidden)) return;
+      valueProp.set.call(this.hidden, v);
+      // Same events the date input fired: page scripts, validators and AutoPostBack listen for them.
+      this.hidden.dispatchEvent(new Event('input', { bubbles: true }));
+      this.hidden.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    Field.prototype.commitTyped = function () {
+      var text = this.box.value.trim();
+      if (!text) { this.set(null); return; }
+      var d = fromDisplay(text);
+      var msg = !d ? 'Enter a valid date as DD-MM-YYYY.'
+        : !this.allowed(d) ? 'Choose a date between ' + display(this.min) + ' and ' + display(this.max) + '.' : '';
+      if (!msg) { this.set(d); return; }
+      valueProp.set.call(this.hidden, '');   // never post a half-typed or out-of-range date
+      this.box.setCustomValidity(msg);
+      this.box.classList.add('is-invalid');
+      this.box.reportValidity();
+    };
+    Field.prototype.open = function () {
+      if (this.box.disabled || this.box.readOnly) return;
+      if (current === this) return;
+      current = this;
+      var d = this.selected() || fromDisplay(this.box.value) || today();
+      if (d < this.min) d = this.min;
+      if (d > this.max) d = this.max;
+      this.view = new Date(d.getFullYear(), d.getMonth(), 1);
+      if (!popup) build();
+      popup.hidden = false;
+      render();
+      place();
+    };
+
+    function close() {
+      if (!popup || !current) return;
+      popup.hidden = true;
+      current = null;
+    }
+
+    // Inline SVG, so the arrows show even before the icon font has loaded.
+    function chevron(points) {
+      return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="' + points + '"/></svg>';
+    }
+
+    function build() {
+      popup = document.createElement('div');
+      popup.className = 'datepicker';
+      popup.setAttribute('role', 'dialog');
+      popup.setAttribute('aria-label', 'Choose date');
+      popup.innerHTML =
+        '<div class="datepicker-head">' +
+          '<button type="button" class="datepicker-nav" data-step="-1" aria-label="Previous month">' + chevron('15 6 9 12 15 18') + '</button>' +
+          '<select class="datepicker-month" aria-label="Month"></select>' +
+          '<select class="datepicker-year" aria-label="Year"></select>' +
+          '<button type="button" class="datepicker-nav" data-step="1" aria-label="Next month">' + chevron('9 6 15 12 9 18') + '</button>' +
+        '</div>' +
+        '<div class="datepicker-grid" role="grid"></div>' +
+        '<div class="datepicker-foot">' +
+          '<button type="button" class="btn btn--sm" data-dp="today">Today</button>' +
+          '<button type="button" class="btn btn--sm btn--primary" data-dp="done">Done</button>' +
+        '</div>';
+      document.body.appendChild(popup);
+      // Keep focus in the text box so clicks on the calendar do not blur it.
+      popup.addEventListener('mousedown', function (e) { if (e.target.tagName !== 'SELECT') e.preventDefault(); });
+      popup.addEventListener('click', function (e) {
+        if (!current) return;
+        var nav = e.target.closest('[data-step]'), day = e.target.closest('[data-date]'), act = e.target.closest('[data-dp]');
+        if (nav && !nav.disabled) { current.view.setMonth(current.view.getMonth() + +nav.getAttribute('data-step')); render(); }
+        else if (day && !day.disabled) { current.set(fromIso(day.getAttribute('data-date'))); close(); }
+        else if (act && act.getAttribute('data-dp') === 'today') {
+          var t = today();
+          if (current.allowed(t)) { current.set(t); close(); }
+          else { current.view = new Date(t.getFullYear(), t.getMonth(), 1); render(); }
+        }
+        else if (act) close();
+      });
+      popup.addEventListener('change', function (e) {
+        if (!current) return;
+        if (e.target.classList.contains('datepicker-month')) current.view.setMonth(+e.target.value);
+        if (e.target.classList.contains('datepicker-year')) current.view.setFullYear(+e.target.value);
+        render();
+      });
+      document.addEventListener('mousedown', function (e) {
+        if (current && !popup.contains(e.target) && e.target !== current.box) close();
+      });
+      window.addEventListener('resize', place);
+      window.addEventListener('scroll', place, true);
+    }
+
+    function render() {
+      var f = current, v = f.view, y = v.getFullYear(), m = v.getMonth();
+      // Clamp the shown month into the allowed range.
+      if (new Date(y, m + 1, 0) < f.min) { v.setFullYear(f.min.getFullYear(), f.min.getMonth(), 1); y = v.getFullYear(); m = v.getMonth(); }
+      if (v > f.max) { v.setFullYear(f.max.getFullYear(), f.max.getMonth(), 1); y = v.getFullYear(); m = v.getMonth(); }
+      var months = popup.querySelector('.datepicker-month'), years = popup.querySelector('.datepicker-year');
+      months.innerHTML = MONTHS.map(function (name, i) {
+        var off = new Date(y, i + 1, 0) < f.min || new Date(y, i, 1) > f.max;
+        return '<option value="' + i + '"' + (i === m ? ' selected' : '') + (off ? ' disabled' : '') + '>' + name + '</option>';
+      }).join('');
+      var yearOpts = [];
+      for (var yr = f.max.getFullYear(); yr >= f.min.getFullYear(); yr--) yearOpts.push('<option' + (yr === y ? ' selected' : '') + '>' + yr + '</option>');
+      years.innerHTML = yearOpts.join('');
+      popup.querySelector('[data-step="-1"]').disabled = new Date(y, m, 0) < f.min;
+      popup.querySelector('[data-step="1"]').disabled = new Date(y, m + 1, 1) > f.max;
+
+      var sel = f.selected(), now = today(), html = DAYS.map(function (d) { return '<div class="datepicker-dow">' + d + '</div>'; });
+      var first = new Date(y, m, 1).getDay(), count = new Date(y, m + 1, 0).getDate();
+      for (var i = 0; i < first; i++) html.push('<div></div>');
+      for (var day = 1; day <= count; day++) {
+        var d = new Date(y, m, day), cls = 'datepicker-day';
+        if (sel && +d === +sel) cls += ' is-selected';
+        if (+d === +now) cls += ' is-today';
+        html.push('<button type="button" class="' + cls + '" data-date="' + iso(d) + '"' + (f.allowed(d) ? '' : ' disabled') + '>' + day + '</button>');
+      }
+      popup.querySelector('.datepicker-grid').innerHTML = html.join('');
+    }
+
+    function place() {
+      if (!current) return;
+      var r = current.box.getBoundingClientRect(), h = popup.offsetHeight, w = popup.offsetWidth;
+      var top = r.bottom + 4;
+      if (top + h > window.innerHeight && r.top - h - 4 > 0) top = r.top - h - 4;
+      popup.style.top = top + 'px';
+      popup.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
+    }
+
+    document.querySelectorAll('input[type=date]').forEach(function (i) { new Field(i); });
+  })();
+
   /* Sidebar groups */
   document.addEventListener('click', function (e) {
     var header = e.target.closest('[data-action="toggle-sidebar-group"]');
