@@ -42,7 +42,7 @@ namespace OpdProject.templates.patients
                 Select(KindFilter, Request.QueryString["kind"]);
                 Select(StatusFilter, Request.QueryString["status"]);
                 /* ?date=yyyy-MM-dd opens another day; missing or invalid = today */
-                DateFilter.Text = ParseDate(Request.QueryString["date"]).ToString("yyyy-MM-dd");
+                DateFilter.Text = DateTime.Today.ToString("yyyy-MM-dd");
                 BindQueue();
             }
         }
