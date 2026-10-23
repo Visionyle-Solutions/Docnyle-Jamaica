@@ -62,10 +62,6 @@ namespace OpdProject.templates.patients
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
         protected global::System.Web.UI.WebControls.TextBox MedicineInput;
 
-        /// <summary>FormularyOptions control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
-        protected global::System.Web.UI.WebControls.Literal FormularyOptions;
-
         /// <summary>StrengthInput control.</summary>
         /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
         protected global::System.Web.UI.WebControls.TextBox StrengthInput;

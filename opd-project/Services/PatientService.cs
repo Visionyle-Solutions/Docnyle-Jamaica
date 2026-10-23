@@ -514,11 +514,12 @@ namespace OpdProject.Services
             }
         }
 
+        /// <summary>API mode: ListPayers returns active payers only and carries no IsActive field, so every row is marked active.</summary>
         public static List<Payer> ListPayers(string country, string category)
         {
             if (Api)
                 return RequestCache.Get("payers:" + country + ":" + category, () =>
-                    (cnHelperObj.ListPayers(AppSession.ApiHospitalId, AppSession.ApiUserId, country, category, AppSession.ApiHashValue).EnsureSuccess().Payers ?? new List<PAT_PayerInfo>()).Where(p => p.IsActive).Select(ToModel).ToList());
+                    (cnHelperObj.ListPayers(AppSession.ApiHospitalId, AppSession.ApiUserId, country, category, AppSession.ApiHashValue).EnsureSuccess().Payers ?? new List<PAT_PayerInfo>()).Select(ToModel).Select(p => { p.IsActive = true; return p; }).ToList());
             lock (DataStore.Sync)
                 return DataStore.Payers.Where(p => p.IsActive && p.Country == country && (category == null || p.Category == category)).ToList();
         }

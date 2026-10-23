@@ -57,8 +57,9 @@
       <div class="form-group form-group--full" style="font-weight:700;"><asp:Literal ID="FormTitle" runat="server" Text="Add Outside Medication" /></div>
       <div class="form-group form-group--full">
         <label class="form-label" for="<%= MedicineInput.ClientID %>">Medicine <span class="required">*</span></label>
-        <asp:TextBox ID="MedicineInput" runat="server" CssClass="form-control" MaxLength="200" placeholder="Search Formulary Or Type A Name" list="formularyNames" autocomplete="off" />
-        <datalist id="formularyNames"><asp:Literal ID="FormularyOptions" runat="server" /></datalist>
+        <div class="patient-suggest">
+          <asp:TextBox ID="MedicineInput" runat="server" CssClass="form-control" MaxLength="200" placeholder="Type 2+ Letters Of Brand Or Generic Name..." autocomplete="off" data-medicine-suggest="true" />
+        </div>
         <asp:RequiredFieldValidator runat="server" ControlToValidate="MedicineInput" ValidationGroup="OutsideMed" Text="Medicine is required" CssClass="field-error" Display="Dynamic" />
       </div>
       <div class="form-group">
@@ -110,3 +111,97 @@
     </asp:Panel>
   </div>
 </div>
+<script>
+  /* Medicine typeahead (same behaviour as the patient typeahead): formulary suggestions appear after 2 characters
+     (brand or generic name); choosing one fills the name and the form. Arrow keys move, Enter picks, Esc closes.
+     A name that is not in the formulary can still be typed and saved. */
+  (function () {
+    var MIN_CHARS = 2;
+    var input = document.querySelector('input[data-medicine-suggest]');
+    if (!input) return;
+    var formSelect = document.getElementById('<%= FormInput.ClientID %>');
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
+    function mark(text, term) {
+      text = String(text == null ? '' : text);
+      var i = text.toLowerCase().indexOf(term.toLowerCase());
+      if (i < 0 || !term) return esc(text);
+      return esc(text.slice(0, i)) + '<mark>' + esc(text.slice(i, i + term.length)) + '</mark>' + esc(text.slice(i + term.length));
+    }
+
+    var wrap = input.parentNode;
+    var list = document.createElement('div');
+    list.className = 'patient-suggest-list';
+    list.setAttribute('role', 'listbox');
+    list.hidden = true;
+    wrap.appendChild(list);
+    var items = [], active = -1, timer = null, seq = 0;
+
+    function close() { list.hidden = true; active = -1; }
+    function highlight(i) {
+      active = i;
+      Array.prototype.forEach.call(list.children, function (el, n) { el.classList.toggle('is-active', n === i); });
+      if (list.children[i] && list.children[i].scrollIntoView) list.children[i].scrollIntoView({ block: 'nearest' });
+    }
+    function selectForm(form) {
+      if (!formSelect || !form) return;
+      var f = String(form).toLowerCase();
+      for (var n = 0; n < formSelect.options.length; n++)
+        if (formSelect.options[n].text.toLowerCase().indexOf(f) >= 0) { formSelect.selectedIndex = n; return; }
+    }
+    function choose(i) {
+      var d = items[i];
+      if (!d) return;
+      input.value = d.name;
+      input.classList.add('is-picked');
+      selectForm(d.form);
+      close();
+    }
+    function render(term) {
+      if (items.length === 0) {
+        list.innerHTML = '<div class="patient-suggest-empty">No matching medicines — keep typing to add it by name</div>';
+      } else {
+        list.innerHTML = items.map(function (d, i) {
+          var meta = [d.generic ? mark(d.generic, term) : '', esc(d.composition), esc(d.form)].filter(function (s) { return s; }).join(' · ');
+          return '<div class="patient-suggest-item" role="option" data-i="' + i + '">' +
+            '<div class="patient-suggest-name">' + mark(d.name, term) + '</div>' +
+            (meta ? '<div class="patient-suggest-meta">' + meta + '</div>' : '') + '</div>';
+        }).join('');
+      }
+      list.hidden = false;
+      active = -1;
+    }
+    function search() {
+      var term = input.value.trim();
+      if (term.length < MIN_CHARS) { close(); return; }
+      var mine = ++seq;
+      list.hidden = false;
+      list.innerHTML = '<div class="patient-suggest-empty">Searching…</div>';
+      fetch(window.location.pathname + '?medicineSuggest=' + encodeURIComponent(term), { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+        .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(function (data) { if (mine !== seq) return; items = data || []; render(term); })
+        .catch(function () { if (mine !== seq) return; items = []; list.innerHTML = '<div class="patient-suggest-empty">Search failed — try again</div>'; });
+    }
+
+    input.addEventListener('input', function () {
+      input.classList.remove('is-picked');
+      clearTimeout(timer);
+      timer = setTimeout(search, 200);
+    });
+    input.addEventListener('focus', function () { if (!input.classList.contains('is-picked') && input.value.trim().length >= MIN_CHARS) search(); });
+    input.addEventListener('keydown', function (e) {
+      if (list.hidden) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); if (items.length) highlight((active + 1) % items.length); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); if (items.length) highlight((active - 1 + items.length) % items.length); }
+      /* Enter picks only a highlighted row, so a free-typed name is never swapped for a suggestion */
+      else if (e.key === 'Enter' && active >= 0) { e.preventDefault(); e.stopPropagation(); choose(active); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+    });
+    /* mousedown (not click) so the choice lands before the input loses focus */
+    list.addEventListener('mousedown', function (e) {
+      var row = e.target.closest('.patient-suggest-item');
+      e.preventDefault();
+      if (row) choose(+row.getAttribute('data-i'));
+    });
+    input.addEventListener('blur', function () { setTimeout(close, 100); });
+  })();
+</script>
