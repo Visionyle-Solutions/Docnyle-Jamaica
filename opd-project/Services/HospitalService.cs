@@ -198,7 +198,7 @@ namespace OpdProject.Services
             {
                 case "DD/MM/YYYY": return value.Value.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
                 case "MM/DD/YYYY": return value.Value.ToString("MM/dd/yyyy", CultureInfo.InvariantCulture);
-                default: return value.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                default: return value.Value.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
             }
         }
 
