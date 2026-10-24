@@ -526,6 +526,6 @@
     },
   });
 })();
-//document.addEventListener('click', function (e) {
-//    if (e.target.closest('#sidebar .nav-item')) document.getElementById('app-shell').classList.remove('nav-open');
-//});
+document.addEventListener('click', function (e) {
+   if (e.target.closest('#sidebar .nav-item')) document.getElementById('app-shell').classList.remove('nav-open');
+});

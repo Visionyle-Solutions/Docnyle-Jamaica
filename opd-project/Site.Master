@@ -23,8 +23,7 @@
     <!-- App shell — same five regions as the original SPA; every page renders inside #main-content. -->
     <div id="app-shell" class="<%: ShellCss %>">
       <asp:PlaceHolder ID="ChromeSidebar" runat="server">
-<%--        <button type="button" id="menu-toggle" onclick="document.getElementById('app-shell').classList.toggle('nav-open')">☰</button>        --%>
-          <nav id="sidebar" aria-label="Primary navigation">
+        <button type="button" id="menu-toggle" onclick="document.getElementById('app-shell').classList.toggle('nav-open')">☰</button>          <nav id="sidebar" aria-label="Primary navigation">
           <div style="padding:16px 14px 10px; text-align:center; border-bottom:1px solid rgba(255,255,255,0.08);">
             <div style="display:inline-block; padding:3px; border-radius:18px; background:linear-gradient(135deg, rgba(245,158,11,0.4), rgba(59,130,246,0.4)); margin-bottom:6px;">
               <img src="<%: ResolveUrl("~/assets/Medcity.png") %>" alt="DocNyle" style="width:72px; height:66px; border-radius:16px; display:block;" />
@@ -57,19 +56,28 @@
             </ItemTemplate>
           </asp:Repeater>
         </nav>
-        <header id="topbar">
-          <div style="flex:1; display:flex; align-items:center;">
-            <asp:Literal ID="HospitalLogo" runat="server" />
-            <span style="font-weight:800; font-size:17px; color:var(--text-primary, #1e293b); letter-spacing:0.2px;"><asp:Literal ID="HospitalName" runat="server" /></span>
-          </div>
-          <asp:Literal ID="TopbarBell" runat="server" />
-          <div class="text-sm" style="color:var(--text-secondary, #64748b);">
-            <asp:Literal ID="UserBadge" runat="server" /><span style="color:var(--color-primary); font-weight:600;">DocNyle</span>
-          </div>
-          <asp:LinkButton ID="SignOutButton" runat="server" CssClass="btn btn--xs btn--ghost" style="margin-left:12px;" OnClick="SignOutButton_Click" CausesValidation="false">
-            <i class="ti ti-logout" aria-hidden="true"></i> Sign out
-          </asp:LinkButton>
-        </header>
+       <header id="topbar">
+  <div class="topbar-brand">
+    <asp:Literal ID="HospitalLogo" runat="server" />
+    <span class="topbar-title"><asp:Literal ID="HospitalName" runat="server" /></span>
+  </div>
+
+  <asp:Literal ID="TopbarBell" runat="server" />
+
+  <div class="topbar-menu" id="topbarMenu">
+    <button type="button" id="topbar-menu-btn" class="topbar-menu-btn" aria-haspopup="true" aria-expanded="false" aria-label="User menu">
+      <i class="ti ti-user-circle" aria-hidden="true"></i>
+    </button>
+    <div class="topbar-menu-panel">
+      <div class="topbar-user text-sm">
+        <asp:Literal ID="UserBadge" runat="server" /><span class="topbar-product">DocNyle</span>
+      </div>
+      <asp:LinkButton ID="SignOutButton" runat="server" CssClass="btn btn--xs btn--ghost topbar-signout" OnClick="SignOutButton_Click" CausesValidation="false">
+        <i class="ti ti-logout" aria-hidden="true"></i> Sign out
+      </asp:LinkButton>
+    </div>
+  </div>
+</header>
       </asp:PlaceHolder>
       <main id="main-content" role="main">
         <asp:ContentPlaceHolder ID="MainContent" runat="server" />
@@ -88,7 +96,24 @@
         </ItemTemplate>
       </asp:Repeater>
     </div>
-
+      <script>
+          (function () {
+              var menu = document.getElementById('topbarMenu');
+              var btn = document.getElementById('topbar-menu-btn');
+              if (!menu || !btn) return;
+              btn.addEventListener('click', function (e) {
+                  e.stopPropagation();
+                  var open = menu.classList.toggle('open');
+                  btn.setAttribute('aria-expanded', open);
+              });
+              document.addEventListener('click', function (e) {
+                  if (!menu.contains(e.target)) {
+                      menu.classList.remove('open');
+                      btn.setAttribute('aria-expanded', 'false');
+                  }
+              });
+          })();
+      </script>
     <script src="<%: Asset("~/js/site.js") %>"></script>
     <asp:ContentPlaceHolder ID="ScriptContent" runat="server" />
   </form>

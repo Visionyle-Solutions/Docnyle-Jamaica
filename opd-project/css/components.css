@@ -79,10 +79,11 @@
 
 /* Cards */
 .card {
-  background: var(--surface-card);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
-  padding: var(--space-4);
+    overflow-y: scroll;
+    background: var(--surface-card);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
 }
 
 .metric-card {
@@ -175,10 +176,11 @@ textarea.form-control { height: auto; min-height: 72px; padding: var(--space-2);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
-.data-table td {
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--border-default);
-}
+    .data-table td {
+        text-wrap: nowrap;
+        padding: var(--space-2) var(--space-3);
+        border-bottom: 1px solid var(--border-default);
+    }
 .data-table tbody tr:nth-child(even) td {
   background-color: var(--color-row-alt);
 }

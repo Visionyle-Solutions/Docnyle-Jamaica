@@ -41,10 +41,31 @@ namespace OpdProject.templates.patients
         /// </remarks>
         protected global::System.Web.UI.WebControls.DropDownList DoctorFilter;
 
-        /// <summary>StatusFilter control.</summary>
-        /// <remarks>Auto-generated field. To modify move field declaration from designer file to code-behind file.</remarks>
+        /// <summary>
+        /// DateFilter control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
         protected global::System.Web.UI.WebControls.TextBox DateFilter;
+
+        /// <summary>
+        /// KindFilter control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
         protected global::System.Web.UI.WebControls.DropDownList KindFilter;
+
+        /// <summary>
+        /// StatusFilter control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
         protected global::System.Web.UI.WebControls.DropDownList StatusFilter;
 
         /// <summary>
@@ -84,6 +105,24 @@ namespace OpdProject.templates.patients
         protected global::System.Web.UI.WebControls.Literal CountCompleted;
 
         /// <summary>
+        /// ExportExcelButton control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.LinkButton ExportExcelButton;
+
+        /// <summary>
+        /// ExportPdfButton control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.LinkButton ExportPdfButton;
+
+        /// <summary>
         /// AppointmentsRepeater control.
         /// </summary>
         /// <remarks>
@@ -101,11 +140,40 @@ namespace OpdProject.templates.patients
         /// </remarks>
         protected global::System.Web.UI.WebControls.PlaceHolder EmptyRow;
 
+        /// <summary>
+        /// PageSizeFilter control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
         protected global::System.Web.UI.WebControls.DropDownList PageSizeFilter;
-        protected global::System.Web.UI.WebControls.Literal PageInfo;
+
+        /// <summary>
+        /// PrevPageButton control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
         protected global::System.Web.UI.WebControls.LinkButton PrevPageButton;
+
+        /// <summary>
+        /// NextPageButton control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
         protected global::System.Web.UI.WebControls.LinkButton NextPageButton;
-        protected global::System.Web.UI.WebControls.LinkButton ExportExcelButton;
-        protected global::System.Web.UI.WebControls.LinkButton ExportPdfButton;
+
+        /// <summary>
+        /// PageInfo control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal PageInfo;
     }
 }

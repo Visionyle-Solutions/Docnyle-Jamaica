@@ -87,7 +87,7 @@
       </tbody>
     </table>
     <%-- pager: page size on the left, Prev/Next centred, record range on the right --%>
-    <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:12px; align-items:center; margin-top:12px;">
+    <div style="display:grid; grid-template-columns:1fr auto 1fr; gap:12px; align-items:center; margin-top:12px;text-wrap:nowrap;">
       <div class="text-sm text-secondary" style="display:flex; gap:8px; align-items:center;">
         <label class="form-label" for="<%= PageSizeFilter.ClientID %>" style="margin:0;">Show</label>
         <asp:DropDownList ID="PageSizeFilter" runat="server" CssClass="form-select" AutoPostBack="true" OnSelectedIndexChanged="PageSizeFilter_Changed" style="width:auto;" />

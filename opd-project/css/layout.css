@@ -160,13 +160,14 @@ html, body {
     opacity: 1;
 }
 
-/*#menu-toggle {
+#menu-toggle {
     display: none;
 }
 
 @media (max-width: 1280px) {
     #app-shell:not(.no-chrome) {
         grid-template-columns: 0 1fr;
+        transition: grid-template-columns .25s cubic-bezier(.4, 0, .2, 1);
     }
 
     #sidebar {
@@ -176,16 +177,15 @@ html, body {
         left: 0;
         width: var(--sidebar-width);
         z-index: 1001;
-        transform: translateX(-100%);*/ /* hidden */
-        /*transition: transform .2s ease;
+        transform: translateX(-100%); /* hidden */
+        transition: transform .2s ease;
     }
 
     #app-shell.nav-open #sidebar {
-        transform: none;
-    }*/
-    /* shown */
+        transform: none; /* shown */
+    }
 
-    /*#menu-toggle {
+    #menu-toggle {
         display: block;
         position: fixed;
         top: 12px;
@@ -203,20 +203,128 @@ html, body {
     }
 
     #topbar {
-        padding-left: 60px;
+        padding-left: 60px; /* room for the button */
         transition: padding-left .25s cubic-bezier(.4, 0, .2, 1);
-    }*/
-    /* room for the button */
-    /* Animate the content column so the page slides over smoothly */
-    /*#app-shell:not(.no-chrome) {
-        transition: grid-template-columns .25s cubic-bezier(.4, 0, .2, 1);
-    }*/
+    }
 
-        /* While the menu is open (cursor on the edge strip or on the menu), reserve its width */
-        /*#app-shell:not(.no-chrome):has(#sidebar-handle:hover),
-        #app-shell:not(.no-chrome):has(#sidebar:hover),
-        #app-shell:not(.no-chrome):has(#sidebar:focus-visible),
-        #app-shell:not(.no-chrome).nav-open {
-            grid-template-columns: var(--sidebar-width) 1fr;
-        }
-}*/
+    /* While the menu is open, reserve its width */
+    #app-shell:not(.no-chrome).nav-open {
+        grid-template-columns: var(--sidebar-width) 1fr;
+    }
+}
+/* ── Topbar: desktop ── */
+.topbar-brand {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+}
+
+.topbar-title {
+    font-weight: 800;
+    font-size: 17px;
+    letter-spacing: 0.2px;
+    color: var(--text-primary, #1e293b);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
+.topbar-menu {
+    position: relative;
+}
+
+.topbar-menu-btn {
+    display: none;
+}
+/* button hidden on desktop */
+.topbar-menu-panel {
+    display: flex; /* inline on desktop */
+    align-items: center;
+}
+
+.topbar-user {
+    color: var(--text-secondary, #64748b);
+    white-space: nowrap;
+    margin: 0 8px;
+}
+
+.topbar-product {
+    color: var(--color-primary);
+    font-weight: 600;
+}
+
+.topbar-signout {
+    margin-left: 12px;
+    white-space: nowrap;
+}
+
+/* ── Tablet / small laptop: just smaller fonts ── */
+@media (max-width: 1280px) {
+    #topbar {
+        gap: 8px;
+    }
+
+    .topbar-title {
+        font-size: 15px;
+    }
+
+    .topbar-user {
+        font-size: 12px;
+    }
+}
+
+/* ── Tablet portrait and phone: dropdown ── */
+@media (max-width: 768px) {
+    .topbar-title {
+        font-size: 13px;
+    }
+
+    .topbar-menu-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border: 1px solid var(--border-default, #e2e8f0);
+        border-radius: 50%;
+        background: var(--surface-card, #fff);
+        color: var(--text-primary, #1e293b);
+        font-size: 20px;
+        cursor: pointer;
+    }
+
+    .topbar-menu-panel {
+        display: none; /* closed by default */
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        position: absolute;
+        top: calc(100% + 8px);
+        right: 0;
+        min-width: 210px;
+        padding: 12px;
+        background: var(--surface-card, #fff);
+        border: 1px solid var(--border-default, #e2e8f0);
+        border-radius: 10px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, .15);
+        z-index: 1003;
+    }
+
+    .topbar-menu.open .topbar-menu-panel {
+        display: flex;
+    }
+
+    .topbar-user {
+        margin: 0;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--border-default, #e2e8f0);
+        white-space: normal;
+    }
+
+    .topbar-signout {
+        margin-left: 0;
+        justify-content: flex-start;
+    }
+}
